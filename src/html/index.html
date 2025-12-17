@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>G4G Research Operations</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <style>
+    /* ============================================
+       CSS VARIABLES & RESET
+       ============================================ */
+    :root {
+      --primary-color: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #3b82f6;
+      --secondary-color: #7c3aed;
+      --success-color: #10b981;
+      --warning-color: #f59e0b;
+      --danger-color: #ef4444;
+      --info-color: #06b6d4;
+
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+
+      --uga-color: #ba0c2f;
+      --missouri-color: #f1b82d;
+
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+      --border-radius: 8px;
+      --border-radius-lg: 12px;
+      --transition: all 0.2s ease;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--gray-50);
+      color: var(--gray-800);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ============================================
+       HEADER & NAVIGATION
+       ============================================ */
+    .header {
+      background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+      color: white;
+      padding: 0;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: var(--border-radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .logo-text h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .logo-text span {
+      font-size: 0.75rem;
+      opacity: 0.9;
+      font-weight: 400;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: white;
+      color: var(--primary-color);
+    }
+
+    .btn-primary:hover {
+      background: var(--gray-100);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    /* ============================================
+       MAIN CONTENT
+       ============================================ */
+    .main-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Hero Section */
+    .hero {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      padding: 2.5rem;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow);
+      border-left: 4px solid var(--primary-color);
+    }
+
+    .hero h2 {
+      font-size: 1.75rem;
+      color: var(--gray-900);
+      margin-bottom: 0.5rem;
+    }
+
+    .hero p {
+      color: var(--gray-600);
+      font-size: 1rem;
+      max-width: 800px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      padding: 1.5rem;
+      box-shadow: var(--shadow);
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+    }
+
+    .stat-card.primary::before { background: var(--primary-color); }
+    .stat-card.success::before { background: var(--success-color); }
+    .stat-card.warning::before { background: var(--warning-color); }
+    .stat-card.info::before { background: var(--info-color); }
+    .stat-card.uga::before { background: var(--uga-color); }
+    .stat-card.missouri::before { background: var(--missouri-color); }
+
+    .stat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .stat-card-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--border-radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .stat-card.primary .stat-card-icon { background: rgba(37, 99, 235, 0.1); color: var(--primary-color); }
+    .stat-card.success .stat-card-icon { background: rgba(16, 185, 129, 0.1); color: var(--success-color); }
+    .stat-card.warning .stat-card-icon { background: rgba(245, 158, 11, 0.1); color: var(--warning-color); }
+    .stat-card.info .stat-card-icon { background: rgba(6, 182, 212, 0.1); color: var(--info-color); }
+    .stat-card.uga .stat-card-icon { background: rgba(186, 12, 47, 0.1); color: var(--uga-color); }
+    .stat-card.missouri .stat-card-icon { background: rgba(241, 184, 45, 0.1); color: var(--missouri-color); }
+
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--gray-900);
+      line-height: 1;
+    }
+
+    .stat-label {
+      font-size: 0.875rem;
+      color: var(--gray-500);
+      margin-top: 0.25rem;
+    }
+
+    .stat-trend {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .stat-trend.up { color: var(--success-color); }
+    .stat-trend.down { color: var(--danger-color); }
+
+    /* Two Column Layout */
+    .content-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Card Component */
+    .card {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--gray-900);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .material-icons {
+      font-size: 20px;
+      color: var(--primary-color);
+    }
+
+    .card-body {
+      padding: 1.5rem;
+    }
+
+    /* Progress Bars */
+    .progress-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .progress-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .progress-label {
+      font-size: 0.875rem;
+      color: var(--gray-700);
+      font-weight: 500;
+    }
+
+    .progress-value {
+      font-size: 0.875rem;
+      color: var(--gray-500);
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--gray-200);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+
+    .progress-fill.primary { background: var(--primary-color); }
+    .progress-fill.success { background: var(--success-color); }
+    .progress-fill.warning { background: var(--warning-color); }
+    .progress-fill.info { background: var(--info-color); }
+
+    /* Site Comparison */
+    .site-comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .site-card {
+      padding: 1.25rem;
+      border-radius: var(--border-radius);
+      text-align: center;
+    }
+
+    .site-card.uga {
+      background: rgba(186, 12, 47, 0.05);
+      border: 1px solid rgba(186, 12, 47, 0.2);
+    }
+
+    .site-card.missouri {
+      background: rgba(241, 184, 45, 0.05);
+      border: 1px solid rgba(241, 184, 45, 0.2);
+    }
+
+    .site-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--gray-700);
+      margin-bottom: 0.5rem;
+    }
+
+    .site-value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .site-card.uga .site-value { color: var(--uga-color); }
+    .site-card.missouri .site-value { color: #b8860b; }
+
+    .site-detail {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      margin-top: 0.25rem;
+    }
+
+    /* Instrument Checklist Preview */
+    .instrument-preview {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .instrument-item {
+      display: flex;
+      align-items: center;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--gray-100);
+      gap: 1rem;
+    }
+
+    .instrument-item:last-child {
+      border-bottom: none;
+    }
+
+    .instrument-number {
+      width: 28px;
+      height: 28px;
+      background: var(--gray-100);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--gray-600);
+      flex-shrink: 0;
+    }
+
+    .instrument-name {
+      flex: 1;
+      font-size: 0.875rem;
+      color: var(--gray-700);
+    }
+
+    .instrument-stat {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      padding: 4px 8px;
+      background: var(--gray-100);
+      border-radius: 4px;
+    }
+
+    /* Quick Links */
+    .quick-links {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .quick-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 1rem;
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+      text-decoration: none;
+      color: var(--gray-700);
+      transition: var(--transition);
+      border: 1px solid transparent;
+    }
+
+    .quick-link:hover {
+      background: white;
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+
+    .quick-link .material-icons {
+      font-size: 20px;
+    }
+
+    .quick-link-text {
+      flex: 1;
+    }
+
+    .quick-link-title {
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+
+    .quick-link-desc {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--gray-500);
+      font-size: 0.875rem;
+    }
+
+    /* Loading State */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--gray-200);
+      border-top-color: var(--primary-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .header-content {
+        padding: 1rem;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .main-content {
+        padding: 1rem;
+      }
+
+      .hero {
+        padding: 1.5rem;
+      }
+
+      .hero h2 {
+        font-size: 1.25rem;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stat-value {
+        font-size: 1.75rem;
+      }
+
+      .site-comparison {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .header-actions {
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">
+        <div class="logo-icon">
+          <span class="material-icons">videogame_asset</span>
+        </div>
+        <div class="logo-text">
+          <h1>Gaming4Good</h1>
+          <span>Research Operations Dashboard</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="#about" class="btn btn-secondary">
+          <span class="material-icons">info</span>
+          About Study
+        </a>
+        <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="btn btn-primary">
+          <span class="material-icons">login</span>
+          Staff Login
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Hero Section -->
+    <section class="hero">
+      <h2>Cross-Site Research Operations</h2>
+      <p>Tracking participant progress across University of Georgia (UGA) and University of Missouri (Mizzou) research sites. Engaging neurodiverse learners in video game design using Game Builder Garage.</p>
+    </section>
+
+    <!-- Stats Grid -->
+    <section class="stats-grid" id="statsGrid">
+      <div class="loading">
+        <div class="spinner"></div>
+      </div>
+    </section>
+
+    <!-- Main Content Grid -->
+    <div class="content-grid">
+      <!-- Left Column -->
+      <div>
+        <!-- Instrument Completion -->
+        <div class="card" style="margin-bottom: 2rem;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">checklist</span>
+              Protocol Checklist Progress
+            </h3>
+          </div>
+          <div class="card-body">
+            <div class="instrument-preview" id="instrumentProgress">
+              <div class="loading">
+                <div class="spinner"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Site Comparison -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">compare_arrows</span>
+              Site Comparison
+            </h3>
+          </div>
+          <div class="card-body">
+            <div class="site-comparison" id="siteComparison">
+              <div class="site-card uga">
+                <div class="site-name">UGA</div>
+                <div class="site-value" id="ugaCount">-</div>
+                <div class="site-detail">Participants</div>
+              </div>
+              <div class="site-card missouri">
+                <div class="site-name">Missouri</div>
+                <div class="site-value" id="missouriCount">-</div>
+                <div class="site-detail">Participants</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column -->
+      <div>
+        <!-- Quick Links -->
+        <div class="card" style="margin-bottom: 2rem;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">flash_on</span>
+              Quick Actions
+            </h3>
+          </div>
+          <div class="card-body">
+            <div class="quick-links">
+              <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
+                <span class="material-icons">person_add</span>
+                <div class="quick-link-text">
+                  <div class="quick-link-title">Enroll Participant</div>
+                  <div class="quick-link-desc">Add a new participant to the study</div>
+                </div>
+              </a>
+              <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
+                <span class="material-icons">edit_note</span>
+                <div class="quick-link-text">
+                  <div class="quick-link-title">Update Checklist</div>
+                  <div class="quick-link-desc">Mark instruments as complete</div>
+                </div>
+              </a>
+              <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
+                <span class="material-icons">analytics</span>
+                <div class="quick-link-text">
+                  <div class="quick-link-title">View Reports</div>
+                  <div class="quick-link-desc">Cross-site analytics and exports</div>
+                </div>
+              </a>
+              <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
+                <span class="material-icons">groups</span>
+                <div class="quick-link-text">
+                  <div class="quick-link-title">Manage Cohorts</div>
+                  <div class="quick-link-desc">Set up study rollouts</div>
+                </div>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- About Section -->
+        <div class="card" id="about">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">school</span>
+              About G4G
+            </h3>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 0.875rem; color: var(--gray-600); margin-bottom: 1rem;">
+              Gaming4Good (G4G) is a grant-funded research project engaging neurodiverse learners in video game design activities.
+            </p>
+            <div class="progress-list">
+              <div class="progress-item">
+                <div class="progress-header">
+                  <span class="progress-label">Research Sites</span>
+                  <span class="progress-value">2 Active</span>
+                </div>
+              </div>
+              <div class="progress-item">
+                <div class="progress-header">
+                  <span class="progress-label">Protocol Items</span>
+                  <span class="progress-value">18 Required</span>
+                </div>
+              </div>
+              <div class="progress-item">
+                <div class="progress-header">
+                  <span class="progress-label">Platform</span>
+                  <span class="progress-value">Nintendo Switch</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Gaming4Good Research Operations &copy; 2025 | University of Georgia & University of Missouri</p>
+  </footer>
+
+  <script>
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function() {
+      loadDashboardStats();
+    });
+
+    // ============================================
+    // LOAD DASHBOARD STATISTICS
+    // ============================================
+    function loadDashboardStats() {
+      google.script.run
+        .withSuccessHandler(renderStats)
+        .withFailureHandler(handleError)
+        .getPublicDashboardStats();
+    }
+
+    function renderStats(stats) {
+      // Render stats cards
+      const statsHtml = `
+        <div class="stat-card primary">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">groups</span>
+            </div>
+          </div>
+          <div class="stat-value">${stats.totalParticipants || 0}</div>
+          <div class="stat-label">Total Participants</div>
+        </div>
+
+        <div class="stat-card success">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">person</span>
+            </div>
+          </div>
+          <div class="stat-value">${stats.activeParticipants || 0}</div>
+          <div class="stat-label">Active Participants</div>
+        </div>
+
+        <div class="stat-card info">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">trending_up</span>
+            </div>
+          </div>
+          <div class="stat-value">${stats.overallCompletion || 0}%</div>
+          <div class="stat-label">Overall Completion</div>
+        </div>
+
+        <div class="stat-card warning">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">event</span>
+            </div>
+          </div>
+          <div class="stat-value">${stats.activeRollouts || 0}</div>
+          <div class="stat-label">Active Cohorts</div>
+        </div>
+      `;
+
+      document.getElementById('statsGrid').innerHTML = statsHtml;
+
+      // Render site comparison
+      document.getElementById('ugaCount').textContent = stats.ugaParticipants || 0;
+      document.getElementById('missouriCount').textContent = stats.missouriParticipants || 0;
+
+      // Render instrument progress
+      if (stats.instrumentStats && stats.instrumentStats.length > 0) {
+        let instrumentHtml = '';
+        stats.instrumentStats.forEach(inst => {
+          const colorClass = inst.percentage >= 80 ? 'success' :
+                            inst.percentage >= 50 ? 'warning' : 'primary';
+          instrumentHtml += `
+            <div class="instrument-item">
+              <div class="instrument-number">${inst.number}</div>
+              <div class="instrument-name">${inst.name}</div>
+              <div class="instrument-stat">${inst.percentage}%</div>
+            </div>
+          `;
+        });
+        document.getElementById('instrumentProgress').innerHTML = instrumentHtml;
+      } else {
+        document.getElementById('instrumentProgress').innerHTML =
+          '<p style="text-align: center; color: var(--gray-500); padding: 2rem;">No data available yet. Enroll participants to see progress.</p>';
+      }
+    }
+
+    function handleError(error) {
+      console.error('Error loading stats:', error);
+      document.getElementById('statsGrid').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load statistics. Please refresh the page.</p>';
+    }
+  </script>
+</body>
+</html>

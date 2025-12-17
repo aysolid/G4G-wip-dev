@@ -1,0 +1,2535 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>G4G - Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <style>
+    /* ============================================
+       CSS VARIABLES & RESET
+       ============================================ */
+    :root {
+      --primary-color: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #3b82f6;
+      --secondary-color: #7c3aed;
+      --success-color: #10b981;
+      --warning-color: #f59e0b;
+      --danger-color: #ef4444;
+      --info-color: #06b6d4;
+
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+
+      --uga-color: #ba0c2f;
+      --missouri-color: #f1b82d;
+
+      --sidebar-width: 260px;
+      --header-height: 64px;
+
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+      --border-radius: 8px;
+      --border-radius-lg: 12px;
+      --transition: all 0.2s ease;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--gray-100);
+      color: var(--gray-800);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ============================================
+       LAYOUT - SIDEBAR & MAIN
+       ============================================ */
+    .app-container {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--gray-900);
+      color: white;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.3s ease;
+    }
+
+    .sidebar-header {
+      padding: 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sidebar-logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+      border-radius: var(--border-radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sidebar-logo-icon .material-icons {
+      font-size: 22px;
+    }
+
+    .sidebar-logo-text {
+      font-weight: 600;
+      font-size: 1.125rem;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 1rem 0;
+      overflow-y: auto;
+    }
+
+    .nav-section {
+      margin-bottom: 1.5rem;
+    }
+
+    .nav-section-title {
+      padding: 0.5rem 1.25rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gray-500);
+      font-weight: 600;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0.75rem 1.25rem;
+      color: var(--gray-400);
+      text-decoration: none;
+      transition: var(--transition);
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+
+    .nav-item:hover {
+      background: rgba(255,255,255,0.05);
+      color: white;
+    }
+
+    .nav-item.active {
+      background: rgba(37, 99, 235, 0.15);
+      color: white;
+      border-left-color: var(--primary-color);
+    }
+
+    .nav-item .material-icons {
+      font-size: 20px;
+    }
+
+    .nav-item-badge {
+      margin-left: auto;
+      background: var(--primary-color);
+      color: white;
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .sidebar-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      background: var(--primary-color);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    .user-details {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .user-name {
+      font-weight: 500;
+      font-size: 0.875rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-role {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      text-transform: capitalize;
+    }
+
+    .logout-btn {
+      background: none;
+      border: none;
+      color: var(--gray-400);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: var(--border-radius);
+      transition: var(--transition);
+    }
+
+    .logout-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
+    }
+
+    /* Main Content Area */
+    .main-wrapper {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Header */
+    .top-header {
+      height: var(--header-height);
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .mobile-menu-btn {
+      display: none;
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: var(--gray-600);
+      cursor: pointer;
+      padding: 8px;
+    }
+
+    .page-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--gray-900);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .site-filter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .site-filter label {
+      font-size: 0.875rem;
+      color: var(--gray-600);
+    }
+
+    .site-filter select {
+      padding: 8px 12px;
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius);
+      font-size: 0.875rem;
+      background: white;
+      cursor: pointer;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      padding: 1.5rem;
+      overflow-y: auto;
+    }
+
+    /* ============================================
+       CARDS & COMPONENTS
+       ============================================ */
+    .card {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--gray-900);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .material-icons {
+      font-size: 20px;
+      color: var(--primary-color);
+    }
+
+    .card-body {
+      padding: 1.25rem;
+    }
+
+    /* Stats Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      padding: 1.25rem;
+      box-shadow: var(--shadow);
+      border-left: 4px solid var(--primary-color);
+    }
+
+    .stat-card.success { border-left-color: var(--success-color); }
+    .stat-card.warning { border-left-color: var(--warning-color); }
+    .stat-card.info { border-left-color: var(--info-color); }
+    .stat-card.uga { border-left-color: var(--uga-color); }
+    .stat-card.missouri { border-left-color: var(--missouri-color); }
+
+    .stat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--border-radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--gray-100);
+    }
+
+    .stat-card-icon .material-icons {
+      font-size: 20px;
+      color: var(--gray-600);
+    }
+
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--gray-900);
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--gray-500);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--border-radius);
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--primary-color);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .btn-secondary {
+      background: var(--gray-100);
+      color: var(--gray-700);
+      border: 1px solid var(--gray-300);
+    }
+
+    .btn-secondary:hover {
+      background: var(--gray-200);
+    }
+
+    .btn-success {
+      background: var(--success-color);
+      color: white;
+    }
+
+    .btn-danger {
+      background: var(--danger-color);
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+
+    .btn .material-icons {
+      font-size: 18px;
+    }
+
+    /* Tables */
+    .table-container {
+      overflow-x: auto;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th,
+    .data-table td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--gray-200);
+    }
+
+    .data-table th {
+      background: var(--gray-50);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--gray-600);
+    }
+
+    .data-table tr:hover {
+      background: var(--gray-50);
+    }
+
+    .data-table td {
+      font-size: 0.875rem;
+    }
+
+    /* Status Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .badge-success {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--success-color);
+    }
+
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--warning-color);
+    }
+
+    .badge-danger {
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--danger-color);
+    }
+
+    .badge-info {
+      background: rgba(6, 182, 212, 0.1);
+      color: var(--info-color);
+    }
+
+    .badge-neutral {
+      background: var(--gray-100);
+      color: var(--gray-600);
+    }
+
+    /* Progress Bars */
+    .progress-bar {
+      height: 8px;
+      background: var(--gray-200);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.5s ease;
+    }
+
+    .progress-fill.primary { background: var(--primary-color); }
+    .progress-fill.success { background: var(--success-color); }
+    .progress-fill.warning { background: var(--warning-color); }
+    .progress-fill.danger { background: var(--danger-color); }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--gray-700);
+      margin-bottom: 0.5rem;
+    }
+
+    .form-input,
+    .form-select,
+    .form-textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius);
+      font-size: 0.875rem;
+      transition: var(--transition);
+    }
+
+    .form-input:focus,
+    .form-select:focus,
+    .form-textarea:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2000;
+      opacity: 0;
+      visibility: hidden;
+      transition: var(--transition);
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      width: 90%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      transform: translateY(-20px);
+      transition: var(--transition);
+    }
+
+    .modal-overlay.active .modal {
+      transform: translateY(0);
+    }
+
+    .modal-header {
+      padding: 1.25rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 24px;
+      color: var(--gray-500);
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .modal-close:hover {
+      color: var(--gray-700);
+    }
+
+    .modal-body {
+      padding: 1.25rem;
+    }
+
+    .modal-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+    }
+
+    /* Search */
+    .search-box {
+      position: relative;
+    }
+
+    .search-box .material-icons {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--gray-400);
+      font-size: 20px;
+    }
+
+    .search-box input {
+      padding-left: 40px;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1.5rem;
+      color: var(--gray-500);
+    }
+
+    .empty-state .material-icons {
+      font-size: 48px;
+      margin-bottom: 1rem;
+      opacity: 0.5;
+    }
+
+    .empty-state h3 {
+      font-size: 1.125rem;
+      color: var(--gray-700);
+      margin-bottom: 0.5rem;
+    }
+
+    /* Loading */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--gray-200);
+      border-top-color: var(--primary-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Toast Notifications */
+    .toast-container {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 3000;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .toast {
+      background: white;
+      border-radius: var(--border-radius);
+      padding: 1rem;
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 300px;
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast.success { border-left: 4px solid var(--success-color); }
+    .toast.error { border-left: 4px solid var(--danger-color); }
+    .toast.warning { border-left: 4px solid var(--warning-color); }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    /* Quick Actions Grid */
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .quick-action-card {
+      background: white;
+      border-radius: var(--border-radius-lg);
+      padding: 1.25rem;
+      text-align: center;
+      cursor: pointer;
+      transition: var(--transition);
+      border: 2px solid transparent;
+    }
+
+    .quick-action-card:hover {
+      border-color: var(--primary-color);
+      transform: translateY(-2px);
+    }
+
+    .quick-action-icon {
+      width: 50px;
+      height: 50px;
+      background: var(--gray-100);
+      border-radius: var(--border-radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 0.75rem;
+    }
+
+    .quick-action-icon .material-icons {
+      font-size: 24px;
+      color: var(--primary-color);
+    }
+
+    .quick-action-label {
+      font-weight: 500;
+      font-size: 0.875rem;
+      color: var(--gray-700);
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .sidebar {
+        transform: translateX(-100%);
+      }
+
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .main-wrapper {
+        margin-left: 0;
+      }
+
+      .mobile-menu-btn {
+        display: block;
+      }
+
+      .sidebar-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 999;
+        opacity: 0;
+        visibility: hidden;
+        transition: var(--transition);
+      }
+
+      .sidebar-overlay.active {
+        opacity: 1;
+        visibility: visible;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .header-right {
+        display: none;
+      }
+
+      .quick-actions {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .quick-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Mobile Sidebar Overlay -->
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-icon">
+            <span class="material-icons">videogame_asset</span>
+          </div>
+          <span class="sidebar-logo-text">G4G Research</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-title">Overview</div>
+          <a class="nav-item active" onclick="showSection('dashboard')">
+            <span class="material-icons">dashboard</span>
+            Dashboard
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Participants</div>
+          <a class="nav-item" onclick="showSection('participants')">
+            <span class="material-icons">groups</span>
+            All Participants
+            <span class="nav-item-badge" id="participantCount">0</span>
+          </a>
+          <a class="nav-item" onclick="showSection('enroll')" id="navEnroll">
+            <span class="material-icons">person_add</span>
+            Enroll New
+          </a>
+        </div>
+
+        <div class="nav-section" id="adminSection">
+          <div class="nav-section-title">Administration</div>
+          <a class="nav-item" onclick="showSection('rollouts')">
+            <span class="material-icons">event</span>
+            Study Rollouts
+          </a>
+          <a class="nav-item" onclick="showSection('users')">
+            <span class="material-icons">manage_accounts</span>
+            User Management
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Reports</div>
+          <a class="nav-item" onclick="showSection('reports')">
+            <span class="material-icons">analytics</span>
+            Analytics
+          </a>
+          <a class="nav-item" onclick="showSection('exports')">
+            <span class="material-icons">download</span>
+            Export Data
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Account</div>
+          <a class="nav-item" onclick="showSection('settings')">
+            <span class="material-icons">settings</span>
+            Settings
+          </a>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar" id="userAvatar">?</div>
+          <div class="user-details">
+            <div class="user-name" id="userName">Loading...</div>
+            <div class="user-role" id="userRole">-</div>
+          </div>
+          <button class="logout-btn" onclick="handleLogout()" title="Logout">
+            <span class="material-icons">logout</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <!-- Top Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <button class="mobile-menu-btn" onclick="toggleSidebar()">
+            <span class="material-icons">menu</span>
+          </button>
+          <h1 class="page-title" id="pageTitle">Dashboard</h1>
+        </div>
+        <div class="header-right">
+          <div class="site-filter">
+            <label for="siteFilter">Site:</label>
+            <select id="siteFilter" onchange="handleSiteFilterChange()">
+              <option value="All">All Sites</option>
+              <option value="UGA">UGA</option>
+              <option value="Missouri">Missouri</option>
+            </select>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content Area -->
+      <main class="main-content">
+        <!-- Dashboard Section -->
+        <section id="dashboardSection">
+          <div class="loading" id="dashboardLoading">
+            <div class="spinner"></div>
+          </div>
+          <div id="dashboardContent" class="hidden"></div>
+        </section>
+
+        <!-- Participants Section -->
+        <section id="participantsSection" class="hidden"></section>
+
+        <!-- Enroll Section -->
+        <section id="enrollSection" class="hidden"></section>
+
+        <!-- Rollouts Section -->
+        <section id="rolloutsSection" class="hidden"></section>
+
+        <!-- Users Section -->
+        <section id="usersSection" class="hidden"></section>
+
+        <!-- Reports Section -->
+        <section id="reportsSection" class="hidden"></section>
+
+        <!-- Exports Section -->
+        <section id="exportsSection" class="hidden"></section>
+
+        <!-- Settings Section -->
+        <section id="settingsSection" class="hidden"></section>
+
+        <!-- Participant Detail Section -->
+        <section id="participantDetailSection" class="hidden"></section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalContainer">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Modal Title</h3>
+        <button class="modal-close" onclick="closeModal()">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================
+    // GLOBAL STATE
+    // ============================================
+    const WEB_APP_URL = '<?= ScriptApp.getService().getUrl() ?>';
+    let currentUser = null;
+    let sessionToken = null;
+    let currentSiteFilter = 'All';
+    let appConfig = null;
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function() {
+      initializeApp();
+    });
+
+    function initializeApp() {
+      // Get token from URL or localStorage
+      const urlParams = new URLSearchParams(window.location.search);
+      sessionToken = urlParams.get('token') || localStorage.getItem('g4g_token');
+
+      if (!sessionToken) {
+        redirectToLogin();
+        return;
+      }
+
+      // Verify session and get user info
+      google.script.run
+        .withSuccessHandler(handleUserLoaded)
+        .withFailureHandler(handleAuthError)
+        .getCurrentUser(sessionToken);
+
+      // Load config
+      google.script.run
+        .withSuccessHandler(function(config) {
+          appConfig = config;
+        })
+        .getConfig();
+    }
+
+    function handleUserLoaded(user) {
+      if (!user) {
+        redirectToLogin();
+        return;
+      }
+
+      currentUser = user;
+      localStorage.setItem('g4g_token', sessionToken);
+      localStorage.setItem('g4g_user', JSON.stringify(user));
+
+      // Update UI with user info
+      document.getElementById('userName').textContent = user.fullName;
+      document.getElementById('userRole').textContent = user.role;
+      document.getElementById('userAvatar').textContent = user.fullName.charAt(0).toUpperCase();
+
+      // Apply role-based access
+      applyRoleBasedAccess();
+
+      // Load initial data
+      loadDashboardData();
+    }
+
+    function handleAuthError(error) {
+      console.error('Auth error:', error);
+      redirectToLogin();
+    }
+
+    function redirectToLogin() {
+      localStorage.removeItem('g4g_token');
+      localStorage.removeItem('g4g_user');
+      window.location.href = WEB_APP_URL + '?page=login';
+    }
+
+    function applyRoleBasedAccess() {
+      // Hide admin section for non-admins
+      if (currentUser.role !== 'admin') {
+        document.getElementById('adminSection').classList.add('hidden');
+      }
+
+      // Hide enroll button for viewers
+      if (currentUser.role === 'viewer') {
+        document.getElementById('navEnroll').classList.add('hidden');
+      }
+    }
+
+    // ============================================
+    // NAVIGATION
+    // ============================================
+    function showSection(section) {
+      // Hide all sections
+      const sections = ['dashboard', 'participants', 'enroll', 'rollouts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      sections.forEach(s => {
+        const el = document.getElementById(s + 'Section');
+        if (el) el.classList.add('hidden');
+      });
+
+      // Update active nav
+      document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+      event.target.closest('.nav-item').classList.add('active');
+
+      // Show selected section
+      const sectionEl = document.getElementById(section + 'Section');
+      if (sectionEl) sectionEl.classList.remove('hidden');
+
+      // Update page title
+      const titles = {
+        dashboard: 'Dashboard',
+        participants: 'Participants',
+        enroll: 'Enroll Participant',
+        rollouts: 'Study Rollouts',
+        users: 'User Management',
+        reports: 'Analytics',
+        exports: 'Export Data',
+        settings: 'Settings'
+      };
+      document.getElementById('pageTitle').textContent = titles[section] || 'Dashboard';
+
+      // Load section-specific data
+      switch(section) {
+        case 'dashboard':
+          loadDashboardData();
+          break;
+        case 'participants':
+          loadParticipants();
+          break;
+        case 'enroll':
+          loadEnrollForm();
+          break;
+        case 'rollouts':
+          loadRollouts();
+          break;
+        case 'users':
+          loadUsers();
+          break;
+        case 'reports':
+          loadReports();
+          break;
+        case 'exports':
+          loadExports();
+          break;
+        case 'settings':
+          loadSettings();
+          break;
+      }
+
+      // Close mobile sidebar
+      toggleSidebar(false);
+    }
+
+    function toggleSidebar(show) {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebarOverlay');
+
+      if (typeof show === 'boolean') {
+        sidebar.classList.toggle('open', show);
+        overlay.classList.toggle('active', show);
+      } else {
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('active');
+      }
+    }
+
+    // ============================================
+    // DASHBOARD
+    // ============================================
+    function loadDashboardData() {
+      document.getElementById('dashboardLoading').classList.remove('hidden');
+      document.getElementById('dashboardContent').classList.add('hidden');
+
+      google.script.run
+        .withSuccessHandler(renderDashboard)
+        .withFailureHandler(handleError)
+        .getDashboardStats(sessionToken, currentSiteFilter);
+    }
+
+    function renderDashboard(stats) {
+      document.getElementById('dashboardLoading').classList.add('hidden');
+      document.getElementById('dashboardContent').classList.remove('hidden');
+      document.getElementById('participantCount').textContent = stats.totalParticipants;
+
+      const dashboardHtml = `
+        <!-- Quick Actions (for Admin/Facilitator) -->
+        ${currentUser.role !== 'viewer' ? `
+        <div class="quick-actions">
+          <div class="quick-action-card" onclick="showSection('enroll')">
+            <div class="quick-action-icon">
+              <span class="material-icons">person_add</span>
+            </div>
+            <div class="quick-action-label">Enroll Participant</div>
+          </div>
+          <div class="quick-action-card" onclick="showSection('participants')">
+            <div class="quick-action-icon">
+              <span class="material-icons">checklist</span>
+            </div>
+            <div class="quick-action-label">Update Checklist</div>
+          </div>
+          ${currentUser.role === 'admin' ? `
+          <div class="quick-action-card" onclick="showSection('rollouts')">
+            <div class="quick-action-icon">
+              <span class="material-icons">event</span>
+            </div>
+            <div class="quick-action-label">New Rollout</div>
+          </div>
+          <div class="quick-action-card" onclick="showSection('users')">
+            <div class="quick-action-icon">
+              <span class="material-icons">person_add</span>
+            </div>
+            <div class="quick-action-label">Add User</div>
+          </div>
+          ` : ''}
+        </div>
+        ` : ''}
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <div class="stat-card-icon">
+                <span class="material-icons">groups</span>
+              </div>
+            </div>
+            <div class="stat-value">${stats.totalParticipants}</div>
+            <div class="stat-label">Total Participants</div>
+          </div>
+          <div class="stat-card success">
+            <div class="stat-card-header">
+              <div class="stat-card-icon">
+                <span class="material-icons">person</span>
+              </div>
+            </div>
+            <div class="stat-value">${stats.activeParticipants}</div>
+            <div class="stat-label">Active</div>
+          </div>
+          <div class="stat-card info">
+            <div class="stat-card-header">
+              <div class="stat-card-icon">
+                <span class="material-icons">trending_up</span>
+              </div>
+            </div>
+            <div class="stat-value">${stats.overallCompletion}%</div>
+            <div class="stat-label">Avg Completion</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="stat-card-header">
+              <div class="stat-card-icon">
+                <span class="material-icons">event</span>
+              </div>
+            </div>
+            <div class="stat-value">${stats.activeRollouts}</div>
+            <div class="stat-label">Active Cohorts</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+          <!-- Instrument Progress -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">checklist</span>
+                Protocol Checklist Progress
+              </h3>
+            </div>
+            <div class="card-body">
+              <div style="max-height: 400px; overflow-y: auto;">
+                ${stats.instrumentStats.map(inst => `
+                  <div style="display: flex; align-items: center; padding: 0.5rem 0; gap: 1rem; border-bottom: 1px solid var(--gray-100);">
+                    <span style="width: 24px; height: 24px; background: var(--gray-100); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; color: var(--gray-600);">${inst.number}</span>
+                    <span style="flex: 1; font-size: 0.875rem; color: var(--gray-700);">${inst.name}</span>
+                    <span style="font-size: 0.75rem; color: var(--gray-500);">${inst.completed}/${inst.total}</span>
+                    <div style="width: 80px;">
+                      <div class="progress-bar">
+                        <div class="progress-fill ${inst.percentage >= 80 ? 'success' : inst.percentage >= 50 ? 'warning' : 'primary'}" style="width: ${inst.percentage}%"></div>
+                      </div>
+                    </div>
+                    <span style="width: 40px; text-align: right; font-size: 0.75rem; font-weight: 500;">${inst.percentage}%</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Site Comparison -->
+          <div>
+            <div class="card" style="margin-bottom: 1rem;">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <span class="material-icons">compare_arrows</span>
+                  By Site
+                </h3>
+              </div>
+              <div class="card-body">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                  <div style="text-align: center; padding: 1rem; background: rgba(186, 12, 47, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(186, 12, 47, 0.2);">
+                    <div style="font-size: 0.875rem; font-weight: 600; color: var(--gray-700); margin-bottom: 0.25rem;">UGA</div>
+                    <div style="font-size: 1.75rem; font-weight: 700; color: var(--uga-color);">${stats.ugaParticipants}</div>
+                  </div>
+                  <div style="text-align: center; padding: 1rem; background: rgba(241, 184, 45, 0.05); border-radius: var(--border-radius); border: 1px solid rgba(241, 184, 45, 0.2);">
+                    <div style="font-size: 0.875rem; font-weight: 600; color: var(--gray-700); margin-bottom: 0.25rem;">Missouri</div>
+                    <div style="font-size: 1.75rem; font-weight: 700; color: #b8860b;">${stats.missouriParticipants}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">
+                  <span class="material-icons">pie_chart</span>
+                  Status Distribution
+                </h3>
+              </div>
+              <div class="card-body">
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="badge badge-success">Active</span>
+                    <span style="font-weight: 600;">${stats.activeParticipants}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="badge badge-info">Completed</span>
+                    <span style="font-weight: 600;">${stats.completedParticipants}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="badge badge-warning">Withdrawn</span>
+                    <span style="font-weight: 600;">${stats.withdrawnParticipants}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('dashboardContent').innerHTML = dashboardHtml;
+    }
+
+    // ============================================
+    // PARTICIPANTS
+    // ============================================
+    function loadParticipants() {
+      const section = document.getElementById('participantsSection');
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">groups</span>
+              Participants
+            </h3>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+              <div class="search-box">
+                <span class="material-icons">search</span>
+                <input type="text" class="form-input" placeholder="Search participants..." id="participantSearch" onkeyup="filterParticipants()">
+              </div>
+              ${currentUser.role !== 'viewer' ? `
+              <button class="btn btn-primary" onclick="showSection('enroll')">
+                <span class="material-icons">add</span>
+                Enroll New
+              </button>
+              ` : ''}
+            </div>
+          </div>
+          <div class="card-body" id="participantsList">
+            <div class="loading">
+              <div class="spinner"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(renderParticipants)
+        .withFailureHandler(handleError)
+        .getAllParticipants(sessionToken, { site: currentSiteFilter });
+    }
+
+    function renderParticipants(result) {
+      if (!result.success) {
+        document.getElementById('participantsList').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <h3>Error loading participants</h3>
+            <p>${result.message}</p>
+          </div>
+        `;
+        return;
+      }
+
+      const participants = result.participants;
+
+      if (participants.length === 0) {
+        document.getElementById('participantsList').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">groups</span>
+            <h3>No participants found</h3>
+            <p>Start by enrolling a new participant.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const tableHtml = `
+        <div class="table-container">
+          <table class="data-table" id="participantsTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Site</th>
+                <th>School/Location</th>
+                <th>Cohort</th>
+                <th>Progress</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${participants.map(p => `
+                <tr data-search="${p.fullName.toLowerCase()} ${p.participantId.toLowerCase()} ${p.schoolName.toLowerCase()}">
+                  <td><code style="font-size: 0.8rem;">${p.participantId}</code></td>
+                  <td><strong>${p.fullName}</strong></td>
+                  <td><span class="badge ${p.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${p.site}</span></td>
+                  <td>${p.schoolName}</td>
+                  <td>${p.period} ${p.year}</td>
+                  <td>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <div class="progress-bar" style="width: 100px;">
+                        <div class="progress-fill ${p.completionPercentage >= 80 ? 'success' : p.completionPercentage >= 50 ? 'warning' : 'primary'}" style="width: ${p.completionPercentage}%"></div>
+                      </div>
+                      <span style="font-size: 0.8rem; font-weight: 500;">${p.completionPercentage}%</span>
+                    </div>
+                  </td>
+                  <td><span class="badge badge-${p.status === 'active' ? 'success' : p.status === 'completed' ? 'info' : 'warning'}">${p.status}</span></td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" onclick="viewParticipant('${p.participantId}')">
+                      <span class="material-icons">visibility</span>
+                      View
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById('participantsList').innerHTML = tableHtml;
+    }
+
+    function filterParticipants() {
+      const search = document.getElementById('participantSearch').value.toLowerCase();
+      const rows = document.querySelectorAll('#participantsTable tbody tr');
+
+      rows.forEach(row => {
+        const searchText = row.getAttribute('data-search');
+        row.style.display = searchText.includes(search) ? '' : 'none';
+      });
+    }
+
+    function viewParticipant(participantId) {
+      const section = document.getElementById('participantDetailSection');
+
+      // Hide all sections and show participant detail
+      ['dashboard', 'participants', 'enroll', 'rollouts', 'users', 'reports', 'exports', 'settings'].forEach(s => {
+        document.getElementById(s + 'Section').classList.add('hidden');
+      });
+      section.classList.remove('hidden');
+
+      document.getElementById('pageTitle').textContent = 'Participant Details';
+
+      section.innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(renderParticipantDetail)
+        .withFailureHandler(handleError)
+        .getParticipantById(sessionToken, participantId);
+    }
+
+    function renderParticipantDetail(result) {
+      if (!result.success) {
+        document.getElementById('participantDetailSection').innerHTML = `
+          <div class="card">
+            <div class="card-body">
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Error loading participant</h3>
+                <p>${result.message}</p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const p = result.participant;
+      const checklist = result.checklist;
+
+      const html = `
+        <button class="btn btn-secondary" onclick="showSection('participants')" style="margin-bottom: 1rem;">
+          <span class="material-icons">arrow_back</span>
+          Back to Participants
+        </button>
+
+        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 1.5rem;">
+          <!-- Participant Info Card -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">person</span>
+                Participant Info
+              </h3>
+              ${currentUser.role !== 'viewer' ? `
+              <button class="btn btn-sm btn-secondary" onclick="editParticipant('${p.participantId}')">
+                <span class="material-icons">edit</span>
+              </button>
+              ` : ''}
+            </div>
+            <div class="card-body">
+              <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Participant ID</div>
+                  <div style="font-weight: 600; font-family: monospace;">${p.participantId}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Full Name</div>
+                  <div style="font-weight: 600; font-size: 1.125rem;">${p.fullName}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Site</div>
+                  <div><span class="badge ${p.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${p.site}</span></div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">School/Location</div>
+                  <div>${p.schoolName}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Cohort</div>
+                  <div>${p.period} ${p.year}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Enrollment Date</div>
+                  <div>${formatDate(p.enrollmentDate)}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Status</div>
+                  <div><span class="badge badge-${p.status === 'active' ? 'success' : p.status === 'completed' ? 'info' : 'warning'}">${p.status}</span></div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Overall Progress</div>
+                  <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                    <div class="progress-bar" style="flex: 1;">
+                      <div class="progress-fill ${p.completionPercentage >= 80 ? 'success' : p.completionPercentage >= 50 ? 'warning' : 'primary'}" style="width: ${p.completionPercentage}%"></div>
+                    </div>
+                    <span style="font-weight: 600;">${p.completionPercentage}%</span>
+                  </div>
+                </div>
+                ${p.notes ? `
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Notes</div>
+                  <div style="font-size: 0.875rem; color: var(--gray-600);">${p.notes}</div>
+                </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+
+          <!-- Checklist Card -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">checklist</span>
+                Protocol Checklist (18 Items)
+              </h3>
+              <div style="display: flex; gap: 0.5rem;">
+                <span class="badge badge-success">${checklist.filter(c => c.status === 'completed').length} Complete</span>
+                <span class="badge badge-neutral">${checklist.filter(c => c.status === 'not_started').length} Pending</span>
+                <span class="badge badge-danger">${checklist.filter(c => c.status === 'missing').length} Missing</span>
+              </div>
+            </div>
+            <div class="card-body" style="padding: 0;">
+              <div style="max-height: 600px; overflow-y: auto;">
+                ${checklist.map((item, index) => `
+                  <div style="display: flex; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid var(--gray-100); gap: 1rem; ${item.status === 'completed' ? 'background: rgba(16, 185, 129, 0.03);' : item.status === 'missing' ? 'background: rgba(239, 68, 68, 0.03);' : ''}">
+                    <span style="width: 28px; height: 28px; background: ${item.status === 'completed' ? 'var(--success-color)' : item.status === 'missing' ? 'var(--danger-color)' : 'var(--gray-200)'}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: ${item.status !== 'not_started' ? 'white' : 'var(--gray-600)'}; font-size: 0.75rem; font-weight: 600;">${item.status === 'completed' ? '✓' : item.status === 'missing' ? '!' : item.instrumentNumber}</span>
+
+                    <div style="flex: 1;">
+                      <div style="font-weight: 500; font-size: 0.9rem; color: var(--gray-800);">${item.instrumentName}</div>
+                      ${item.completedDate ? `<div style="font-size: 0.75rem; color: var(--gray-500);">Completed ${formatDate(item.completedDate)} by ${item.completedBy}</div>` : ''}
+                      ${item.notes ? `<div style="font-size: 0.75rem; color: var(--gray-500); font-style: italic;">Note: ${item.notes}</div>` : ''}
+                    </div>
+
+                    ${currentUser.role !== 'viewer' ? `
+                    <div style="display: flex; gap: 4px;">
+                      <button class="btn btn-sm ${item.status === 'completed' ? 'btn-success' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'completed', '${p.participantId}')" title="Mark Complete">
+                        <span class="material-icons">check</span>
+                      </button>
+                      <button class="btn btn-sm ${item.status === 'missing' ? 'btn-danger' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'missing', '${p.participantId}')" title="Mark Missing">
+                        <span class="material-icons">close</span>
+                      </button>
+                      <button class="btn btn-sm btn-secondary" onclick="addChecklistNote('${item.checklistId}', '${p.participantId}')" title="Add Note">
+                        <span class="material-icons">note_add</span>
+                      </button>
+                    </div>
+                    ` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('participantDetailSection').innerHTML = html;
+    }
+
+    function updateChecklistStatus(checklistId, status, participantId) {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Checklist updated', 'success');
+            viewParticipant(participantId);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .updateChecklistItem(sessionToken, checklistId, { status: status });
+    }
+
+    function addChecklistNote(checklistId, participantId) {
+      const note = prompt('Enter note for this item:');
+      if (note !== null) {
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success) {
+              showToast('Note added', 'success');
+              viewParticipant(participantId);
+            } else {
+              showToast(result.message, 'error');
+            }
+          })
+          .withFailureHandler(handleError)
+          .updateChecklistItem(sessionToken, checklistId, { notes: note });
+      }
+    }
+
+    // ============================================
+    // ENROLLMENT
+    // ============================================
+    function loadEnrollForm() {
+      const section = document.getElementById('enrollSection');
+      section.innerHTML = `
+        <div class="card" style="max-width: 600px;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">person_add</span>
+              Enroll New Participant
+            </h3>
+          </div>
+          <div class="card-body">
+            <form id="enrollForm" onsubmit="handleEnroll(event)">
+              <div class="form-group">
+                <label class="form-label">Participant Full Name *</label>
+                <input type="text" class="form-input" id="enrollName" required placeholder="Enter participant's full name">
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">Site *</label>
+                  <select class="form-select" id="enrollSite" required onchange="loadRolloutsForSite()">
+                    <option value="">Select site...</option>
+                    <option value="UGA">UGA</option>
+                    <option value="Missouri">Missouri</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Study Rollout *</label>
+                  <select class="form-select" id="enrollRollout" required disabled>
+                    <option value="">Select site first...</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Notes (optional)</label>
+                <textarea class="form-textarea" id="enrollNotes" rows="3" placeholder="Any additional notes about this participant..."></textarea>
+              </div>
+
+              <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                <button type="submit" class="btn btn-primary" id="enrollBtn">
+                  <span class="material-icons">person_add</span>
+                  Enroll Participant
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="showSection('participants')">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadRolloutsForSite() {
+      const site = document.getElementById('enrollSite').value;
+      const rolloutSelect = document.getElementById('enrollRollout');
+
+      if (!site) {
+        rolloutSelect.innerHTML = '<option value="">Select site first...</option>';
+        rolloutSelect.disabled = true;
+        return;
+      }
+
+      rolloutSelect.innerHTML = '<option value="">Loading...</option>';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.rollouts.length > 0) {
+            let options = '<option value="">Select rollout...</option>';
+            result.rollouts.filter(r => r.status === 'active').forEach(r => {
+              options += `<option value="${r.rolloutId}">${r.schoolName} (${r.period} ${r.year})</option>`;
+            });
+            rolloutSelect.innerHTML = options;
+            rolloutSelect.disabled = false;
+          } else {
+            rolloutSelect.innerHTML = '<option value="">No active rollouts for this site</option>';
+            rolloutSelect.disabled = true;
+          }
+        })
+        .withFailureHandler(handleError)
+        .getRolloutsBySite(sessionToken, site);
+    }
+
+    function handleEnroll(event) {
+      event.preventDefault();
+
+      const data = {
+        fullName: document.getElementById('enrollName').value.trim(),
+        rolloutId: document.getElementById('enrollRollout').value,
+        notes: document.getElementById('enrollNotes').value.trim()
+      };
+
+      const btn = document.getElementById('enrollBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div> Enrolling...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Participant enrolled successfully! ID: ' + result.participantId, 'success');
+            viewParticipant(result.participantId);
+          } else {
+            showToast(result.message, 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
+          }
+        })
+        .withFailureHandler(function(error) {
+          handleError(error);
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
+        })
+        .enrollParticipant(sessionToken, data);
+    }
+
+    // ============================================
+    // ROLLOUTS (Admin Only)
+    // ============================================
+    function loadRollouts() {
+      if (currentUser.role !== 'admin') {
+        document.getElementById('rolloutsSection').innerHTML = `
+          <div class="card">
+            <div class="card-body">
+              <div class="empty-state">
+                <span class="material-icons">lock</span>
+                <h3>Access Denied</h3>
+                <p>Only administrators can manage study rollouts.</p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const section = document.getElementById('rolloutsSection');
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">event</span>
+              Study Rollouts
+            </h3>
+            <button class="btn btn-primary" onclick="showAddRolloutModal()">
+              <span class="material-icons">add</span>
+              Add Rollout
+            </button>
+          </div>
+          <div class="card-body" id="rolloutsList">
+            <div class="loading">
+              <div class="spinner"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(renderRollouts)
+        .withFailureHandler(handleError)
+        .getAllRollouts(sessionToken, currentSiteFilter);
+    }
+
+    function renderRollouts(result) {
+      if (!result.success) {
+        document.getElementById('rolloutsList').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <h3>Error loading rollouts</h3>
+          </div>
+        `;
+        return;
+      }
+
+      const rollouts = result.rollouts;
+
+      if (rollouts.length === 0) {
+        document.getElementById('rolloutsList').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">event</span>
+            <h3>No study rollouts</h3>
+            <p>Create your first study rollout to start enrolling participants.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const tableHtml = `
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Site</th>
+                <th>School/Location</th>
+                <th>Period</th>
+                <th>Year</th>
+                <th>Status</th>
+                <th>Description</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rollouts.map(r => `
+                <tr>
+                  <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${r.site}</span></td>
+                  <td><strong>${r.schoolName}</strong></td>
+                  <td>${r.period}</td>
+                  <td>${r.year}</td>
+                  <td><span class="badge badge-${r.status === 'active' ? 'success' : r.status === 'completed' ? 'info' : 'neutral'}">${r.status}</span></td>
+                  <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${r.description || '-'}</td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')">
+                      <span class="material-icons">edit</span>
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById('rolloutsList').innerHTML = tableHtml;
+    }
+
+    function showAddRolloutModal() {
+      document.getElementById('modalTitle').textContent = 'Add Study Rollout';
+      document.getElementById('modalBody').innerHTML = `
+        <form id="rolloutForm">
+          <div class="form-group">
+            <label class="form-label">Site *</label>
+            <select class="form-select" id="rolloutSite" required>
+              <option value="">Select site...</option>
+              <option value="UGA">UGA</option>
+              <option value="Missouri">Missouri</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">School/Location Name *</label>
+            <input type="text" class="form-input" id="rolloutSchool" required placeholder="e.g., Double Helix School">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Period *</label>
+              <select class="form-select" id="rolloutPeriod" required>
+                <option value="">Select...</option>
+                <option value="Spring">Spring</option>
+                <option value="Summer">Summer</option>
+                <option value="Fall">Fall</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Year *</label>
+              <input type="number" class="form-input" id="rolloutYear" required min="2024" max="2030" value="2025">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <textarea class="form-textarea" id="rolloutDescription" rows="2" placeholder="Brief description of this cohort..."></textarea>
+          </div>
+        </form>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRollout()">
+          <span class="material-icons">save</span>
+          Save Rollout
+        </button>
+      `;
+      openModal();
+    }
+
+    function saveRollout() {
+      const data = {
+        site: document.getElementById('rolloutSite').value,
+        schoolName: document.getElementById('rolloutSchool').value.trim(),
+        period: document.getElementById('rolloutPeriod').value,
+        year: document.getElementById('rolloutYear').value,
+        description: document.getElementById('rolloutDescription').value.trim()
+      };
+
+      if (!data.site || !data.schoolName || !data.period || !data.year) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Rollout created successfully', 'success');
+            closeModal();
+            loadRollouts();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .createRollout(sessionToken, data);
+    }
+
+    // ============================================
+    // USERS (Admin Only)
+    // ============================================
+    function loadUsers() {
+      if (currentUser.role !== 'admin') {
+        document.getElementById('usersSection').innerHTML = `
+          <div class="card">
+            <div class="card-body">
+              <div class="empty-state">
+                <span class="material-icons">lock</span>
+                <h3>Access Denied</h3>
+                <p>Only administrators can manage users.</p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const section = document.getElementById('usersSection');
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">manage_accounts</span>
+              User Management
+            </h3>
+            <button class="btn btn-primary" onclick="showAddUserModal()">
+              <span class="material-icons">person_add</span>
+              Add User
+            </button>
+          </div>
+          <div class="card-body" id="usersList">
+            <div class="loading">
+              <div class="spinner"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(renderUsers)
+        .withFailureHandler(handleError)
+        .getAllUsers(sessionToken);
+    }
+
+    function renderUsers(result) {
+      if (!result.success) {
+        document.getElementById('usersList').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <h3>Error loading users</h3>
+          </div>
+        `;
+        return;
+      }
+
+      const users = result.users;
+
+      const tableHtml = `
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Site</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(u => `
+                <tr>
+                  <td><strong>${u.fullName}</strong></td>
+                  <td>${u.email}</td>
+                  <td><span class="badge badge-${u.role === 'admin' ? 'info' : u.role === 'facilitator' ? 'success' : 'neutral'}">${u.role}</span></td>
+                  <td>${u.site}</td>
+                  <td><span class="badge badge-${u.status === 'active' ? 'success' : 'warning'}">${u.status}</span></td>
+                  <td>${u.lastLogin ? formatDate(u.lastLogin) : 'Never'}</td>
+                  <td>
+                    <button class="btn btn-sm btn-secondary" onclick="editUser('${u.userId}', '${u.fullName}', '${u.email}', '${u.role}', '${u.site}', '${u.status}')">
+                      <span class="material-icons">edit</span>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="resetPassword('${u.userId}', '${u.email}')" title="Reset Password">
+                      <span class="material-icons">lock_reset</span>
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById('usersList').innerHTML = tableHtml;
+    }
+
+    function showAddUserModal() {
+      document.getElementById('modalTitle').textContent = 'Add New User';
+      document.getElementById('modalBody').innerHTML = `
+        <form id="userForm">
+          <div class="form-group">
+            <label class="form-label">Full Name *</label>
+            <input type="text" class="form-input" id="userFullName" required placeholder="Enter full name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email *</label>
+            <input type="email" class="form-input" id="userEmail" required placeholder="user@email.edu">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Role *</label>
+              <select class="form-select" id="userRole" required>
+                <option value="">Select role...</option>
+                <option value="admin">Admin</option>
+                <option value="facilitator">Facilitator</option>
+                <option value="viewer">Viewer</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Site *</label>
+              <select class="form-select" id="userSite" required>
+                <option value="">Select site...</option>
+                <option value="All">All Sites</option>
+                <option value="UGA">UGA</option>
+                <option value="Missouri">Missouri</option>
+              </select>
+            </div>
+          </div>
+          <p style="font-size: 0.875rem; color: var(--gray-500); margin-top: 0.5rem;">
+            <span class="material-icons" style="font-size: 16px; vertical-align: middle;">info</span>
+            A temporary password will be generated and displayed after creation.
+          </p>
+        </form>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveUser()">
+          <span class="material-icons">person_add</span>
+          Create User
+        </button>
+      `;
+      openModal();
+    }
+
+    function saveUser() {
+      const data = {
+        fullName: document.getElementById('userFullName').value.trim(),
+        email: document.getElementById('userEmail').value.trim(),
+        role: document.getElementById('userRole').value,
+        site: document.getElementById('userSite').value
+      };
+
+      if (!data.fullName || !data.email || !data.role || !data.site) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            closeModal();
+            showToast('User created! Temporary password: ' + result.tempPassword, 'success');
+            alert('User created successfully!\n\nTemporary Password: ' + result.tempPassword + '\n\nPlease share this with the user securely.');
+            loadUsers();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .createUser(sessionToken, data);
+    }
+
+    function resetPassword(userId, email) {
+      if (!confirm('Reset password for ' + email + '?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Password reset!', 'success');
+            alert('New temporary password for ' + email + ':\n\n' + result.tempPassword + '\n\nPlease share this securely.');
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .resetUserPassword(sessionToken, userId);
+    }
+
+    // ============================================
+    // REPORTS
+    // ============================================
+    function loadReports() {
+      const section = document.getElementById('reportsSection');
+      section.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">compare_arrows</span>
+                Site Comparison
+              </h3>
+            </div>
+            <div class="card-body" id="siteComparisonReport">
+              <div class="loading">
+                <div class="spinner"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">history</span>
+                Recent Activity
+              </h3>
+            </div>
+            <div class="card-body" id="activityLog" style="max-height: 400px; overflow-y: auto;">
+              <div class="loading">
+                <div class="spinner"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Load site comparison
+      google.script.run
+        .withSuccessHandler(renderSiteComparison)
+        .withFailureHandler(handleError)
+        .getSiteComparison(sessionToken);
+
+      // Load recent activity
+      google.script.run
+        .withSuccessHandler(renderActivityLog)
+        .withFailureHandler(handleError)
+        .getRecentActivity(sessionToken, 20);
+    }
+
+    function renderSiteComparison(result) {
+      if (!result.success) return;
+
+      const uga = result.comparison.UGA;
+      const miz = result.comparison.Missouri;
+
+      document.getElementById('siteComparisonReport').innerHTML = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; text-align: center;">
+          <div style="padding: 1.5rem; background: rgba(186, 12, 47, 0.05); border-radius: var(--border-radius);">
+            <div style="font-weight: 600; color: var(--uga-color); margin-bottom: 1rem;">UGA</div>
+            <div style="font-size: 2rem; font-weight: 700;">${uga.totalParticipants}</div>
+            <div style="font-size: 0.8rem; color: var(--gray-500);">Participants</div>
+            <div style="margin-top: 1rem;">
+              <div class="progress-bar">
+                <div class="progress-fill primary" style="width: ${uga.overallCompletion}%"></div>
+              </div>
+              <div style="font-size: 0.8rem; margin-top: 4px;">${uga.overallCompletion}% Complete</div>
+            </div>
+          </div>
+          <div style="padding: 1.5rem; background: rgba(241, 184, 45, 0.05); border-radius: var(--border-radius);">
+            <div style="font-weight: 600; color: #b8860b; margin-bottom: 1rem;">Missouri</div>
+            <div style="font-size: 2rem; font-weight: 700;">${miz.totalParticipants}</div>
+            <div style="font-size: 0.8rem; color: var(--gray-500);">Participants</div>
+            <div style="margin-top: 1rem;">
+              <div class="progress-bar">
+                <div class="progress-fill primary" style="width: ${miz.overallCompletion}%"></div>
+              </div>
+              <div style="font-size: 0.8rem; margin-top: 4px;">${miz.overallCompletion}% Complete</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderActivityLog(result) {
+      if (!result.success) return;
+
+      if (result.activities.length === 0) {
+        document.getElementById('activityLog').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">history</span>
+            <p>No recent activity</p>
+          </div>
+        `;
+        return;
+      }
+
+      const html = result.activities.map(a => `
+        <div style="display: flex; gap: 12px; padding: 0.75rem 0; border-bottom: 1px solid var(--gray-100);">
+          <div style="width: 32px; height: 32px; background: var(--gray-100); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+            <span class="material-icons" style="font-size: 16px; color: var(--gray-600);">
+              ${a.action.includes('LOGIN') ? 'login' : a.action.includes('ENROLL') ? 'person_add' : a.action.includes('CHECKLIST') ? 'checklist' : 'edit'}
+            </span>
+          </div>
+          <div style="flex: 1;">
+            <div style="font-size: 0.875rem;"><strong>${a.userName}</strong> ${a.details}</div>
+            <div style="font-size: 0.75rem; color: var(--gray-500);">${formatDateTime(a.timestamp)}</div>
+          </div>
+        </div>
+      `).join('');
+
+      document.getElementById('activityLog').innerHTML = html;
+    }
+
+    // ============================================
+    // EXPORTS
+    // ============================================
+    function loadExports() {
+      const section = document.getElementById('exportsSection');
+      section.innerHTML = `
+        <div class="card" style="max-width: 600px;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">download</span>
+              Export Data
+            </h3>
+          </div>
+          <div class="card-body">
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 500;">Participants Export</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">All participant data as CSV</div>
+                </div>
+                <button class="btn btn-primary" onclick="exportParticipants()">
+                  <span class="material-icons">download</span>
+                  Export
+                </button>
+              </div>
+
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 500;">Checklist Export</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">All checklist items as CSV</div>
+                </div>
+                <button class="btn btn-primary" onclick="exportChecklist()">
+                  <span class="material-icons">download</span>
+                  Export
+                </button>
+              </div>
+
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 500;">Summary Report</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Cross-site summary as text</div>
+                </div>
+                <button class="btn btn-primary" onclick="exportSummary()">
+                  <span class="material-icons">download</span>
+                  Export
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function exportParticipants() {
+      google.script.run
+        .withSuccessHandler(downloadCSV)
+        .withFailureHandler(handleError)
+        .exportParticipantsCSV(sessionToken, { site: currentSiteFilter });
+    }
+
+    function exportChecklist() {
+      google.script.run
+        .withSuccessHandler(downloadCSV)
+        .withFailureHandler(handleError)
+        .exportChecklistCSV(sessionToken, { site: currentSiteFilter });
+    }
+
+    function exportSummary() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            const blob = new Blob([result.report], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = result.filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('Report downloaded', 'success');
+          }
+        })
+        .withFailureHandler(handleError)
+        .exportSummaryReport(sessionToken);
+    }
+
+    function downloadCSV(result) {
+      if (result.success) {
+        const blob = new Blob([result.csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = result.filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Export downloaded', 'success');
+      } else {
+        showToast(result.message, 'error');
+      }
+    }
+
+    // ============================================
+    // SETTINGS
+    // ============================================
+    function loadSettings() {
+      const section = document.getElementById('settingsSection');
+      section.innerHTML = `
+        <div class="card" style="max-width: 500px;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">settings</span>
+              Account Settings
+            </h3>
+          </div>
+          <div class="card-body">
+            <div style="margin-bottom: 2rem;">
+              <h4 style="font-size: 1rem; margin-bottom: 1rem;">Your Information</h4>
+              <div style="display: grid; gap: 0.5rem;">
+                <div><strong>Name:</strong> ${currentUser.fullName}</div>
+                <div><strong>Email:</strong> ${currentUser.email}</div>
+                <div><strong>Role:</strong> <span class="badge badge-info">${currentUser.role}</span></div>
+                <div><strong>Site:</strong> ${currentUser.site}</div>
+              </div>
+            </div>
+
+            <div>
+              <h4 style="font-size: 1rem; margin-bottom: 1rem;">Change Password</h4>
+              <form onsubmit="handleChangePassword(event)">
+                <div class="form-group">
+                  <label class="form-label">Current Password</label>
+                  <input type="password" class="form-input" id="currentPassword" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">New Password</label>
+                  <input type="password" class="form-input" id="newPassword" required minlength="8">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Confirm New Password</label>
+                  <input type="password" class="form-input" id="confirmPassword" required minlength="8">
+                </div>
+                <button type="submit" class="btn btn-primary">
+                  <span class="material-icons">lock</span>
+                  Change Password
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function handleChangePassword(event) {
+      event.preventDefault();
+
+      const currentPassword = document.getElementById('currentPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (newPassword !== confirmPassword) {
+        showToast('New passwords do not match', 'error');
+        return;
+      }
+
+      if (newPassword.length < 8) {
+        showToast('Password must be at least 8 characters', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Password changed successfully', 'success');
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .changePassword(sessionToken, currentPassword, newPassword);
+    }
+
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
+    function handleSiteFilterChange() {
+      currentSiteFilter = document.getElementById('siteFilter').value;
+      loadDashboardData();
+    }
+
+    function handleLogout() {
+      google.script.run
+        .withSuccessHandler(function() {
+          localStorage.removeItem('g4g_token');
+          localStorage.removeItem('g4g_user');
+          window.location.href = WEB_APP_URL;
+        })
+        .logoutUser(sessionToken);
+    }
+
+    function openModal() {
+      document.getElementById('modalOverlay').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.remove('active');
+    }
+
+    function showToast(message, type) {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + (type || 'success');
+      toast.innerHTML = `
+        <span class="material-icons">${type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'check_circle'}</span>
+        <span>${message}</span>
+      `;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.remove();
+      }, 5000);
+    }
+
+    function handleError(error) {
+      console.error('Error:', error);
+      showToast('An error occurred. Please try again.', 'error');
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return '-';
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function formatDateTime(dateString) {
+      if (!dateString) return '-';
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    // Close modal on overlay click
+    document.getElementById('modalOverlay').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeModal();
+    });
+  </script>
+</body>
+</html>
