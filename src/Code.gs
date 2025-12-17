@@ -129,7 +129,7 @@ function initializeDatabase() {
 
   // Create Users sheet
   createSheetIfNotExists(ss, 'Users', [
-    'userId', 'email', 'passwordHash', 'fullName', 'role', 'site', 'status', 'createdAt', 'createdBy', 'lastLogin'
+    'userId', 'username', 'passwordHash', 'fullName', 'role', 'site', 'status', 'createdAt', 'createdBy', 'lastLogin'
   ]);
 
   // Create StudyRollouts sheet
@@ -199,7 +199,7 @@ function createSheetIfNotExists(ss, sheetName, headers) {
  * Run this once after initializing the database
  */
 function createInitialAdmin() {
-  const email = 'admin@g4g.edu';
+  const username = 'admin';
   const password = generateRandomPassword();
   const passwordHash = hashPassword(password);
 
@@ -213,7 +213,7 @@ function createInitialAdmin() {
   // Check if admin already exists
   const data = usersSheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][1] === email) {
+    if (data[i][1] === username) {
       Logger.log('Admin user already exists!');
       return { success: false, message: 'Admin user already exists' };
     }
@@ -224,7 +224,7 @@ function createInitialAdmin() {
 
   usersSheet.appendRow([
     userId,
-    email,
+    username,
     passwordHash,
     'System Administrator',
     'admin',
@@ -236,16 +236,33 @@ function createInitialAdmin() {
   ]);
 
   Logger.log('Initial admin created!');
-  Logger.log('Email: ' + email);
+  Logger.log('Username: ' + username);
   Logger.log('Temporary Password: ' + password);
   Logger.log('IMPORTANT: Change this password after first login!');
 
   return {
     success: true,
     message: 'Admin created successfully',
-    email: email,
+    username: username,
     password: password
   };
+}
+
+/**
+ * UTILITY: Generate a password hash
+ * Run this function from the script editor to generate hashed passwords
+ * for manual entry in the spreadsheet
+ *
+ * Usage: Change the password below and run this function.
+ * Copy the hash from the execution log to your spreadsheet.
+ */
+function generatePasswordHash() {
+  const password = 'admin'; // <-- Change this to your desired password
+  const hash = hashPassword(password);
+  Logger.log('Password: ' + password);
+  Logger.log('Hash: ' + hash);
+  Logger.log('Copy the hash above to the passwordHash column in the Users sheet');
+  return hash;
 }
 
 // ============================================
@@ -253,9 +270,9 @@ function createInitialAdmin() {
 // ============================================
 
 /**
- * Authenticate user with email and password
+ * Authenticate user with username and password
  */
-function authenticateUser(email, password) {
+function authenticateUser(username, password) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const usersSheet = ss.getSheetByName('Users');
 
@@ -266,13 +283,23 @@ function authenticateUser(email, password) {
   const data = usersSheet.getDataRange().getValues();
   const headers = data[0];
 
+  // Debug logging
+  Logger.log('Attempting login for username: ' + username);
+  Logger.log('Headers found: ' + JSON.stringify(headers));
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    const rowEmail = row[headers.indexOf('email')];
+    const rowUsername = row[headers.indexOf('username')];
     const rowPasswordHash = row[headers.indexOf('passwordHash')];
     const rowStatus = row[headers.indexOf('status')];
 
-    if (rowEmail === email && rowStatus === 'active') {
+    Logger.log('Checking row ' + i + ': username=' + rowUsername + ', status=' + rowStatus);
+
+    if (rowUsername === username && rowStatus === 'active') {
+      Logger.log('Username matched! Verifying password...');
+      Logger.log('Stored hash: ' + rowPasswordHash);
+      Logger.log('Input password hash: ' + hashPassword(password));
+
       if (verifyPassword(password, rowPasswordHash)) {
         // Create session
         const userId = row[headers.indexOf('userId')];
@@ -290,17 +317,19 @@ function authenticateUser(email, password) {
           token: session.token,
           user: {
             userId: userId,
-            email: rowEmail,
+            username: rowUsername,
             fullName: row[headers.indexOf('fullName')],
             role: row[headers.indexOf('role')],
             site: row[headers.indexOf('site')]
           }
         };
+      } else {
+        Logger.log('Password verification failed');
       }
     }
   }
 
-  return { success: false, message: 'Invalid email or password' };
+  return { success: false, message: 'Invalid username or password' };
 }
 
 /**
@@ -444,7 +473,7 @@ function getUserById(userId) {
     if (data[i][headers.indexOf('userId')] === userId) {
       return {
         userId: data[i][headers.indexOf('userId')],
-        email: data[i][headers.indexOf('email')],
+        username: data[i][headers.indexOf('username')],
         fullName: data[i][headers.indexOf('fullName')],
         role: data[i][headers.indexOf('role')],
         site: data[i][headers.indexOf('site')],
@@ -479,7 +508,7 @@ function getAllUsers(token) {
   for (let i = 1; i < data.length; i++) {
     users.push({
       userId: data[i][headers.indexOf('userId')],
-      email: data[i][headers.indexOf('email')],
+      username: data[i][headers.indexOf('username')],
       fullName: data[i][headers.indexOf('fullName')],
       role: data[i][headers.indexOf('role')],
       site: data[i][headers.indexOf('site')],
@@ -504,13 +533,13 @@ function createUser(token, userData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const usersSheet = ss.getSheetByName('Users');
 
-  // Check if email already exists
+  // Check if username already exists
   const data = usersSheet.getDataRange().getValues();
   const headers = data[0];
 
   for (let i = 1; i < data.length; i++) {
-    if (data[i][headers.indexOf('email')] === userData.email) {
-      return { success: false, message: 'Email already exists' };
+    if (data[i][headers.indexOf('username')] === userData.username) {
+      return { success: false, message: 'Username already exists' };
     }
   }
 
@@ -521,7 +550,7 @@ function createUser(token, userData) {
 
   usersSheet.appendRow([
     userId,
-    userData.email,
+    userData.username,
     passwordHash,
     userData.fullName,
     userData.role,
@@ -533,7 +562,7 @@ function createUser(token, userData) {
   ]);
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_USER', 'user', userId,
-    'Created user: ' + userData.email);
+    'Created user: ' + userData.username);
 
   return {
     success: true,
@@ -573,7 +602,7 @@ function updateUser(token, userId, userData) {
       }
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_USER', 'user', userId,
-        'Updated user: ' + data[i][headers.indexOf('email')]);
+        'Updated user: ' + data[i][headers.indexOf('username')]);
 
       return { success: true, message: 'User updated successfully' };
     }
@@ -604,7 +633,7 @@ function resetUserPassword(token, userId) {
       usersSheet.getRange(i + 1, headers.indexOf('passwordHash') + 1).setValue(passwordHash);
 
       logActivity(currentUser.userId, currentUser.fullName, 'RESET_PASSWORD', 'user', userId,
-        'Reset password for: ' + data[i][headers.indexOf('email')]);
+        'Reset password for: ' + data[i][headers.indexOf('username')]);
 
       return { success: true, tempPassword: newPassword };
     }

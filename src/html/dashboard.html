@@ -2037,7 +2037,7 @@
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Email</th>
+                <th>Username</th>
                 <th>Role</th>
                 <th>Site</th>
                 <th>Status</th>
@@ -2049,16 +2049,16 @@
               ${users.map(u => `
                 <tr>
                   <td><strong>${u.fullName}</strong></td>
-                  <td>${u.email}</td>
+                  <td>${u.username}</td>
                   <td><span class="badge badge-${u.role === 'admin' ? 'info' : u.role === 'facilitator' ? 'success' : 'neutral'}">${u.role}</span></td>
                   <td>${u.site}</td>
                   <td><span class="badge badge-${u.status === 'active' ? 'success' : 'warning'}">${u.status}</span></td>
                   <td>${u.lastLogin ? formatDate(u.lastLogin) : 'Never'}</td>
                   <td>
-                    <button class="btn btn-sm btn-secondary" onclick="editUser('${u.userId}', '${u.fullName}', '${u.email}', '${u.role}', '${u.site}', '${u.status}')">
+                    <button class="btn btn-sm btn-secondary" onclick="editUser('${u.userId}', '${u.fullName}', '${u.username}', '${u.role}', '${u.site}', '${u.status}')">
                       <span class="material-icons">edit</span>
                     </button>
-                    <button class="btn btn-sm btn-secondary" onclick="resetPassword('${u.userId}', '${u.email}')" title="Reset Password">
+                    <button class="btn btn-sm btn-secondary" onclick="resetPassword('${u.userId}', '${u.username}')" title="Reset Password">
                       <span class="material-icons">lock_reset</span>
                     </button>
                   </td>
@@ -2081,8 +2081,8 @@
             <input type="text" class="form-input" id="userFullName" required placeholder="Enter full name">
           </div>
           <div class="form-group">
-            <label class="form-label">Email *</label>
-            <input type="email" class="form-input" id="userEmail" required placeholder="user@email.edu">
+            <label class="form-label">Username *</label>
+            <input type="text" class="form-input" id="userUsername" required placeholder="Enter username">
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -2123,12 +2123,12 @@
     function saveUser() {
       const data = {
         fullName: document.getElementById('userFullName').value.trim(),
-        email: document.getElementById('userEmail').value.trim(),
+        username: document.getElementById('userUsername').value.trim(),
         role: document.getElementById('userRole').value,
         site: document.getElementById('userSite').value
       };
 
-      if (!data.fullName || !data.email || !data.role || !data.site) {
+      if (!data.fullName || !data.username || !data.role || !data.site) {
         showToast('Please fill in all required fields', 'error');
         return;
       }
@@ -2148,14 +2148,14 @@
         .createUser(sessionToken, data);
     }
 
-    function resetPassword(userId, email) {
-      if (!confirm('Reset password for ' + email + '?')) return;
+    function resetPassword(userId, username) {
+      if (!confirm('Reset password for ' + username + '?')) return;
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
             showToast('Password reset!', 'success');
-            alert('New temporary password for ' + email + ':\n\n' + result.tempPassword + '\n\nPlease share this securely.');
+            alert('New temporary password for ' + username + ':\n\n' + result.tempPassword + '\n\nPlease share this securely.');
           } else {
             showToast(result.message, 'error');
           }
@@ -2396,7 +2396,7 @@
               <h4 style="font-size: 1rem; margin-bottom: 1rem;">Your Information</h4>
               <div style="display: grid; gap: 0.5rem;">
                 <div><strong>Name:</strong> ${currentUser.fullName}</div>
-                <div><strong>Email:</strong> ${currentUser.email}</div>
+                <div><strong>Username:</strong> ${currentUser.username}</div>
                 <div><strong>Role:</strong> <span class="badge badge-info">${currentUser.role}</span></div>
                 <div><strong>Site:</strong> ${currentUser.site}</div>
               </div>
