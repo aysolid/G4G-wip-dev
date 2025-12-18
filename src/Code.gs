@@ -1313,8 +1313,23 @@ function generateEnrollmentTemplate(token) {
   // Auto-size
   templateSheet.autoResizeColumns(1, 2);
 
-  // Export as Excel and clean up the temp file
-  const blob = tempSs.getBlob().setName('participant_enrollment_template.xlsx').copyBlob();
+  // Ensure writes complete before export
+  SpreadsheetApp.flush();
+
+  // Export as Excel using Drive export endpoint to avoid format issues
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${tempSs.getId()}/export?format=xlsx`;
+  const response = UrlFetchApp.fetch(exportUrl, {
+    method: 'get',
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(tempSs.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to generate template file' };
+  }
+
+  const blob = response.getBlob().setName('participant_enrollment_template.xlsx');
   DriveApp.getFileById(tempSs.getId()).setTrashed(true);
 
   return {
