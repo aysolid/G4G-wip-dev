@@ -2365,7 +2365,7 @@
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Role *</label>
-              <select class="form-select" id="userRole">
+              <select class="form-select" id="newUserRole">
                 <option value="">-- Select Role --</option>
                 <option value="admin">Admin</option>
                 <option value="facilitator">Facilitator</option>
@@ -2374,7 +2374,7 @@
             </div>
             <div class="form-group">
               <label class="form-label">Site *</label>
-              <select class="form-select" id="userSite">
+              <select class="form-select" id="newUserSite">
                 <option value="">-- Select Site --</option>
                 <option value="All">All Sites</option>
                 <option value="UGA">UGA</option>
@@ -2391,8 +2391,8 @@
           Create User
         </button>
       `;
-      configureRoleSiteSelect('userRole', 'userSite', 'All');
-      const defaultRole = document.getElementById('userRole');
+      configureRoleSiteSelect('newUserRole', 'newUserSite', 'All');
+      const defaultRole = document.getElementById('newUserRole');
       if (defaultRole && !defaultRole.value) {
         defaultRole.value = 'admin';
         defaultRole.dispatchEvent(new Event('change'));
@@ -2406,8 +2406,8 @@
         const fullNameEl = document.getElementById('userFullName');
         const usernameEl = document.getElementById('userUsername');
         const passwordEl = document.getElementById('userPassword');
-        const roleEl = document.getElementById('userRole');
-        const siteEl = document.getElementById('userSite');
+        const roleEl = document.getElementById('newUserRole');
+        const siteEl = document.getElementById('newUserSite');
 
         // Check if elements exist
         if (!fullNameEl || !usernameEl || !passwordEl || !roleEl || !siteEl) {
