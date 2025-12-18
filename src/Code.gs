@@ -1282,27 +1282,19 @@ function generateEnrollmentTemplate(token) {
     });
   }
 
-  const csvHeaders = ['participantId', 'fullName', 'rolloutId', 'rolloutName', 'site', 'schoolName', 'period', 'year', 'status', 'notes'];
+  const csvHeaders = ['fullName', 'rolloutName'];
   const rows = [csvHeaders];
 
   rollouts.forEach(r => {
     const label = `${r.schoolName} (${r.period} ${r.year})`;
     rows.push([
       '',
-      'Full Name',
-      r.rolloutId,
-      label,
-      r.site,
-      r.schoolName,
-      r.period,
-      r.year,
-      'active',
-      ''
+      label
     ]);
   });
 
   if (rows.length === 1) {
-    rows.push(['', 'Full Name', 'ROLL-000', 'Example Rollout', '', '', '', '', 'active', '']);
+    rows.push(['', 'Example Rollout (Period Year)']);
   }
 
   const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n');
@@ -1340,7 +1332,7 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const headers = rows[0].map(h => h.trim());
-  const required = ['fullName', 'rolloutId'];
+  const required = ['fullName', 'rolloutName'];
   const missing = required.filter(col => headers.indexOf(col) === -1);
   if (missing.length > 0) {
     return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
@@ -1367,13 +1359,15 @@ function importParticipantsCSV(token, fileData) {
     const site = rolloutData[i][rolloutHeaders.indexOf('site')];
     if (isFacilitator && site !== currentUser.site) continue;
 
-    rolloutMap[rolloutId] = {
+    const label = `${rolloutData[i][rolloutHeaders.indexOf('schoolName')]} (${rolloutData[i][rolloutHeaders.indexOf('period')]} ${rolloutData[i][rolloutHeaders.indexOf('year')]})`;
+    rolloutMap[label.toLowerCase()] = {
       rolloutId: rolloutId,
       site: site,
       schoolName: rolloutData[i][rolloutHeaders.indexOf('schoolName')],
       period: rolloutData[i][rolloutHeaders.indexOf('period')],
       year: rolloutData[i][rolloutHeaders.indexOf('year')],
-      status: rolloutData[i][rolloutHeaders.indexOf('status')]
+      status: rolloutData[i][rolloutHeaders.indexOf('status')],
+      label: label
     };
   }
 
@@ -1405,14 +1399,10 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const participantId = idx('participantId') !== -1 ? (row[idx('participantId')] || '').trim() : '';
     const fullName = (row[idx('fullName')] || '').trim();
-    const rolloutId = (row[idx('rolloutId')] || '').trim();
-    const notes = idx('notes') !== -1 ? (row[idx('notes')] || '').trim() : '';
-    const statusRaw = idx('status') !== -1 ? (row[idx('status')] || '').trim() : '';
-    const status = (statusRaw || 'active').toLowerCase();
+    const rolloutName = (row[idx('rolloutName')] || '').trim();
 
-    if (!fullName && !rolloutId && !participantId) {
+    if (!fullName && !rolloutName) {
       summary.skipped++;
       continue;
     }
@@ -1424,99 +1414,62 @@ function importParticipantsCSV(token, fileData) {
       summary.skipped++;
       continue;
     }
-    if (!rolloutId) {
-      summary.errors.push({ row: rowNumber, message: 'rolloutId is required' });
+    if (!rolloutName) {
+      summary.errors.push({ row: rowNumber, message: 'rolloutName is required' });
       summary.skipped++;
       continue;
     }
-    const rollout = rolloutMap[rolloutId];
+    const rollout = rolloutMap[rolloutName.toLowerCase()];
     if (!rollout) {
-      summary.errors.push({ row: rowNumber, message: 'Rollout not found or not accessible: ' + rolloutId });
+      summary.errors.push({ row: rowNumber, message: 'Rollout not found or not accessible: ' + rolloutName });
       summary.skipped++;
       continue;
     }
 
-    if (CONFIG.PARTICIPANT_STATUSES.indexOf(status) === -1) {
-      summary.errors.push({ row: rowNumber, message: 'Invalid status. Allowed: ' + CONFIG.PARTICIPANT_STATUSES.join(', ') });
+    // Create new participant (participantId auto-generated)
+    if (isFacilitator && rollout.site !== currentUser.site) {
+      summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + rollout.site });
       summary.skipped++;
       continue;
     }
 
-    if (participantId && participantMap[participantId]) {
-      // Update existing participant
-      const existing = participantMap[participantId];
-      const currentSite = existing.data[pHeaders.indexOf('site')];
-      if (isFacilitator && currentSite !== currentUser.site) {
-        summary.errors.push({ row: rowNumber, message: 'Unauthorized to modify participant outside your site' });
-        summary.skipped++;
-        continue;
-      }
+    const newParticipantId = generateParticipantId(rollout.site);
+    const timestamp = new Date().toISOString();
 
-      const updatedRow = existing.data.slice();
-      updatedRow[pHeaders.indexOf('fullName')] = fullName;
-      updatedRow[pHeaders.indexOf('rolloutId')] = rollout.rolloutId;
-      updatedRow[pHeaders.indexOf('site')] = rollout.site;
-      updatedRow[pHeaders.indexOf('schoolName')] = rollout.schoolName;
-      updatedRow[pHeaders.indexOf('period')] = rollout.period;
-      updatedRow[pHeaders.indexOf('year')] = rollout.year;
-      updatedRow[pHeaders.indexOf('status')] = status;
-      updatedRow[pHeaders.indexOf('notes')] = notes;
+    participantsSheet.appendRow([
+      newParticipantId,
+      fullName,
+      rollout.site,
+      rollout.rolloutId,
+      rollout.schoolName,
+      rollout.period,
+      rollout.year,
+      timestamp,
+      currentUser.userId,
+      'active',
+      '',
+      0
+    ]);
 
-      participantsSheet.getRange(existing.rowIndex, 1, 1, pHeaders.length).setValues([updatedRow]);
-      summary.updated++;
-
-      logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT_BULK', 'participant', participantId,
-        'Updated via CSV: ' + fullName);
-    } else if (participantId && !participantMap[participantId]) {
-      summary.errors.push({ row: rowNumber, message: 'Participant ID not found: ' + participantId });
-      summary.skipped++;
-      continue;
-    } else {
-      // Create new participant
-      if (isFacilitator && rollout.site !== currentUser.site) {
-        summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + rollout.site });
-        summary.skipped++;
-        continue;
-      }
-
-      const newParticipantId = generateParticipantId(rollout.site);
-      const timestamp = new Date().toISOString();
-
-      participantsSheet.appendRow([
+    CONFIG.INSTRUMENTS.forEach(instrument => {
+      const checklistId = generateUUID();
+      checklistSheet.appendRow([
+        checklistId,
         newParticipantId,
-        fullName,
-        rollout.site,
-        rollout.rolloutId,
-        rollout.schoolName,
-        rollout.period,
-        rollout.year,
-        timestamp,
-        currentUser.userId,
-        status,
-        notes,
-        0
+        instrument.number,
+        instrument.name,
+        instrument.category,
+        'not_started',
+        '',
+        '',
+        ''
       ]);
+    });
 
-      CONFIG.INSTRUMENTS.forEach(instrument => {
-        const checklistId = generateUUID();
-        checklistSheet.appendRow([
-          checklistId,
-          newParticipantId,
-          instrument.number,
-          instrument.name,
-          instrument.category,
-          'not_started',
-          '',
-          '',
-          ''
-        ]);
-      });
+    logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
+      'Bulk enrolled: ' + fullName + ' into ' + rollout.schoolName);
 
-      logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
-        'Bulk enrolled: ' + fullName + ' into ' + rollout.schoolName);
-
-      summary.created++;
-    }
+    summary.created++;
   }
 
   return {

@@ -1489,13 +1489,13 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>rolloutId</strong>. Optional: <strong>participantId</strong> (to update), <strong>status</strong>, <strong>notes</strong>.
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>rolloutName</strong>. Rollout names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">Upload CSV</label>
           <input type="file" class="form-input" id="batchEnrollmentFile" accept=".csv" onchange="handleBatchEnrollmentFile(this)">
-          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Rollout IDs must match the template. Leave participantId blank to create new participants.</div>
+          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Rollout names must match the template dropdown exactly. Participant IDs are generated automatically.</div>
         </div>
         <div id="batchEnrollmentStatus" class="alert alert-neutral" style="display: flex; align-items: center; gap: 8px;">
           <span class="material-icons" style="font-size: 18px;">upload_file</span>
