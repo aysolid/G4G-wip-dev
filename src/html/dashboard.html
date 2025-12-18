@@ -1118,9 +1118,28 @@
         if (el) el.classList.add('hidden');
       });
 
-      // Update active nav
+      // Update active nav - find the nav item that matches this section
       document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
-      event.target.closest('.nav-item').classList.add('active');
+
+      // Map sections to nav item selectors
+      const navMap = {
+        'dashboard': 'dashboard',
+        'participants': 'participants',
+        'enroll': 'enroll',
+        'rollouts': 'rollouts',
+        'users': 'users',
+        'reports': 'reports',
+        'exports': 'exports',
+        'settings': 'settings'
+      };
+
+      // Find and activate the corresponding nav item
+      document.querySelectorAll('.nav-item').forEach(item => {
+        const onclickAttr = item.getAttribute('onclick');
+        if (onclickAttr && onclickAttr.includes("showSection('" + section + "')")) {
+          item.classList.add('active');
+        }
+      });
 
       // Show selected section
       const sectionEl = document.getElementById(section + 'Section');
@@ -1670,6 +1689,92 @@
       }
     }
 
+    function editParticipant(participantId) {
+      // First fetch the participant details
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showEditParticipantModal(result.participant);
+          } else {
+            showToast('Could not load participant details', 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .getParticipantById(sessionToken, participantId);
+    }
+
+    function showEditParticipantModal(participant) {
+      document.getElementById('modalTitle').textContent = 'Edit Participant';
+      document.getElementById('modalBody').innerHTML = `
+        <div id="editParticipantForm">
+          <div class="form-group">
+            <label class="form-label">Participant ID</label>
+            <input type="text" class="form-input" value="${participant.participantId}" disabled>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Full Name *</label>
+            <input type="text" class="form-input" id="editParticipantName" value="${participant.fullName}" placeholder="Enter full name">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Site</label>
+              <input type="text" class="form-input" value="${participant.site}" disabled>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cohort</label>
+              <input type="text" class="form-input" value="${participant.period} ${participant.year}" disabled>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="editParticipantStatus">
+              <option value="active" ${participant.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="completed" ${participant.status === 'completed' ? 'selected' : ''}>Completed</option>
+              <option value="withdrawn" ${participant.status === 'withdrawn' ? 'selected' : ''}>Withdrawn</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <textarea class="form-textarea" id="editParticipantNotes" rows="3" placeholder="Any notes about this participant...">${participant.notes || ''}</textarea>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" type="button" onclick="saveParticipantEdit('${participant.participantId}')">
+          <span class="material-icons">save</span>
+          Save Changes
+        </button>
+      `;
+      openModal();
+    }
+
+    function saveParticipantEdit(participantId) {
+      const data = {
+        fullName: document.getElementById('editParticipantName').value.trim(),
+        status: document.getElementById('editParticipantStatus').value,
+        notes: document.getElementById('editParticipantNotes').value.trim()
+      };
+
+      if (!data.fullName) {
+        showToast('Please enter a name', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Participant updated successfully', 'success');
+            closeModal();
+            viewParticipant(participantId);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .updateParticipant(sessionToken, participantId, data);
+    }
+
     // ============================================
     // ENROLLMENT
     // ============================================
@@ -1972,6 +2077,103 @@
         .createRollout(sessionToken, data);
     }
 
+    function editRollout(rolloutId) {
+      // First fetch the rollout details
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.rollouts.length > 0) {
+            const rollout = result.rollouts.find(r => r.rolloutId === rolloutId);
+            if (rollout) {
+              showEditRolloutModal(rollout);
+            } else {
+              showToast('Rollout not found', 'error');
+            }
+          } else {
+            showToast('Could not load rollout details', 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .getAllRollouts(sessionToken, 'All');
+    }
+
+    function showEditRolloutModal(rollout) {
+      document.getElementById('modalTitle').textContent = 'Edit Study Rollout';
+      document.getElementById('modalBody').innerHTML = `
+        <div id="editRolloutForm">
+          <div class="form-group">
+            <label class="form-label">Site</label>
+            <input type="text" class="form-input" value="${rollout.site}" disabled>
+          </div>
+          <div class="form-group">
+            <label class="form-label">School/Location Name *</label>
+            <input type="text" class="form-input" id="editRolloutSchool" value="${rollout.schoolName}" placeholder="e.g., Double Helix School">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Period *</label>
+              <select class="form-select" id="editRolloutPeriod">
+                <option value="Spring" ${rollout.period === 'Spring' ? 'selected' : ''}>Spring</option>
+                <option value="Summer" ${rollout.period === 'Summer' ? 'selected' : ''}>Summer</option>
+                <option value="Fall" ${rollout.period === 'Fall' ? 'selected' : ''}>Fall</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Year *</label>
+              <input type="number" class="form-input" id="editRolloutYear" value="${rollout.year}" min="2024" max="2030">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="editRolloutStatus">
+              <option value="active" ${rollout.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="completed" ${rollout.status === 'completed' ? 'selected' : ''}>Completed</option>
+              <option value="inactive" ${rollout.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${rollout.description || ''}</textarea>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" type="button" onclick="updateRollout('${rollout.rolloutId}')">
+          <span class="material-icons">save</span>
+          Save Changes
+        </button>
+      `;
+      openModal();
+    }
+
+    function updateRollout(rolloutId) {
+      const data = {
+        schoolName: document.getElementById('editRolloutSchool').value.trim(),
+        period: document.getElementById('editRolloutPeriod').value,
+        year: document.getElementById('editRolloutYear').value,
+        status: document.getElementById('editRolloutStatus').value,
+        description: document.getElementById('editRolloutDescription').value.trim()
+      };
+
+      if (!data.schoolName || !data.period || !data.year) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Rollout updated successfully', 'success');
+            closeModal();
+            loadRollouts();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .updateRollout(sessionToken, rolloutId, data);
+    }
+
     // ============================================
     // USERS (Admin Only)
     // ============================================
@@ -2075,19 +2277,19 @@
     function showAddUserModal() {
       document.getElementById('modalTitle').textContent = 'Add New User';
       document.getElementById('modalBody').innerHTML = `
-        <form id="userForm">
+        <div id="userForm">
           <div class="form-group">
             <label class="form-label">Full Name *</label>
-            <input type="text" class="form-input" id="userFullName" required placeholder="Enter full name">
+            <input type="text" class="form-input" id="userFullName" placeholder="Enter full name">
           </div>
           <div class="form-group">
             <label class="form-label">Username *</label>
-            <input type="text" class="form-input" id="userUsername" required placeholder="Enter username">
+            <input type="text" class="form-input" id="userUsername" placeholder="Enter username">
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Role *</label>
-              <select class="form-select" id="userRole" required>
+              <select class="form-select" id="userRole">
                 <option value="">Select role...</option>
                 <option value="admin">Admin</option>
                 <option value="facilitator">Facilitator</option>
@@ -2096,7 +2298,7 @@
             </div>
             <div class="form-group">
               <label class="form-label">Site *</label>
-              <select class="form-select" id="userSite" required>
+              <select class="form-select" id="userSite">
                 <option value="">Select site...</option>
                 <option value="All">All Sites</option>
                 <option value="UGA">UGA</option>
@@ -2108,11 +2310,11 @@
             <span class="material-icons" style="font-size: 16px; vertical-align: middle;">info</span>
             A temporary password will be generated and displayed after creation.
           </p>
-        </form>
+        </div>
       `;
       document.getElementById('modalFooter').innerHTML = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveUser()">
+        <button class="btn btn-primary" type="button" onclick="saveUser()">
           <span class="material-icons">person_add</span>
           Create User
         </button>
@@ -2121,16 +2323,37 @@
     }
 
     function saveUser() {
+      // Get form elements
+      const fullNameEl = document.getElementById('userFullName');
+      const usernameEl = document.getElementById('userUsername');
+      const roleEl = document.getElementById('userRole');
+      const siteEl = document.getElementById('userSite');
+
+      // Get values
       const data = {
-        fullName: document.getElementById('userFullName').value.trim(),
-        username: document.getElementById('userUsername').value.trim(),
-        role: document.getElementById('userRole').value,
-        site: document.getElementById('userSite').value
+        fullName: fullNameEl ? fullNameEl.value.trim() : '',
+        username: usernameEl ? usernameEl.value.trim() : '',
+        role: roleEl ? roleEl.value : '',
+        site: siteEl ? siteEl.value : ''
       };
 
-      if (!data.fullName || !data.username || !data.role || !data.site) {
-        showToast('Please fill in all required fields', 'error');
+      // Validate each field and show specific error
+      const errors = [];
+      if (!data.fullName) errors.push('Full Name');
+      if (!data.username) errors.push('Username');
+      if (!data.role) errors.push('Role');
+      if (!data.site) errors.push('Site');
+
+      if (errors.length > 0) {
+        showToast('Please fill in: ' + errors.join(', '), 'error');
         return;
+      }
+
+      // Disable button while saving
+      const saveBtn = document.querySelector('#modalFooter .btn-primary');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px;"></div> Creating...';
       }
 
       google.script.run
@@ -2142,10 +2365,96 @@
             loadUsers();
           } else {
             showToast(result.message, 'error');
+            if (saveBtn) {
+              saveBtn.disabled = false;
+              saveBtn.innerHTML = '<span class="material-icons">person_add</span> Create User';
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          handleError(error);
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<span class="material-icons">person_add</span> Create User';
+          }
+        })
+        .createUser(sessionToken, data);
+    }
+
+    function editUser(userId, fullName, username, role, site, status) {
+      document.getElementById('modalTitle').textContent = 'Edit User';
+      document.getElementById('modalBody').innerHTML = `
+        <div id="editUserForm">
+          <div class="form-group">
+            <label class="form-label">Full Name *</label>
+            <input type="text" class="form-input" id="editUserFullName" value="${fullName}" placeholder="Enter full name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" class="form-input" id="editUserUsername" value="${username}" disabled>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Role *</label>
+              <select class="form-select" id="editUserRole">
+                <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option>
+                <option value="facilitator" ${role === 'facilitator' ? 'selected' : ''}>Facilitator</option>
+                <option value="viewer" ${role === 'viewer' ? 'selected' : ''}>Viewer</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Site *</label>
+              <select class="form-select" id="editUserSite">
+                <option value="All" ${site === 'All' ? 'selected' : ''}>All Sites</option>
+                <option value="UGA" ${site === 'UGA' ? 'selected' : ''}>UGA</option>
+                <option value="Missouri" ${site === 'Missouri' ? 'selected' : ''}>Missouri</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="editUserStatus">
+              <option value="active" ${status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="inactive" ${status === 'inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" type="button" onclick="updateUser('${userId}')">
+          <span class="material-icons">save</span>
+          Save Changes
+        </button>
+      `;
+      openModal();
+    }
+
+    function updateUser(userId) {
+      const data = {
+        fullName: document.getElementById('editUserFullName').value.trim(),
+        role: document.getElementById('editUserRole').value,
+        site: document.getElementById('editUserSite').value,
+        status: document.getElementById('editUserStatus').value
+      };
+
+      if (!data.fullName || !data.role || !data.site) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            closeModal();
+            showToast('User updated successfully', 'success');
+            loadUsers();
+          } else {
+            showToast(result.message, 'error');
           }
         })
         .withFailureHandler(handleError)
-        .createUser(sessionToken, data);
+        .updateUser(sessionToken, userId, data);
     }
 
     function resetPassword(userId, username) {
@@ -2469,10 +2778,18 @@
     }
 
     function handleLogout() {
+      // Clear local storage first
+      localStorage.removeItem('g4g_token');
+      localStorage.removeItem('g4g_user');
+
+      // Invalidate server session
       google.script.run
         .withSuccessHandler(function() {
-          localStorage.removeItem('g4g_token');
-          localStorage.removeItem('g4g_user');
+          // Redirect to landing page (index)
+          window.location.href = WEB_APP_URL;
+        })
+        .withFailureHandler(function() {
+          // Even if server logout fails, still redirect to landing page
           window.location.href = WEB_APP_URL;
         })
         .logoutUser(sessionToken);

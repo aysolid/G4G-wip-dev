@@ -435,14 +435,14 @@ function changePassword(token, currentPassword, newPassword) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === user.userId) {
-      const currentHash = data[i][headers.indexOf('passwordHash')];
+      const storedPassword = data[i][headers.indexOf('passwordHash')];
 
-      if (!verifyPassword(currentPassword, currentHash)) {
+      if (!verifyPassword(currentPassword, storedPassword)) {
         return { success: false, message: 'Current password is incorrect' };
       }
 
-      const newHash = hashPassword(newPassword);
-      usersSheet.getRange(i + 1, headers.indexOf('passwordHash') + 1).setValue(newHash);
+      // Store plain text password since the Google Sheet is highly protected
+      usersSheet.getRange(i + 1, headers.indexOf('passwordHash') + 1).setValue(newPassword);
 
       logActivity(user.userId, user.fullName, 'PASSWORD_CHANGE', 'user', user.userId, 'Password changed');
 
@@ -545,13 +545,13 @@ function createUser(token, userData) {
 
   const userId = generateUUID();
   const tempPassword = generateRandomPassword();
-  const passwordHash = hashPassword(tempPassword);
+  // Store plain text password since the Google Sheet is highly protected
   const timestamp = new Date().toISOString();
 
   usersSheet.appendRow([
     userId,
     userData.username,
-    passwordHash,
+    tempPassword,  // Plain text password
     userData.fullName,
     userData.role,
     userData.site,
@@ -628,9 +628,8 @@ function resetUserPassword(token, userId) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === userId) {
       const newPassword = generateRandomPassword();
-      const passwordHash = hashPassword(newPassword);
-
-      usersSheet.getRange(i + 1, headers.indexOf('passwordHash') + 1).setValue(passwordHash);
+      // Store plain text password since the Google Sheet is highly protected
+      usersSheet.getRange(i + 1, headers.indexOf('passwordHash') + 1).setValue(newPassword);
 
       logActivity(currentUser.userId, currentUser.fullName, 'RESET_PASSWORD', 'user', userId,
         'Reset password for: ' + data[i][headers.indexOf('username')]);
@@ -1590,10 +1589,12 @@ function hashPassword(password) {
 }
 
 /**
- * Verify a password against a hash
+ * Verify a password against stored password
+ * Using plain text comparison since the Google Sheet is highly protected
  */
-function verifyPassword(password, hash) {
-  return hashPassword(password) === hash;
+function verifyPassword(password, storedPassword) {
+  // Plain text comparison - storedPassword is stored as-is in the sheet
+  return password === storedPassword;
 }
 
 /**
