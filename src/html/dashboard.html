@@ -398,6 +398,12 @@
       color: var(--gray-500);
     }
 
+    .stat-subtext {
+      font-size: 0.85rem;
+      color: var(--gray-500);
+      margin-top: 4px;
+    }
+
     /* Buttons */
     .btn {
       display: inline-flex;
@@ -2592,15 +2598,51 @@
     function loadReports() {
       const section = document.getElementById('reportsSection');
       section.innerHTML = `
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+        <div id="analyticsOverview">
+          <div class="loading">
+            <div class="spinner"></div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-top: 1.25rem;">
           <div class="card">
             <div class="card-header">
               <h3 class="card-title">
-                <span class="material-icons">compare_arrows</span>
-                Site Comparison
+                <span class="material-icons">auto_graph</span>
+                Rollout Performance
               </h3>
             </div>
-            <div class="card-body" id="siteComparisonReport">
+            <div class="card-body" id="rolloutPerformance">
+              <div class="loading">
+                <div class="spinner"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">speed</span>
+                Status & Completion
+              </h3>
+            </div>
+            <div class="card-body" id="statusBreakdown">
+              <div class="loading">
+                <div class="spinner"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; margin-top: 1.25rem;">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">
+                <span class="material-icons">checklist</span>
+                Instrument Progress
+              </h3>
+            </div>
+            <div class="card-body" id="instrumentProgress">
               <div class="loading">
                 <div class="spinner"></div>
               </div>
@@ -2623,51 +2665,201 @@
         </div>
       `;
 
-      // Load site comparison
       google.script.run
-        .withSuccessHandler(renderSiteComparison)
+        .withSuccessHandler(renderAnalyticsOverview)
         .withFailureHandler(handleError)
-        .getSiteComparison(sessionToken);
+        .getAnalyticsOverview(sessionToken, currentSiteFilter, currentRolloutFilter);
 
-      // Load recent activity
       google.script.run
         .withSuccessHandler(renderActivityLog)
         .withFailureHandler(handleError)
         .getRecentActivity(sessionToken, 20);
     }
 
-    function renderSiteComparison(result) {
-      if (!result.success) return;
+    function renderAnalyticsOverview(result) {
+      const overviewContainer = document.getElementById('analyticsOverview');
+      const rolloutContainer = document.getElementById('rolloutPerformance');
+      const statusContainer = document.getElementById('statusBreakdown');
+      const instrumentContainer = document.getElementById('instrumentProgress');
 
-      const uga = result.comparison.UGA;
-      const miz = result.comparison.Missouri;
-
-      document.getElementById('siteComparisonReport').innerHTML = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; text-align: center;">
-          <div style="padding: 1.5rem; background: rgba(186, 12, 47, 0.05); border-radius: var(--border-radius);">
-            <div style="font-weight: 600; color: var(--uga-color); margin-bottom: 1rem;">UGA</div>
-            <div style="font-size: 2rem; font-weight: 700;">${uga.totalParticipants}</div>
-            <div style="font-size: 0.8rem; color: var(--gray-500);">Participants</div>
-            <div style="margin-top: 1rem;">
-              <div class="progress-bar">
-                <div class="progress-fill primary" style="width: ${uga.overallCompletion}%"></div>
-              </div>
-              <div style="font-size: 0.8rem; margin-top: 4px;">${uga.overallCompletion}% Complete</div>
-            </div>
+      if (!result.success) {
+        overviewContainer.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <h3>Unable to load analytics</h3>
+            <p>${result.message || 'Please try again later.'}</p>
           </div>
-          <div style="padding: 1.5rem; background: rgba(241, 184, 45, 0.05); border-radius: var(--border-radius);">
-            <div style="font-weight: 600; color: #b8860b; margin-bottom: 1rem;">Missouri</div>
-            <div style="font-size: 2rem; font-weight: 700;">${miz.totalParticipants}</div>
-            <div style="font-size: 0.8rem; color: var(--gray-500);">Participants</div>
-            <div style="margin-top: 1rem;">
-              <div class="progress-bar">
-                <div class="progress-fill primary" style="width: ${miz.overallCompletion}%"></div>
+        `;
+        return;
+      }
+
+      const overview = result.overview;
+      const rollouts = result.rollouts || [];
+      const instrumentStats = result.instrumentStats || [];
+      const totalParticipants = overview.totalParticipants || 0;
+
+      overviewContainer.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-card-header">
+              <div>
+                <div class="stat-label">Total Participants</div>
+                <div class="stat-value">${overview.totalParticipants}</div>
               </div>
-              <div style="font-size: 0.8rem; margin-top: 4px;">${miz.overallCompletion}% Complete</div>
+              <div class="stat-card-icon"><span class="material-icons">groups</span></div>
             </div>
+            <div class="stat-subtext">${overview.completedParticipants} completed • ${overview.activeParticipants} active</div>
+          </div>
+
+          <div class="stat-card info">
+            <div class="stat-card-header">
+              <div>
+                <div class="stat-label">Rollouts</div>
+                <div class="stat-value">${overview.rolloutCount}</div>
+              </div>
+              <div class="stat-card-icon"><span class="material-icons">flag</span></div>
+            </div>
+            <div class="stat-subtext">${overview.activeRollouts} active cohorts across ${overview.siteFilter === 'All' ? 'all sites' : overview.siteFilter}</div>
+          </div>
+
+          <div class="stat-card success">
+            <div class="stat-card-header">
+              <div>
+                <div class="stat-label">Average Completion</div>
+                <div class="stat-value">${overview.averageCompletion}%</div>
+              </div>
+              <div class="stat-card-icon"><span class="material-icons">task_alt</span></div>
+            </div>
+            <div class="stat-subtext">Completion across filtered participants</div>
+          </div>
+
+          <div class="stat-card warning">
+            <div class="stat-card-header">
+              <div>
+                <div class="stat-label">Instruments Completed</div>
+                <div class="stat-value">${overview.instrumentsCompleted}</div>
+              </div>
+              <div class="stat-card-icon"><span class="material-icons">fact_check</span></div>
+            </div>
+            <div class="stat-subtext">${overview.instrumentsTotal || 0} total checklist items assigned</div>
           </div>
         </div>
       `;
+
+      if (rollouts.length === 0) {
+        rolloutContainer.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">insights</span>
+            <h3>No rollouts to display</h3>
+            <p>Adjust your filters or add participants to a rollout.</p>
+          </div>
+        `;
+      } else {
+        const tableHtml = `
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Rollout</th>
+                  <th>Site</th>
+                  <th>Status</th>
+                  <th>Participants</th>
+                  <th>Active</th>
+                  <th>Completed</th>
+                  <th>Withdrawn</th>
+                  <th>Avg Completion</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rollouts.map(r => `
+                  <tr>
+                    <td>
+                      <div style="font-weight: 600;">${r.schoolName || 'No rollout assigned'}</div>
+                      <div class="stat-subtext">${[r.period, r.year].filter(Boolean).join(' ')}</div>
+                    </td>
+                    <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : r.site === 'Missouri' ? 'badge-warning' : 'badge-neutral'}">${r.site || 'All'}</span></td>
+                    <td><span class="badge ${r.status === 'completed' ? 'badge-info' : r.status === 'withdrawn' ? 'badge-warning' : r.status === 'unassigned' ? 'badge-neutral' : 'badge-success'}">${(r.status || 'active')}</span></td>
+                    <td>${r.participantCount}</td>
+                    <td>${r.activeParticipants}</td>
+                    <td>${r.completedParticipants}</td>
+                    <td>${r.withdrawnParticipants}</td>
+                    <td>
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="progress-bar" style="width: 100px;">
+                          <div class="progress-fill ${r.averageCompletion >= 80 ? 'success' : r.averageCompletion >= 50 ? 'warning' : 'primary'}" style="width: ${r.averageCompletion}%"></div>
+                        </div>
+                        <span style="font-size: 0.85rem; font-weight: 600;">${r.averageCompletion}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+        rolloutContainer.innerHTML = tableHtml;
+      }
+
+      if (totalParticipants === 0) {
+        statusContainer.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">insights</span>
+            <h3>No participant data</h3>
+            <p>Enroll participants to see status and completion analytics.</p>
+          </div>
+        `;
+      } else {
+        const totalCount = totalParticipants || 1;
+        statusContainer.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            ${[['Active', overview.activeParticipants, 'success'], ['Completed', overview.completedParticipants, 'primary'], ['Withdrawn', overview.withdrawnParticipants, 'warning']].map(item => {
+              const percent = Math.round((item[1] / totalCount) * 100);
+              return `
+                <div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <div class="stat-label">${item[0]}</div>
+                    <div style="font-weight: 600;">${item[1]} (${percent}%)</div>
+                  </div>
+                  <div class="progress-bar">
+                    <div class="progress-fill ${item[2]}" style="width: ${percent}%;"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            <div style="border-top: 1px solid var(--gray-200); padding-top: 0.75rem; margin-top: 0.75rem;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <div class="stat-label">Overall Completion</div>
+                <div style="font-weight: 600;">${overview.averageCompletion}%</div>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill primary" style="width: ${overview.averageCompletion}%"></div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      if (!instrumentStats || instrumentStats.length === 0) {
+        instrumentContainer.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">assignment</span>
+            <h3>No checklist data</h3>
+            <p>Add participants to see instrument progress.</p>
+          </div>
+        `;
+      } else {
+        instrumentContainer.innerHTML = instrumentStats.map(inst => `
+          <div style="margin-bottom: 0.85rem;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <div style="font-weight: 600;">${inst.name}</div>
+              <div class="stat-label">${inst.completed}/${inst.total} completed (${inst.percentage}%)</div>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill ${inst.percentage >= 80 ? 'success' : inst.percentage >= 50 ? 'warning' : 'primary'}" style="width: ${inst.percentage}%"></div>
+            </div>
+          </div>
+        `).join('');
+      }
     }
 
     function renderActivityLog(result) {
