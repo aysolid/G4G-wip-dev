@@ -881,7 +881,7 @@ function getAllParticipants(token, filters) {
     if (filters.site && filters.site !== 'All' && participant.site !== filters.site) {
       include = false;
     }
-    if (filters.rolloutId && participant.rolloutId !== filters.rolloutId) {
+    if (filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
       include = false;
     }
     if (filters.status && participant.status !== filters.status) {
@@ -1413,6 +1413,209 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   }
 
   return stats;
+}
+
+/**
+ * Get analytics overview across rollouts and instruments
+ */
+function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const effectiveSite = (currentUser.role === 'facilitator' && currentUser.site !== 'All')
+    ? currentUser.site
+    : (siteFilter || 'All');
+  const effectiveRollout = rolloutFilter || 'All';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet) {
+    return {
+      success: true,
+      overview: {
+        totalParticipants: 0,
+        activeParticipants: 0,
+        completedParticipants: 0,
+        withdrawnParticipants: 0,
+        averageCompletion: 0,
+        activeRollouts: 0,
+        rolloutCount: 0,
+        instrumentsCompleted: 0,
+        instrumentsTotal: 0,
+        siteFilter: effectiveSite,
+        rolloutFilter: effectiveRollout
+      },
+      rollouts: [],
+      instrumentStats: []
+    };
+  }
+
+  const rolloutEntries = {};
+  if (rolloutsSheet) {
+    const rData = rolloutsSheet.getDataRange().getValues();
+    const rHeaders = rData[0];
+
+    for (let i = 1; i < rData.length; i++) {
+      const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
+      const rolloutSite = rData[i][rHeaders.indexOf('site')];
+
+      if (effectiveSite !== 'All' && rolloutSite !== effectiveSite) continue;
+      if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
+
+      rolloutEntries[rolloutId] = {
+        rolloutId: rolloutId,
+        site: rolloutSite,
+        schoolName: rData[i][rHeaders.indexOf('schoolName')],
+        period: rData[i][rHeaders.indexOf('period')],
+        year: rData[i][rHeaders.indexOf('year')],
+        status: rData[i][rHeaders.indexOf('status')],
+        participantCount: 0,
+        activeParticipants: 0,
+        completedParticipants: 0,
+        withdrawnParticipants: 0,
+        completionSum: 0,
+        averageCompletion: 0
+      };
+    }
+  }
+
+  const overview = {
+    totalParticipants: 0,
+    activeParticipants: 0,
+    completedParticipants: 0,
+    withdrawnParticipants: 0,
+    averageCompletion: 0,
+    activeRollouts: 0,
+    rolloutCount: Object.keys(rolloutEntries).length,
+    instrumentsCompleted: 0,
+    instrumentsTotal: 0,
+    siteFilter: effectiveSite,
+    rolloutFilter: effectiveRollout
+  };
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const includedParticipantIds = [];
+  let completionSum = 0;
+
+  for (let i = 1; i < pData.length; i++) {
+    const site = pData[i][pHeaders.indexOf('site')];
+    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
+    const status = pData[i][pHeaders.indexOf('status')];
+    const completion = Number(pData[i][pHeaders.indexOf('completionPercentage')]) || 0;
+    const participantId = pData[i][pHeaders.indexOf('participantId')];
+
+    if (effectiveSite !== 'All' && site !== effectiveSite) continue;
+    if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
+
+    includedParticipantIds.push(participantId);
+    overview.totalParticipants++;
+    overview.activeParticipants += status === 'active' ? 1 : 0;
+    overview.completedParticipants += status === 'completed' ? 1 : 0;
+    overview.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
+    completionSum += completion;
+
+    const key = rolloutId || 'Unassigned';
+    if (!rolloutEntries[key]) {
+      rolloutEntries[key] = {
+        rolloutId: rolloutId || 'Unassigned',
+        site: site,
+        schoolName: rolloutId ? pData[i][pHeaders.indexOf('schoolName')] : 'No rollout assigned',
+        period: pData[i][pHeaders.indexOf('period')],
+        year: pData[i][pHeaders.indexOf('year')],
+        status: rolloutId ? 'active' : 'unassigned',
+        participantCount: 0,
+        activeParticipants: 0,
+        completedParticipants: 0,
+        withdrawnParticipants: 0,
+        completionSum: 0,
+        averageCompletion: 0
+      };
+    }
+
+    const rolloutStats = rolloutEntries[key];
+    rolloutStats.participantCount++;
+    rolloutStats.activeParticipants += status === 'active' ? 1 : 0;
+    rolloutStats.completedParticipants += status === 'completed' ? 1 : 0;
+    rolloutStats.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
+    rolloutStats.completionSum += completion;
+  }
+
+  overview.averageCompletion = overview.totalParticipants > 0
+    ? Math.round(completionSum / overview.totalParticipants)
+    : 0;
+
+  Object.keys(rolloutEntries).forEach(key => {
+    const entry = rolloutEntries[key];
+    if (entry.participantCount > 0) {
+      entry.averageCompletion = Math.round(entry.completionSum / entry.participantCount);
+    }
+    if (entry.status === 'active') {
+      overview.activeRollouts++;
+    }
+  });
+
+  // Instrument progress for included participants
+  let instrumentStats = [];
+  if (checklistSheet && includedParticipantIds.length > 0) {
+    const cData = checklistSheet.getDataRange().getValues();
+    const cHeaders = cData[0];
+    const counts = {};
+
+    CONFIG.INSTRUMENTS.forEach(inst => {
+      counts[inst.number] = { total: 0, completed: 0, name: inst.name, category: inst.category };
+    });
+
+    for (let i = 1; i < cData.length; i++) {
+      const participantId = cData[i][cHeaders.indexOf('participantId')];
+      if (!includedParticipantIds.includes(participantId)) continue;
+
+      const instrumentNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
+      const status = cData[i][cHeaders.indexOf('status')];
+
+      if (counts[instrumentNumber]) {
+        counts[instrumentNumber].total++;
+        if (status === 'completed') {
+          counts[instrumentNumber].completed++;
+        }
+      }
+    }
+
+    instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
+      number: inst.number,
+      name: inst.name,
+      category: inst.category,
+      total: counts[inst.number].total,
+      completed: counts[inst.number].completed,
+      percentage: counts[inst.number].total > 0
+        ? Math.round((counts[inst.number].completed / counts[inst.number].total) * 100)
+        : 0
+    }));
+
+    overview.instrumentsCompleted = instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
+    overview.instrumentsTotal = instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
+  }
+
+  const rollouts = Object.values(rolloutEntries).sort((a, b) => {
+    if (a.site === b.site) {
+      return (b.year || '').toString().localeCompare((a.year || '').toString());
+    }
+    return a.site.localeCompare(b.site);
+  });
+
+  overview.rolloutCount = rollouts.length;
+
+  return {
+    success: true,
+    overview: overview,
+    rollouts: rollouts,
+    instrumentStats: instrumentStats
+  };
 }
 
 /**
