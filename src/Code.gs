@@ -1282,27 +1282,46 @@ function generateEnrollmentTemplate(token) {
     });
   }
 
-  const csvHeaders = ['fullName', 'rolloutName'];
-  const rows = [csvHeaders];
+  // Build dropdown-enabled template as an Excel file
+  const tempSs = SpreadsheetApp.create('Participant Enrollment Template');
+  const templateSheet = tempSs.getSheets()[0];
+  templateSheet.setName('Template');
 
-  rollouts.forEach(r => {
-    const label = `${r.schoolName} (${r.period} ${r.year})`;
-    rows.push([
-      '',
-      label
-    ]);
-  });
+  // Headers
+  templateSheet.getRange('A1').setValue('fullName');
+  templateSheet.getRange('B1').setValue('rolloutName');
+  templateSheet.getRange('A1:B1')
+    .setFontWeight('bold')
+    .setBackground('#f1f5f9');
 
-  if (rows.length === 1) {
-    rows.push(['', 'Example Rollout (Period Year)']);
-  }
+  // Helper sheet with rollout list
+  const helperSheet = tempSs.insertSheet('Rollouts');
+  helperSheet.getRange(1, 1, rollouts.length, 1).setValues(
+    rollouts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+  );
+  helperSheet.hideSheet();
 
-  const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n');
+  // Data validation for rollout dropdown (apply to reasonable range)
+  const lastRow = Math.max(2, rollouts.length + 5);
+  const validationRange = helperSheet.getRange(1, 1, rollouts.length, 1);
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(validationRange, true)
+    .setAllowInvalid(false)
+    .build();
+  templateSheet.getRange(2, 2, lastRow, 1).setDataValidation(rule);
+
+  // Auto-size
+  templateSheet.autoResizeColumns(1, 2);
+
+  // Export as Excel and clean up the temp file
+  const blob = tempSs.getBlob().setName('participant_enrollment_template.xlsx').copyBlob();
+  DriveApp.getFileById(tempSs.getId()).setTrashed(true);
 
   return {
     success: true,
-    csv: csv,
-    filename: 'participant_enrollment_template.csv',
+    file: Utilities.base64Encode(blob.getBytes()),
+    mimeType: blob.getContentType(),
+    filename: blob.getName(),
     rolloutCount: rollouts.length
   };
 }

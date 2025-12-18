@@ -1470,7 +1470,7 @@
       }
 
       google.script.run
-        .withSuccessHandler(downloadCSV)
+        .withSuccessHandler(downloadFileFromResult)
         .withFailureHandler(handleError)
         .generateEnrollmentTemplate(sessionToken);
     }
@@ -3621,6 +3621,39 @@
       } else {
         showToast(result.message, 'error');
       }
+    }
+
+    function downloadFileFromResult(result) {
+      if (!result || !result.success) {
+        showToast(result && result.message ? result.message : 'Download failed', 'error');
+        return;
+      }
+
+      // Handle binary file (base64) or CSV fallback
+      if (result.file && result.mimeType) {
+        const byteCharacters = atob(result.file);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: result.mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = result.filename || 'download';
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Template downloaded', 'success');
+        return;
+      }
+
+      if (result.csv) {
+        downloadCSV(result);
+        return;
+      }
+
+      showToast('Nothing to download', 'error');
     }
 
     // ============================================
