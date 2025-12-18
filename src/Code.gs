@@ -672,6 +672,76 @@ function resetUserPassword(token, userId) {
   return { success: false, message: 'User not found' };
 }
 
+/**
+ * Delete a user account (Admin only)
+ */
+function deleteUser(token, userId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (currentUser.userId === userId) {
+    return { success: false, message: 'You cannot delete your own account' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const usersSheet = ss.getSheetByName('Users');
+  const sessionsSheet = ss.getSheetByName('Sessions');
+
+  if (!usersSheet) {
+    return { success: false, message: 'Users sheet not found' };
+  }
+
+  const data = usersSheet.getDataRange().getValues();
+  const headers = data[0];
+  const userIdCol = headers.indexOf('userId');
+  const usernameCol = headers.indexOf('username');
+  const roleCol = headers.indexOf('role');
+
+  // Ensure at least one admin remains
+  let adminCount = 0;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][roleCol] === 'admin') {
+      adminCount++;
+    }
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][userIdCol] === userId) {
+      const username = data[i][usernameCol];
+      const role = data[i][roleCol];
+
+      if (role === 'admin' && adminCount <= 1) {
+        return { success: false, message: 'At least one admin user is required' };
+      }
+
+      usersSheet.deleteRow(i + 1);
+
+      // Deactivate all sessions for this user
+      if (sessionsSheet) {
+        const sessionData = sessionsSheet.getDataRange().getValues();
+        const sessionHeaders = sessionData[0];
+        const sUserIdCol = sessionHeaders.indexOf('userId');
+        const sIsActiveCol = sessionHeaders.indexOf('isActive');
+
+        for (let j = 1; j < sessionData.length; j++) {
+          if (sessionData[j][sUserIdCol] === userId) {
+            sessionsSheet.getRange(j + 1, sIsActiveCol + 1).setValue(false);
+          }
+        }
+      }
+
+      logActivity(currentUser.userId, currentUser.fullName, 'DELETE_USER', 'user', userId,
+        'Deleted user: ' + username);
+
+      return { success: true, message: 'User deleted successfully' };
+    }
+  }
+
+  return { success: false, message: 'User not found' };
+}
+
 // ============================================
 // STUDY ROLLOUT FUNCTIONS
 // ============================================
@@ -1070,6 +1140,16 @@ function updateParticipant(token, participantId, participantData) {
     return { success: false, message: 'Unauthorized' };
   }
 
+  const canChangeStatus = currentUser.role === 'admin';
+
+  if (participantData.status && !canChangeStatus) {
+    return { success: false, message: 'Only administrators can change participant status' };
+  }
+
+  if (participantData.status && CONFIG.PARTICIPANT_STATUSES.indexOf(participantData.status) === -1) {
+    return { success: false, message: 'Invalid status selected' };
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const data = participantsSheet.getDataRange().getValues();
@@ -1100,6 +1180,63 @@ function updateParticipant(token, participantId, participantData) {
   }
 
   return { success: false, message: 'Participant not found' };
+}
+
+/**
+ * Delete a participant and their checklist entries (Admin only)
+ */
+function deleteParticipant(token, participantId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet) {
+    return { success: false, message: 'Participants sheet not found' };
+  }
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const participantIdCol = pHeaders.indexOf('participantId');
+  let participantName = '';
+  let participantSite = '';
+  let rowIndex = -1;
+
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][participantIdCol] === participantId) {
+      participantName = pData[i][pHeaders.indexOf('fullName')];
+      participantSite = pData[i][pHeaders.indexOf('site')];
+      rowIndex = i + 1;
+      break;
+    }
+  }
+
+  if (rowIndex === -1) {
+    return { success: false, message: 'Participant not found' };
+  }
+
+  participantsSheet.deleteRow(rowIndex);
+
+  if (checklistSheet) {
+    const cData = checklistSheet.getDataRange().getValues();
+    const cHeaders = cData[0];
+    const checklistParticipantCol = cHeaders.indexOf('participantId');
+
+    for (let i = cData.length - 1; i >= 1; i--) {
+      if (cData[i][checklistParticipantCol] === participantId) {
+        checklistSheet.deleteRow(i + 1);
+      }
+    }
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'DELETE_PARTICIPANT', 'participant', participantId,
+    'Deleted participant: ' + participantName + ' (' + participantSite + ')');
+
+  return { success: true, message: 'Participant deleted successfully' };
 }
 
 /**
@@ -1226,6 +1363,184 @@ function bulkUpdateChecklist(token, participantId, updates) {
   return {
     success: true,
     message: `Updated ${successCount} items, ${errorCount} errors`
+  };
+}
+
+/**
+ * Get checklist statuses for a specific instrument within a rollout
+ */
+function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const rollout = getRolloutById(rolloutId);
+  if (!rollout) {
+    return { success: false, message: 'Rollout not found' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && rollout.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  if (!instrument) {
+    return { success: false, message: 'Instrument not found' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet || !checklistSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const cHeaders = checklistData[0];
+
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
+  const statusCol = cHeaders.indexOf('status');
+  const checklistIdCol = cHeaders.indexOf('checklistId');
+
+  const checklistMap = {};
+  for (let i = 1; i < checklistData.length; i++) {
+    if (String(checklistData[i][instrumentCol]) === String(instrumentNumber)) {
+      const pid = checklistData[i][checklistParticipantCol];
+      checklistMap[pid] = {
+        checklistId: checklistData[i][checklistIdCol],
+        status: checklistData[i][statusCol],
+        completedDate: checklistData[i][cHeaders.indexOf('completedDate')],
+        completedBy: checklistData[i][cHeaders.indexOf('completedBy')]
+      };
+    }
+  }
+
+  const participants = [];
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][pHeaders.indexOf('rolloutId')] !== rolloutId) continue;
+
+    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const checklistInfo = checklistMap[participantId] || {};
+
+    participants.push({
+      participantId: participantId,
+      fullName: pData[i][pHeaders.indexOf('fullName')],
+      site: pData[i][pHeaders.indexOf('site')],
+      schoolName: pData[i][pHeaders.indexOf('schoolName')],
+      status: checklistInfo.status || 'not_started',
+      checklistId: checklistInfo.checklistId || '',
+      completedDate: checklistInfo.completedDate || '',
+      completedBy: checklistInfo.completedBy || ''
+    });
+  }
+
+  return {
+    success: true,
+    instrumentName: instrument.name,
+    rolloutName: rollout.schoolName,
+    site: rollout.site,
+    participants: participants
+  };
+}
+
+/**
+ * Bulk update an instrument across participants in a rollout
+ */
+function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const rollout = getRolloutById(rolloutId);
+  if (!rollout) {
+    return { success: false, message: 'Rollout not found' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && rollout.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  if (!instrument) {
+    return { success: false, message: 'Instrument not found' };
+  }
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return { success: false, message: 'No updates provided' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet || !checklistSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const participantsInRollout = {};
+
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][pHeaders.indexOf('rolloutId')] === rolloutId) {
+      participantsInRollout[pData[i][pHeaders.indexOf('participantId')]] = true;
+    }
+  }
+
+  const cData = checklistSheet.getDataRange().getValues();
+  const cHeaders = cData[0];
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
+  const checklistIdCol = cHeaders.indexOf('checklistId');
+
+  const checklistMap = {};
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
+      const pid = cData[i][checklistParticipantCol];
+      checklistMap[pid] = cData[i][checklistIdCol];
+    }
+  }
+
+  let successCount = 0;
+  let errorCount = 0;
+
+  updates.forEach(update => {
+    if (!participantsInRollout[update.participantId]) {
+      errorCount++;
+      return;
+    }
+
+    if (CONFIG.CHECKLIST_STATUSES.indexOf(update.status) === -1) {
+      errorCount++;
+      return;
+    }
+
+    const checklistId = checklistMap[update.participantId];
+    if (!checklistId) {
+      errorCount++;
+      return;
+    }
+
+    const result = updateChecklistItem(token, checklistId, { status: update.status });
+    if (result.success) {
+      successCount++;
+    } else {
+      errorCount++;
+    }
+  });
+
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
+    'Updated ' + successCount + ' ' + instrument.name + ' records for rollout ' + rollout.schoolName);
+
+  return {
+    success: errorCount === 0,
+    message: 'Updated ' + successCount + ' participants' + (errorCount > 0 ? (' (' + errorCount + ' errors)') : '')
   };
 }
 

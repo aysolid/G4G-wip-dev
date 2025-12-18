@@ -1044,6 +1044,7 @@
     let currentRolloutFilter = 'All';
     let availableRollouts = [];
     let appConfig = null;
+    let batchChecklistState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
 
     // ============================================
     // INITIALIZATION
@@ -1418,12 +1419,16 @@
               <span class="material-icons">groups</span>
               Participants
             </h3>
-            <div style="display: flex; gap: 1rem; align-items: center;">
+            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
               <div class="search-box">
                 <span class="material-icons">search</span>
                 <input type="text" class="form-input" placeholder="Search participants..." id="participantSearch" onkeyup="filterParticipants()">
               </div>
               ${currentUser.role !== 'viewer' ? `
+              <button class="btn btn-secondary" onclick="openBatchChecklistModal()">
+                <span class="material-icons">playlist_add_check</span>
+                Batch Checklist Update
+              </button>
               <button class="btn btn-primary" onclick="showSection('enroll')">
                 <span class="material-icons">add</span>
                 Enroll New
@@ -1506,10 +1511,22 @@
                   </td>
                   <td><span class="badge badge-${p.status === 'active' ? 'success' : p.status === 'completed' ? 'info' : 'warning'}">${p.status}</span></td>
                   <td>
-                    <button class="btn btn-sm btn-secondary" onclick="viewParticipant('${p.participantId}')">
-                      <span class="material-icons">visibility</span>
-                      View
-                    </button>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                      <button class="btn btn-sm btn-secondary" onclick="viewParticipant('${p.participantId}')">
+                        <span class="material-icons">visibility</span>
+                        View
+                      </button>
+                      ${currentUser.role === 'admin' ? `
+                      <button class="btn btn-sm btn-secondary" onclick='openParticipantStatusModal("${p.participantId}", ${JSON.stringify(p.fullName)}, "${p.status}")' title="Change status">
+                        <span class="material-icons">pending_actions</span>
+                        Status
+                      </button>
+                      <button class="btn btn-sm btn-danger" onclick='confirmDeleteParticipant("${p.participantId}", ${JSON.stringify(p.fullName)}, false)' title="Delete participant">
+                        <span class="material-icons">delete</span>
+                        Delete
+                      </button>
+                      ` : ''}
+                    </div>
                   </td>
                 </tr>
               `).join('')}
@@ -1587,11 +1604,22 @@
                 <span class="material-icons">person</span>
                 Participant Info
               </h3>
-              ${currentUser.role !== 'viewer' ? `
-              <button class="btn btn-sm btn-secondary" onclick="editParticipant('${p.participantId}')">
-                <span class="material-icons">edit</span>
-              </button>
-              ` : ''}
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                ${currentUser.role === 'admin' ? `
+                <button class="btn btn-sm btn-secondary" onclick='openParticipantStatusModal("${p.participantId}", ${JSON.stringify(p.fullName)}, "${p.status}")'>
+                  <span class="material-icons">pending_actions</span>
+                  Status
+                </button>
+                <button class="btn btn-sm btn-danger" onclick='confirmDeleteParticipant("${p.participantId}", ${JSON.stringify(p.fullName)}, true)'>
+                  <span class="material-icons">delete</span>
+                </button>
+                ` : ''}
+                ${currentUser.role !== 'viewer' ? `
+                <button class="btn btn-sm btn-secondary" onclick="editParticipant('${p.participantId}')">
+                  <span class="material-icons">edit</span>
+                </button>
+                ` : ''}
+              </div>
             </div>
             <div class="card-body">
               <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -1758,6 +1786,7 @@
               <input type="text" class="form-input" value="${participant.period} ${participant.year}" disabled>
             </div>
           </div>
+          ${currentUser.role === 'admin' ? `
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="editParticipantStatus">
@@ -1766,6 +1795,13 @@
               <option value="withdrawn" ${participant.status === 'withdrawn' ? 'selected' : ''}>Withdrawn</option>
             </select>
           </div>
+          ` : `
+          <div class="form-group">
+            <label class="form-label">Status</label>
+            <input type="text" class="form-input" value="${participant.status}" disabled>
+            <p style="font-size: 0.8rem; color: var(--gray-500); margin-top: 0.25rem;">Only administrators can change participant status.</p>
+          </div>
+          `}
           <div class="form-group">
             <label class="form-label">Notes</label>
             <textarea class="form-textarea" id="editParticipantNotes" rows="3" placeholder="Any notes about this participant...">${participant.notes || ''}</textarea>
@@ -1785,9 +1821,13 @@
     function saveParticipantEdit(participantId) {
       const data = {
         fullName: document.getElementById('editParticipantName').value.trim(),
-        status: document.getElementById('editParticipantStatus').value,
         notes: document.getElementById('editParticipantNotes').value.trim()
       };
+
+      if (currentUser.role === 'admin') {
+        const statusEl = document.getElementById('editParticipantStatus');
+        data.status = statusEl ? statusEl.value : '';
+      }
 
       if (!data.fullName) {
         showToast('Please enter a name', 'error');
@@ -1806,6 +1846,370 @@
         })
         .withFailureHandler(handleError)
         .updateParticipant(sessionToken, participantId, data);
+    }
+
+    function openParticipantStatusModal(participantId, fullName, currentStatus) {
+      if (currentUser.role !== 'admin') {
+        showToast('Only administrators can update participant status', 'error');
+        return;
+      }
+
+      const statusOptions = [
+        { value: 'active', label: 'Active' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'withdrawn', label: 'Withdrawn' }
+      ];
+
+      document.getElementById('modalTitle').textContent = 'Update Participant Status';
+      document.getElementById('modalBody').innerHTML = `
+        <p style="margin-bottom: 1rem;">Select a new status for <strong>${fullName}</strong>.</p>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="participantStatusSelect">
+            <option value="">-- Choose status --</option>
+            ${statusOptions.map(opt => `<option value="${opt.value}" ${opt.value === currentStatus ? 'selected' : ''}>${opt.label}</option>`).join('')}
+          </select>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-danger" type="button" onclick='confirmDeleteParticipant("${participantId}", ${JSON.stringify(fullName)}, true)'>
+          <span class="material-icons">delete</span>
+          Delete Participant
+        </button>
+        <button class="btn btn-primary" type="button" onclick="applyParticipantStatus('${participantId}')">
+          <span class="material-icons">save</span>
+          Update Status
+        </button>
+      `;
+      openModal();
+    }
+
+    function applyParticipantStatus(participantId) {
+      const select = document.getElementById('participantStatusSelect');
+      const status = select ? select.value : '';
+
+      if (!status) {
+        showToast('Please select a status', 'error');
+        return;
+      }
+
+      updateParticipantStatus(participantId, status, function() {
+        closeModal();
+        refreshParticipantData(participantId);
+      });
+    }
+
+    function updateParticipantStatus(participantId, status, onSuccess) {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Participant status updated', 'success');
+            if (onSuccess) onSuccess();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .updateParticipant(sessionToken, participantId, { status: status });
+    }
+
+    function confirmDeleteParticipant(participantId, fullName, fromDetailView) {
+      if (currentUser.role !== 'admin') {
+        showToast('Only administrators can delete participants', 'error');
+        return;
+      }
+
+      const confirmed = confirm('Delete participant ' + fullName + '? This will remove their checklist history.');
+      if (!confirmed) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('Participant deleted', 'success');
+            closeModal();
+            if (fromDetailView || isSectionVisible('participantDetail')) {
+              showSection('participants');
+            }
+            loadParticipants();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .deleteParticipant(sessionToken, participantId);
+    }
+
+    function refreshParticipantData(participantId) {
+      loadParticipants();
+
+      if (isSectionVisible('participantDetail')) {
+        viewParticipant(participantId);
+      }
+    }
+
+    function openBatchChecklistModal() {
+      if (currentUser.role === 'viewer') {
+        showToast('Only administrators and facilitators can update checklists', 'error');
+        return;
+      }
+
+      const instruments = (appConfig && appConfig.instruments) ? appConfig.instruments : [];
+      if (!instruments.length) {
+        showToast('Instruments not loaded yet. Please try again.', 'error');
+        return;
+      }
+
+      const instrumentOptions = instruments
+        .map(inst => `<option value="${inst.number}">${inst.number}. ${inst.name}</option>`)
+        .join('');
+
+      const rolloutOptions = (availableRollouts || [])
+        .filter(r => r.status === 'active')
+        .map(r => {
+          const label = `${r.schoolName} (${r.period} ${r.year}) - ${r.site}`;
+          const selected = currentRolloutFilter !== 'All' && currentRolloutFilter === r.rolloutId ? 'selected' : '';
+          return `<option value="${r.rolloutId}" ${selected}>${label}</option>`;
+        })
+        .join('');
+
+      batchChecklistState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
+
+      document.getElementById('modalTitle').textContent = 'Batch Checklist Update';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Protocol Item</label>
+            <select class="form-select" id="batchInstrumentSelect">
+              <option value="">-- Choose protocol item --</option>
+              ${instrumentOptions}
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Rollout</label>
+            <select class="form-select" id="batchRolloutSelect">
+              <option value="">-- Choose rollout --</option>
+              ${rolloutOptions || '<option value="" disabled>No active rollouts found</option>'}
+            </select>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 1rem;">
+          <div class="card-body" id="batchChecklistResults">
+            <div class="empty-state">
+              <span class="material-icons">fact_check</span>
+              <h3>Select a protocol item and rollout to load participants.</h3>
+              <p>Use this tool to mark a checklist item as completed, missing, or not started for multiple participants at once.</p>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="loadBatchChecklistParticipants()">
+          <span class="material-icons">refresh</span>
+          Load Participants
+        </button>
+      `;
+      openModal();
+    }
+
+    function loadBatchChecklistParticipants() {
+      const instrumentSelect = document.getElementById('batchInstrumentSelect');
+      const rolloutSelect = document.getElementById('batchRolloutSelect');
+      const instrumentNumber = instrumentSelect ? instrumentSelect.value : '';
+      const rolloutId = rolloutSelect ? rolloutSelect.value : '';
+      const results = document.getElementById('batchChecklistResults');
+
+      if (!instrumentNumber || !rolloutId) {
+        showToast('Select a protocol item and rollout first', 'error');
+        return;
+      }
+
+      if (results) {
+        results.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            batchChecklistState = {
+              participants: result.participants || [],
+              instrumentNumber: instrumentNumber,
+              rolloutId: rolloutId,
+              instrumentName: result.instrumentName || ''
+            };
+            batchChecklistState.selections = {};
+            renderBatchChecklistResults(result);
+          } else if (results) {
+            results.innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>${result.message || 'Unable to load participants'}</h3>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(function(error) {
+          if (results) {
+            results.innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Unable to load participants</h3>
+              </div>
+            `;
+          }
+          handleError(error);
+        })
+        .getInstrumentChecklistForRollout(sessionToken, rolloutId, instrumentNumber);
+    }
+
+    function renderBatchChecklistResults(result) {
+      const results = document.getElementById('batchChecklistResults');
+      if (!results) return;
+
+      const participants = batchChecklistState.participants || [];
+      if (participants.length === 0) {
+        results.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">groups</span>
+            <h3>No participants found for this rollout</h3>
+          </div>
+        `;
+        return;
+      }
+
+      const badgeClass = status => status === 'completed' ? 'badge-success' : status === 'missing' ? 'badge-danger' : 'badge-neutral';
+      const statusLabel = status => {
+        if (status === 'completed') return 'completed';
+        if (status === 'missing') return 'missing';
+        return 'not started';
+      };
+
+      results.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <div>
+            <div style="font-weight: 600;">${batchChecklistState.instrumentName || 'Protocol Item'}</div>
+            <div style="font-size: 0.85rem; color: var(--gray-600);">${result.rolloutName || ''} ${result.site ? '(' + result.site + ')' : ''}</div>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <select class="form-select" id="batchStatusSelect" style="width: 200px;">
+              <option value="">Apply status...</option>
+              <option value="completed">Mark Completed</option>
+              <option value="missing">Mark Missing</option>
+              <option value="not_started">Reset to Not Started</option>
+            </select>
+            <button class="btn btn-primary" type="button" onclick="applyBatchChecklistUpdates()">
+              <span class="material-icons">save</span>
+              Apply to Selected
+            </button>
+          </div>
+        </div>
+        <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 50px;">Select</th>
+                <th>Participant</th>
+                <th>Current Status</th>
+                <th style="width: 220px;">New Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${participants.map(p => `
+              <tr>
+                <td><input type="checkbox" data-batch-id="${p.participantId}" onchange="toggleBatchChecklistSelection('${p.participantId}', this.checked)"></td>
+                <td>
+                  <div style="font-weight: 600;">${p.fullName}</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">${p.participantId} • ${p.schoolName}</div>
+                </td>
+                <td><span class="badge ${badgeClass(p.status)}">${statusLabel(p.status)}</span></td>
+                <td>
+                  <select class="form-select" onchange="setBatchParticipantStatus('${p.participantId}', this.value)">
+                    <option value="">-- Keep current --</option>
+                    <option value="completed">Mark Completed</option>
+                    <option value="missing">Mark Missing</option>
+                    <option value="not_started">Reset to Not Started</option>
+                  </select>
+                </td>
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function toggleBatchChecklistSelection(participantId, checked) {
+      if (!batchChecklistState.selections) batchChecklistState.selections = {};
+
+      if (!checked) {
+        delete batchChecklistState.selections[participantId];
+        return;
+      }
+
+      if (!batchChecklistState.selections[participantId]) {
+        batchChecklistState.selections[participantId] = '';
+      }
+    }
+
+    function setBatchParticipantStatus(participantId, status) {
+      if (!batchChecklistState.selections) batchChecklistState.selections = {};
+      const checkbox = document.querySelector(`input[data-batch-id="${participantId}"]`);
+
+      if (!status) {
+        delete batchChecklistState.selections[participantId];
+        if (checkbox) checkbox.checked = false;
+        return;
+      }
+
+      batchChecklistState.selections[participantId] = status;
+      if (checkbox) checkbox.checked = true;
+    }
+
+    function applyBatchChecklistUpdates() {
+      if (!batchChecklistState.instrumentNumber || !batchChecklistState.rolloutId) {
+        showToast('Load participants before applying updates', 'error');
+        return;
+      }
+
+      const defaultStatusEl = document.getElementById('batchStatusSelect');
+      const defaultStatus = defaultStatusEl ? defaultStatusEl.value : '';
+      const selectedRows = Array.from(document.querySelectorAll('input[data-batch-id]:checked'));
+      const updates = [];
+
+      if (defaultStatus) {
+        if (selectedRows.length === 0) {
+          showToast('Select at least one participant', 'error');
+          return;
+        }
+        selectedRows.forEach(row => {
+          updates.push({ participantId: row.getAttribute('data-batch-id'), status: defaultStatus });
+        });
+      } else if (batchChecklistState.selections) {
+        Object.keys(batchChecklistState.selections).forEach(pid => {
+          if (batchChecklistState.selections[pid]) {
+            updates.push({ participantId: pid, status: batchChecklistState.selections[pid] });
+          }
+        });
+      }
+
+      if (updates.length === 0) {
+        showToast('Choose a status to apply using the dropdowns', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(result.message || 'Checklist updated', 'success');
+            loadBatchChecklistParticipants();
+            refreshParticipantData(updates[0].participantId);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .bulkUpdateInstrumentStatus(sessionToken, batchChecklistState.rolloutId, batchChecklistState.instrumentNumber, updates);
     }
 
     // ============================================
@@ -2311,6 +2715,9 @@
                     <button class="btn btn-sm btn-secondary" onclick="resetPassword('${u.userId}', '${u.username}')" title="Reset Password">
                       <span class="material-icons">lock_reset</span>
                     </button>
+                    <button class="btn btn-sm btn-danger" onclick='confirmDeleteUser("${u.userId}", ${JSON.stringify(u.username)})' title="Delete User">
+                      <span class="material-icons">delete</span>
+                    </button>
                   </td>
                 </tr>
               `).join('')}
@@ -2590,6 +2997,22 @@
         })
         .withFailureHandler(handleError)
         .resetUserPassword(sessionToken, userId);
+    }
+
+    function confirmDeleteUser(userId, username) {
+      if (!confirm('Delete user ' + username + '? This action cannot be undone.')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast('User deleted', 'success');
+            loadUsers();
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .deleteUser(sessionToken, userId);
     }
 
     // ============================================
