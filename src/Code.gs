@@ -1249,6 +1249,254 @@ function generateParticipantId(site) {
   return prefix + '-' + timestamp + random;
 }
 
+/**
+ * Generate a CSV template for batch participant enrollment
+ */
+function generateEnrollmentTemplate(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  if (!rolloutsSheet) {
+    return { success: false, message: 'Study rollouts sheet not found' };
+  }
+
+  const data = rolloutsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rollouts = [];
+  const isFacilitator = currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All';
+
+  for (let i = 1; i < data.length; i++) {
+    const site = data[i][headers.indexOf('site')];
+    if (isFacilitator && site !== currentUser.site) continue;
+    rollouts.push({
+      rolloutId: data[i][headers.indexOf('rolloutId')],
+      site: site,
+      schoolName: data[i][headers.indexOf('schoolName')],
+      period: data[i][headers.indexOf('period')],
+      year: data[i][headers.indexOf('year')],
+      status: data[i][headers.indexOf('status')]
+    });
+  }
+
+  // Build dropdown-enabled template as an Excel file
+  const tempSs = SpreadsheetApp.create('Participant Enrollment Template');
+  const templateSheet = tempSs.getSheets()[0];
+  templateSheet.setName('Template');
+
+  // Headers
+  templateSheet.getRange('A1').setValue('fullName');
+  templateSheet.getRange('B1').setValue('rolloutName');
+  templateSheet.getRange('A1:B1')
+    .setFontWeight('bold')
+    .setBackground('#f1f5f9');
+
+  // Helper sheet with rollout list
+  const helperSheet = tempSs.insertSheet('Rollouts');
+  helperSheet.getRange(1, 1, rollouts.length, 1).setValues(
+    rollouts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+  );
+  helperSheet.hideSheet();
+
+  // Data validation for rollout dropdown (apply to reasonable range)
+  const lastRow = Math.max(2, rollouts.length + 5);
+  const validationRange = helperSheet.getRange(1, 1, rollouts.length, 1);
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(validationRange, true)
+    .setAllowInvalid(false)
+    .build();
+  templateSheet.getRange(2, 2, lastRow, 1).setDataValidation(rule);
+
+  // Auto-size
+  templateSheet.autoResizeColumns(1, 2);
+
+  // Export as Excel and clean up the temp file
+  const blob = tempSs.getBlob().setName('participant_enrollment_template.xlsx').copyBlob();
+  DriveApp.getFileById(tempSs.getId()).setTrashed(true);
+
+  return {
+    success: true,
+    file: Utilities.base64Encode(blob.getBytes()),
+    mimeType: blob.getContentType(),
+    filename: blob.getName(),
+    rolloutCount: rollouts.length
+  };
+}
+
+/**
+ * Import participants from CSV (batch enrollment/upsert)
+ */
+function importParticipantsCSV(token, fileData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!fileData || !fileData.csv) {
+    return { success: false, message: 'No CSV content provided' };
+  }
+
+  let rows;
+  try {
+    rows = Utilities.parseCsv(fileData.csv);
+  } catch (error) {
+    return { success: false, message: 'Unable to parse CSV: ' + error.message };
+  }
+
+  if (!rows || rows.length === 0) {
+    return { success: false, message: 'CSV is empty' };
+  }
+
+  const headers = rows[0].map(h => h.trim());
+  const required = ['fullName', 'rolloutName'];
+  const missing = required.filter(col => headers.indexOf(col) === -1);
+  if (missing.length > 0) {
+    return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
+  }
+
+  const idx = name => headers.indexOf(name);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!participantsSheet || !checklistSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  // Build rollout map for quick lookups
+  const rolloutData = rolloutsSheet.getDataRange().getValues();
+  const rolloutHeaders = rolloutData[0];
+  const rolloutMap = {};
+  const isFacilitator = currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All';
+
+  for (let i = 1; i < rolloutData.length; i++) {
+    const rolloutId = rolloutData[i][rolloutHeaders.indexOf('rolloutId')];
+    const site = rolloutData[i][rolloutHeaders.indexOf('site')];
+    if (isFacilitator && site !== currentUser.site) continue;
+
+    const label = `${rolloutData[i][rolloutHeaders.indexOf('schoolName')]} (${rolloutData[i][rolloutHeaders.indexOf('period')]} ${rolloutData[i][rolloutHeaders.indexOf('year')]})`;
+    rolloutMap[label.toLowerCase()] = {
+      rolloutId: rolloutId,
+      site: site,
+      schoolName: rolloutData[i][rolloutHeaders.indexOf('schoolName')],
+      period: rolloutData[i][rolloutHeaders.indexOf('period')],
+      year: rolloutData[i][rolloutHeaders.indexOf('year')],
+      status: rolloutData[i][rolloutHeaders.indexOf('status')],
+      label: label
+    };
+  }
+
+  if (Object.keys(rolloutMap).length === 0) {
+    return { success: false, message: 'No accessible rollouts found for this user' };
+  }
+
+  // Participant map for upserts
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const participantMap = {};
+  for (let i = 1; i < pData.length; i++) {
+    const pid = pData[i][pHeaders.indexOf('participantId')];
+    participantMap[pid] = {
+      rowIndex: i + 1,
+      data: pData[i]
+    };
+  }
+
+  const summary = {
+    processed: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const rowNumber = r + 1; // 1-based CSV row
+
+    const fullName = (row[idx('fullName')] || '').trim();
+    const rolloutName = (row[idx('rolloutName')] || '').trim();
+
+    if (!fullName && !rolloutName) {
+      summary.skipped++;
+      continue;
+    }
+
+    summary.processed++;
+
+    if (!fullName) {
+      summary.errors.push({ row: rowNumber, message: 'Full name is required' });
+      summary.skipped++;
+      continue;
+    }
+    if (!rolloutName) {
+      summary.errors.push({ row: rowNumber, message: 'rolloutName is required' });
+      summary.skipped++;
+      continue;
+    }
+    const rollout = rolloutMap[rolloutName.toLowerCase()];
+    if (!rollout) {
+      summary.errors.push({ row: rowNumber, message: 'Rollout not found or not accessible: ' + rolloutName });
+      summary.skipped++;
+      continue;
+    }
+
+    // Create new participant (participantId auto-generated)
+    if (isFacilitator && rollout.site !== currentUser.site) {
+      summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + rollout.site });
+      summary.skipped++;
+      continue;
+    }
+
+    const newParticipantId = generateParticipantId(rollout.site);
+    const timestamp = new Date().toISOString();
+
+    participantsSheet.appendRow([
+      newParticipantId,
+      fullName,
+      rollout.site,
+      rollout.rolloutId,
+      rollout.schoolName,
+      rollout.period,
+      rollout.year,
+      timestamp,
+      currentUser.userId,
+      'active',
+      '',
+      0
+    ]);
+
+    CONFIG.INSTRUMENTS.forEach(instrument => {
+      const checklistId = generateUUID();
+      checklistSheet.appendRow([
+        checklistId,
+        newParticipantId,
+        instrument.number,
+        instrument.name,
+        instrument.category,
+        'not_started',
+        '',
+        '',
+        ''
+      ]);
+    });
+
+    logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
+      'Bulk enrolled: ' + fullName + ' into ' + rollout.schoolName);
+
+    summary.created++;
+  }
+
+  return {
+    success: true,
+    summary: summary
+  };
+}
+
 // ============================================
 // CHECKLIST FUNCTIONS
 // ============================================
@@ -2263,6 +2511,14 @@ function generateRandomPassword() {
  */
 function generateSessionToken() {
   return Utilities.getUuid() + '-' + Utilities.getUuid();
+}
+
+/**
+ * Escape a value for CSV
+ */
+function csvEscape(value) {
+  const str = value === null || value === undefined ? '' : String(value);
+  return '"' + str.replace(/"/g, '""') + '"';
 }
 
 /**
