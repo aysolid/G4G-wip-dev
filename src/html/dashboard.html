@@ -967,6 +967,12 @@
               <option value="Missouri">Missouri</option>
             </select>
           </div>
+          <div class="site-filter" id="rolloutFilterContainer">
+            <label for="rolloutFilter">Rollout:</label>
+            <select id="rolloutFilter" onchange="handleRolloutFilterChange()">
+              <option value="All">All Rollouts</option>
+            </select>
+          </div>
         </div>
       </header>
 
@@ -1029,6 +1035,8 @@
     let currentUser = null;
     let sessionToken = null;
     let currentSiteFilter = 'All';
+    let currentRolloutFilter = 'All';
+    let availableRollouts = [];
     let appConfig = null;
 
     // ============================================
@@ -1079,6 +1087,9 @@
 
       // Apply role-based access
       applyRoleBasedAccess();
+
+      // Load rollouts for filter dropdown
+      loadRolloutsForFilter(currentSiteFilter);
 
       // Load initial data
       loadDashboardData();
@@ -1210,10 +1221,16 @@
       document.getElementById('dashboardLoading').classList.remove('hidden');
       document.getElementById('dashboardContent').classList.add('hidden');
 
+      // Pass both site and rollout filters to the backend
+      const filters = {
+        site: currentSiteFilter,
+        rolloutId: currentRolloutFilter
+      };
+
       google.script.run
         .withSuccessHandler(renderDashboard)
         .withFailureHandler(handleError)
-        .getDashboardStats(sessionToken, currentSiteFilter);
+        .getDashboardStats(sessionToken, currentSiteFilter, currentRolloutFilter);
     }
 
     function renderDashboard(stats) {
@@ -2326,68 +2343,83 @@
     }
 
     function saveUser() {
-      // Get values directly from elements
-      const fullName = document.getElementById('userFullName').value.trim();
-      const username = document.getElementById('userUsername').value.trim();
-      const password = document.getElementById('userPassword').value.trim();
-      const roleSelect = document.getElementById('userRole');
-      const siteSelect = document.getElementById('userSite');
+      try {
+        // Get form elements
+        const fullNameEl = document.getElementById('userFullName');
+        const usernameEl = document.getElementById('userUsername');
+        const passwordEl = document.getElementById('userPassword');
+        const roleEl = document.getElementById('userRole');
+        const siteEl = document.getElementById('userSite');
 
-      // Get selected values from dropdowns
-      const role = roleSelect.options[roleSelect.selectedIndex].value;
-      const site = siteSelect.options[siteSelect.selectedIndex].value;
+        // Check if elements exist
+        if (!fullNameEl || !usernameEl || !passwordEl || !roleEl || !siteEl) {
+          showToast('Form error: Please close and reopen the modal', 'error');
+          return;
+        }
 
-      // Validate each field
-      const errors = [];
-      if (!fullName) errors.push('Full Name');
-      if (!username) errors.push('Username');
-      if (!password) errors.push('Password');
-      if (!role) errors.push('Role');
-      if (!site) errors.push('Site');
+        // Get values safely using simple .value
+        const fullName = fullNameEl.value ? fullNameEl.value.trim() : '';
+        const username = usernameEl.value ? usernameEl.value.trim() : '';
+        const password = passwordEl.value ? passwordEl.value.trim() : '';
+        const role = roleEl.value || '';
+        const site = siteEl.value || '';
 
-      if (errors.length > 0) {
-        showToast('Please fill in: ' + errors.join(', '), 'error');
-        return;
-      }
+        // Validate each field
+        const errors = [];
+        if (!fullName) errors.push('Full Name');
+        if (!username) errors.push('Username');
+        if (!password) errors.push('Password');
+        if (!role) errors.push('Role');
+        if (!site) errors.push('Site');
 
-      // Disable button while saving
-      const saveBtn = document.getElementById('createUserBtn');
-      if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Creating...';
-      }
+        if (errors.length > 0) {
+          showToast('Please fill in: ' + errors.join(', '), 'error');
+          return;
+        }
 
-      const data = {
-        fullName: fullName,
-        username: username,
-        password: password,
-        role: role,
-        site: site
-      };
+        // Disable button while saving
+        const saveBtn = document.getElementById('createUserBtn');
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Creating...';
+        }
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            closeModal();
-            showToast('User created successfully!', 'success');
-            alert('User created successfully!\n\nUsername: ' + username + '\nPassword: ' + password + '\n\nPlease share these credentials securely.');
-            loadUsers();
-          } else {
-            showToast(result.message, 'error');
+        const data = {
+          fullName: fullName,
+          username: username,
+          password: password,
+          role: role,
+          site: site
+        };
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success) {
+              closeModal();
+              showToast('User created successfully!', 'success');
+              alert('User created successfully!\n\nUsername: ' + username + '\nPassword: ' + password + '\n\nPlease share these credentials securely.');
+              loadUsers();
+            } else {
+              showToast(result.message || 'Failed to create user', 'error');
+              if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<span class="material-icons">person_add</span> Create User';
+              }
+            }
+          })
+          .withFailureHandler(function(error) {
+            console.error('Create user error:', error);
+            showToast('Error creating user. Please try again.', 'error');
             if (saveBtn) {
               saveBtn.disabled = false;
               saveBtn.innerHTML = '<span class="material-icons">person_add</span> Create User';
             }
-          }
-        })
-        .withFailureHandler(function(error) {
-          handleError(error);
-          if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<span class="material-icons">person_add</span> Create User';
-          }
-        })
-        .createUser(sessionToken, data);
+          })
+          .createUser(sessionToken, data);
+      } catch (e) {
+        console.error('SaveUser exception:', e);
+        showToast('An error occurred. Please try again.', 'error');
+      }
     }
 
     function editUser(userId, fullName, username, role, site, status) {
@@ -2783,7 +2815,45 @@
     // ============================================
     function handleSiteFilterChange() {
       currentSiteFilter = document.getElementById('siteFilter').value;
+      currentRolloutFilter = 'All'; // Reset rollout filter when site changes
+      loadRolloutsForFilter(currentSiteFilter);
       loadDashboardData();
+    }
+
+    function handleRolloutFilterChange() {
+      currentRolloutFilter = document.getElementById('rolloutFilter').value;
+      loadDashboardData();
+    }
+
+    function loadRolloutsForFilter(site) {
+      // Update the rollout dropdown based on selected site
+      google.script.run
+        .withSuccessHandler(function(result) {
+          const rolloutSelect = document.getElementById('rolloutFilter');
+          if (!rolloutSelect) return;
+
+          // Clear existing options
+          rolloutSelect.innerHTML = '<option value="All">All Rollouts</option>';
+
+          if (result.success && result.rollouts && result.rollouts.length > 0) {
+            availableRollouts = result.rollouts;
+            result.rollouts.forEach(function(rollout) {
+              if (rollout.status === 'active') {
+                const option = document.createElement('option');
+                option.value = rollout.rolloutId;
+                option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+                if (site !== 'All') {
+                  option.textContent += ' - ' + rollout.site;
+                }
+                rolloutSelect.appendChild(option);
+              }
+            });
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading rollouts for filter:', error);
+        })
+        .getAllRollouts(sessionToken, site);
     }
 
     function handleLogout() {

@@ -606,8 +606,28 @@
   <main class="main-content">
     <!-- Hero Section -->
     <section class="hero">
-      <h2>Cross-Site Research Operations</h2>
-      <p>Tracking participant progress across University of Georgia (UGA) and University of Missouri (Mizzou) research sites. Engaging neurodiverse learners in video game design using Game Builder Garage.</p>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2>Cross-Site Research Operations</h2>
+          <p>Tracking participant progress across University of Georgia (UGA) and University of Missouri (Mizzou) research sites. Engaging neurodiverse learners in video game design using Game Builder Garage.</p>
+        </div>
+        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="publicSiteFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Site:</label>
+            <select id="publicSiteFilter" onchange="handlePublicSiteFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
+              <option value="All">All Sites</option>
+              <option value="UGA">UGA</option>
+              <option value="Missouri">Missouri</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="publicRolloutFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Rollout:</label>
+            <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
+              <option value="All">All Rollouts</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Stats Grid -->
@@ -752,25 +772,85 @@
 
   <script>
     // ============================================
+    // GLOBAL STATE
+    // ============================================
+    let currentPublicSiteFilter = 'All';
+    let currentPublicRolloutFilter = 'All';
+
+    // ============================================
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      loadPublicRollouts(currentPublicSiteFilter);
       loadDashboardStats();
     });
+
+    // ============================================
+    // FILTER HANDLERS
+    // ============================================
+    function handlePublicSiteFilterChange() {
+      currentPublicSiteFilter = document.getElementById('publicSiteFilter').value;
+      currentPublicRolloutFilter = 'All'; // Reset rollout filter when site changes
+      loadPublicRollouts(currentPublicSiteFilter);
+      loadDashboardStats();
+    }
+
+    function handlePublicRolloutFilterChange() {
+      currentPublicRolloutFilter = document.getElementById('publicRolloutFilter').value;
+      loadDashboardStats();
+    }
+
+    function loadPublicRollouts(siteFilter) {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          const rolloutSelect = document.getElementById('publicRolloutFilter');
+          if (!rolloutSelect) return;
+
+          // Clear existing options
+          rolloutSelect.innerHTML = '<option value="All">All Rollouts</option>';
+
+          if (result.success && result.rollouts && result.rollouts.length > 0) {
+            result.rollouts.forEach(function(rollout) {
+              const option = document.createElement('option');
+              option.value = rollout.rolloutId;
+              option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+              if (siteFilter === 'All') {
+                option.textContent += ' - ' + rollout.site;
+              }
+              rolloutSelect.appendChild(option);
+            });
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error loading rollouts:', error);
+        })
+        .getPublicRollouts(siteFilter);
+    }
 
     // ============================================
     // LOAD DASHBOARD STATISTICS
     // ============================================
     function loadDashboardStats() {
+      // Show loading state
+      document.getElementById('statsGrid').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
       google.script.run
         .withSuccessHandler(renderStats)
         .withFailureHandler(handleError)
-        .getPublicDashboardStats();
+        .getPublicDashboardStats(currentPublicSiteFilter, currentPublicRolloutFilter);
     }
 
     function renderStats(stats) {
-      // Render stats cards
+      // Render stats cards with filter info
+      let filterInfo = '';
+      if (stats.currentRollout) {
+        filterInfo = `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; background: var(--primary-color); color: white; border-radius: var(--border-radius); margin-bottom: 1rem;">
+          Showing data for: <strong>${stats.currentRollout.schoolName}</strong> (${stats.currentRollout.period} ${stats.currentRollout.year}) - ${stats.currentRollout.site}
+        </div>`;
+      }
+
       const statsHtml = `
+        ${filterInfo}
         <div class="stat-card primary">
           <div class="stat-card-header">
             <div class="stat-card-icon">
@@ -828,6 +908,7 @@
             <div class="instrument-item">
               <div class="instrument-number">${inst.number}</div>
               <div class="instrument-name">${inst.name}</div>
+              <div class="instrument-stat">${inst.completed || 0}/${inst.total || 0}</div>
               <div class="instrument-stat">${inst.percentage}%</div>
             </div>
           `;

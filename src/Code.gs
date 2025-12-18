@@ -1189,7 +1189,7 @@ function updateParticipantCompletion(participantId) {
 /**
  * Get dashboard statistics
  */
-function getDashboardStats(token, siteFilter) {
+function getDashboardStats(token, siteFilter, rolloutFilter) {
   const currentUser = validateSession(token);
   // Allow public access for basic stats, but filter for authenticated users
 
@@ -1208,7 +1208,8 @@ function getDashboardStats(token, siteFilter) {
     activeRollouts: 0,
     overallCompletion: 0,
     instrumentStats: [],
-    recentActivity: []
+    recentActivity: [],
+    currentRollout: null
   };
 
   if (!participantsSheet) return stats;
@@ -1218,17 +1219,26 @@ function getDashboardStats(token, siteFilter) {
   const pHeaders = pData[0];
 
   let totalCompletion = 0;
+  let filteredParticipantIds = [];
 
   for (let i = 1; i < pData.length; i++) {
     const site = pData[i][pHeaders.indexOf('site')];
     const status = pData[i][pHeaders.indexOf('status')];
     const completion = pData[i][pHeaders.indexOf('completionPercentage')] || 0;
+    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
+    const participantId = pData[i][pHeaders.indexOf('participantId')];
 
     // Apply site filter
     if (siteFilter && siteFilter !== 'All' && site !== siteFilter) {
       continue;
     }
 
+    // Apply rollout filter
+    if (rolloutFilter && rolloutFilter !== 'All' && rolloutId !== rolloutFilter) {
+      continue;
+    }
+
+    filteredParticipantIds.push(participantId);
     stats.totalParticipants++;
     totalCompletion += completion;
 
@@ -1252,6 +1262,19 @@ function getDashboardStats(token, siteFilter) {
     for (let i = 1; i < rData.length; i++) {
       const rSite = rData[i][rHeaders.indexOf('site')];
       const rStatus = rData[i][rHeaders.indexOf('status')];
+      const rId = rData[i][rHeaders.indexOf('rolloutId')];
+
+      // If a specific rollout is selected, get its details
+      if (rolloutFilter && rolloutFilter !== 'All' && rId === rolloutFilter) {
+        stats.currentRollout = {
+          rolloutId: rId,
+          site: rSite,
+          schoolName: rData[i][rHeaders.indexOf('schoolName')],
+          period: rData[i][rHeaders.indexOf('period')],
+          year: rData[i][rHeaders.indexOf('year')],
+          status: rStatus
+        };
+      }
 
       if (siteFilter && siteFilter !== 'All' && rSite !== siteFilter) {
         continue;
@@ -1261,7 +1284,7 @@ function getDashboardStats(token, siteFilter) {
     }
   }
 
-  // Get instrument completion stats
+  // Get instrument completion stats (only for filtered participants)
   if (checklistSheet) {
     const cData = checklistSheet.getDataRange().getValues();
     const cHeaders = cData[0];
@@ -1275,6 +1298,12 @@ function getDashboardStats(token, siteFilter) {
     for (let i = 1; i < cData.length; i++) {
       const instNum = cData[i][cHeaders.indexOf('instrumentNumber')];
       const instStatus = cData[i][cHeaders.indexOf('status')];
+      const checklistParticipantId = cData[i][cHeaders.indexOf('participantId')];
+
+      // Only count checklist items for filtered participants
+      if (filteredParticipantIds.length > 0 && !filteredParticipantIds.includes(checklistParticipantId)) {
+        continue;
+      }
 
       if (instrumentCounts[instNum]) {
         instrumentCounts[instNum].total++;
@@ -1302,8 +1331,46 @@ function getDashboardStats(token, siteFilter) {
 /**
  * Get public dashboard statistics (no authentication required)
  */
-function getPublicDashboardStats() {
-  return getDashboardStats(null, 'All');
+function getPublicDashboardStats(siteFilter, rolloutFilter) {
+  return getDashboardStats(null, siteFilter || 'All', rolloutFilter || 'All');
+}
+
+/**
+ * Get public rollouts list (no authentication required)
+ */
+function getPublicRollouts(siteFilter) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!rolloutsSheet) return { success: true, rollouts: [] };
+
+  const data = rolloutsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rollouts = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const site = data[i][headers.indexOf('site')];
+    const status = data[i][headers.indexOf('status')];
+
+    // Apply site filter
+    if (siteFilter && siteFilter !== 'All' && site !== siteFilter) {
+      continue;
+    }
+
+    // Only return active rollouts for public view
+    if (status === 'active') {
+      rollouts.push({
+        rolloutId: data[i][headers.indexOf('rolloutId')],
+        site: site,
+        schoolName: data[i][headers.indexOf('schoolName')],
+        period: data[i][headers.indexOf('period')],
+        year: data[i][headers.indexOf('year')],
+        status: status
+      });
+    }
+  }
+
+  return { success: true, rollouts: rollouts };
 }
 
 /**
@@ -1315,8 +1382,8 @@ function getSiteComparison(token) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  const ugaStats = getDashboardStats(token, 'UGA');
-  const missouriStats = getDashboardStats(token, 'Missouri');
+  const ugaStats = getDashboardStats(token, 'UGA', 'All');
+  const missouriStats = getDashboardStats(token, 'Missouri', 'All');
 
   return {
     success: true,
