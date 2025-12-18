@@ -1045,6 +1045,8 @@
     let availableRollouts = [];
     let appConfig = null;
     let batchChecklistState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
+    let batchEnrollmentUpload = null;
+    let batchEnrollmentResult = null;
 
     // ============================================
     // INITIALIZATION
@@ -1425,6 +1427,14 @@
                 <input type="text" class="form-input" placeholder="Search participants..." id="participantSearch" onkeyup="filterParticipants()">
               </div>
               ${currentUser.role !== 'viewer' ? `
+              <button class="btn btn-secondary" onclick="downloadEnrollmentTemplate()">
+                <span class="material-icons">file_download</span>
+                Download Template
+              </button>
+              <button class="btn btn-secondary" onclick="openBatchEnrollmentModal()">
+                <span class="material-icons">upload_file</span>
+                Upload CSV
+              </button>
               <button class="btn btn-secondary" onclick="openBatchChecklistModal()">
                 <span class="material-icons">playlist_add_check</span>
                 Batch Checklist Update
@@ -1451,6 +1461,198 @@
           site: getParticipantSiteFilter(),
           rolloutId: currentRolloutFilter
         });
+    }
+
+    function downloadEnrollmentTemplate() {
+      if (currentUser.role === 'viewer') {
+        showToast('Only administrators and facilitators can download templates', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(downloadCSV)
+        .withFailureHandler(handleError)
+        .generateEnrollmentTemplate(sessionToken);
+    }
+
+    function openBatchEnrollmentModal() {
+      if (currentUser.role === 'viewer') {
+        showToast('Only administrators and facilitators can upload participants', 'error');
+        return;
+      }
+
+      batchEnrollmentUpload = null;
+      batchEnrollmentResult = null;
+
+      document.getElementById('modalTitle').textContent = 'Batch Participant Enrollment';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
+          <span class="material-icons" style="font-size: 18px;">info</span>
+          <div>
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>rolloutId</strong>. Optional: <strong>participantId</strong> (to update), <strong>status</strong>, <strong>notes</strong>.
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Upload CSV</label>
+          <input type="file" class="form-input" id="batchEnrollmentFile" accept=".csv" onchange="handleBatchEnrollmentFile(this)">
+          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Rollout IDs must match the template. Leave participantId blank to create new participants.</div>
+        </div>
+        <div id="batchEnrollmentStatus" class="alert alert-neutral" style="display: flex; align-items: center; gap: 8px;">
+          <span class="material-icons" style="font-size: 18px;">upload_file</span>
+          <span>No file selected yet.</span>
+        </div>
+        <div id="batchEnrollmentResults" style="margin-top: 0.75rem;"></div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="batchEnrollmentUploadBtn" type="button" onclick="submitBatchEnrollmentUpload()" disabled>
+          <span class="material-icons">file_upload</span>
+          Upload CSV
+        </button>
+      `;
+      openModal();
+    }
+
+    function handleBatchEnrollmentFile(input) {
+      const file = input && input.files ? input.files[0] : null;
+      const statusEl = document.getElementById('batchEnrollmentStatus');
+      const uploadBtn = document.getElementById('batchEnrollmentUploadBtn');
+
+      if (!file) {
+        if (statusEl) {
+          statusEl.innerHTML = `
+            <span class="material-icons" style="font-size: 18px;">upload_file</span>
+            <span>No file selected yet.</span>
+          `;
+        }
+        if (uploadBtn) uploadBtn.disabled = true;
+        batchEnrollmentUpload = null;
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        batchEnrollmentUpload = {
+          name: file.name,
+          content: e.target.result
+        };
+        if (statusEl) {
+          statusEl.innerHTML = `
+            <span class="material-icons" style="font-size: 18px;">description</span>
+            <span>Ready to upload <strong>${file.name}</strong>.</span>
+          `;
+        }
+        if (uploadBtn) uploadBtn.disabled = false;
+      };
+      reader.onerror = function() {
+        batchEnrollmentUpload = null;
+        if (statusEl) {
+          statusEl.innerHTML = `
+            <span class="material-icons" style="font-size: 18px;">error</span>
+            <span>Could not read the file. Please try again.</span>
+          `;
+        }
+        if (uploadBtn) uploadBtn.disabled = true;
+      };
+
+      reader.readAsText(file);
+    }
+
+    function submitBatchEnrollmentUpload() {
+      const statusEl = document.getElementById('batchEnrollmentStatus');
+      const uploadBtn = document.getElementById('batchEnrollmentUploadBtn');
+
+      if (!batchEnrollmentUpload || !batchEnrollmentUpload.content) {
+        showToast('Please select a CSV file first', 'error');
+        return;
+      }
+
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div class="loading" style="justify-content: flex-start; gap: 8px;">
+            <div class="spinner"></div>
+            <span>Processing upload...</span>
+          </div>
+        `;
+      }
+      if (uploadBtn) uploadBtn.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          renderBatchEnrollmentResult(result);
+          if (uploadBtn) uploadBtn.disabled = false;
+        })
+        .withFailureHandler(function(error) {
+          if (statusEl) {
+            statusEl.innerHTML = `
+              <span class="material-icons" style="font-size: 18px;">error</span>
+              <span>Upload failed. Please try again.</span>
+            `;
+          }
+          if (uploadBtn) uploadBtn.disabled = false;
+          handleError(error);
+        })
+        .importParticipantsCSV(sessionToken, {
+          csv: batchEnrollmentUpload.content,
+          filename: batchEnrollmentUpload.name
+        });
+    }
+
+    function renderBatchEnrollmentResult(result) {
+      const statusEl = document.getElementById('batchEnrollmentStatus');
+      const container = document.getElementById('batchEnrollmentResults');
+      if (!statusEl || !container) return;
+
+      if (!result || !result.success) {
+        statusEl.innerHTML = `
+          <span class="material-icons" style="font-size: 18px;">error</span>
+          <span>${result && result.message ? result.message : 'Upload failed.'}</span>
+        `;
+        container.innerHTML = '';
+        return;
+      }
+
+      const summary = result.summary || {};
+      const errors = summary.errors || [];
+
+      statusEl.innerHTML = `
+        <span class="material-icons" style="font-size: 18px;">check_circle</span>
+        <span>Upload processed. Created: <strong>${summary.created || 0}</strong>, Updated: <strong>${summary.updated || 0}</strong>, Skipped: <strong>${summary.skipped || 0}</strong>.</span>
+      `;
+
+      container.innerHTML = `
+        <div class="card">
+          <div class="card-body">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 12px;">
+              ${[
+                ['Processed', summary.processed || 0],
+                ['Created', summary.created || 0],
+                ['Updated', summary.updated || 0],
+                ['Skipped', summary.skipped || 0]
+              ].map(item => `
+                <div style="padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
+                  <div style="font-size: 0.85rem; color: var(--gray-600);">${item[0]}</div>
+                  <div style="font-weight: 700; font-size: 1.1rem;">${item[1]}</div>
+                </div>
+              `).join('')}
+            </div>
+            ${errors.length ? `
+              <div class="alert alert-warning" style="margin-top: 0.5rem;">
+                <div style="font-weight: 600; margin-bottom: 0.25rem;">Errors (${errors.length})</div>
+                <ul style="margin: 0; padding-left: 1.25rem; line-height: 1.4;">
+                  ${errors.map(e => `<li>Row ${e.row}: ${e.message}</li>`).join('')}
+                </ul>
+              </div>
+            ` : `
+              <div class="alert alert-success">
+                All rows processed successfully.
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+
+      loadParticipants();
     }
 
     function renderParticipants(result) {
