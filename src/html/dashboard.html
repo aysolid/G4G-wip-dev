@@ -1436,7 +1436,10 @@
       google.script.run
         .withSuccessHandler(renderParticipants)
         .withFailureHandler(handleError)
-        .getAllParticipants(sessionToken, { site: getParticipantSiteFilter() });
+        .getAllParticipants(sessionToken, {
+          site: getParticipantSiteFilter(),
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function renderParticipants(result) {
@@ -2754,14 +2757,20 @@
       google.script.run
         .withSuccessHandler(downloadCSV)
         .withFailureHandler(handleError)
-        .exportParticipantsCSV(sessionToken, { site: currentSiteFilter });
+        .exportParticipantsCSV(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function exportChecklist() {
       google.script.run
         .withSuccessHandler(downloadCSV)
         .withFailureHandler(handleError)
-        .exportChecklistCSV(sessionToken, { site: currentSiteFilter });
+        .exportChecklistCSV(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function exportSummary() {
@@ -2882,16 +2891,47 @@
     // ============================================
     // UTILITY FUNCTIONS
     // ============================================
+    function isSectionVisible(sectionId) {
+      const section = document.getElementById(sectionId + 'Section');
+      return section && !section.classList.contains('hidden');
+    }
+
+    function refreshDataForFilters() {
+      loadDashboardData();
+
+      if (isSectionVisible('participants')) {
+        loadParticipants();
+      }
+
+      if (isSectionVisible('rollouts')) {
+        loadRollouts();
+      }
+
+      if (isSectionVisible('exports')) {
+        loadExports();
+      }
+
+      if (isSectionVisible('reports')) {
+        loadReports();
+      }
+    }
+
     function handleSiteFilterChange() {
       currentSiteFilter = document.getElementById('siteFilter').value;
       currentRolloutFilter = 'All'; // Reset rollout filter when site changes
+
+      const rolloutSelect = document.getElementById('rolloutFilter');
+      if (rolloutSelect) {
+        rolloutSelect.value = 'All';
+      }
+
       loadRolloutsForFilter(currentSiteFilter);
-      loadDashboardData();
+      refreshDataForFilters();
     }
 
     function handleRolloutFilterChange() {
       currentRolloutFilter = document.getElementById('rolloutFilter').value;
-      loadDashboardData();
+      refreshDataForFilters();
     }
 
     function loadRolloutsForFilter(site) {
@@ -2917,6 +2957,16 @@
                 rolloutSelect.appendChild(option);
               }
             });
+
+            const matchingRollout = result.rollouts.find(r => r.rolloutId === currentRolloutFilter);
+            if (matchingRollout) {
+              rolloutSelect.value = currentRolloutFilter;
+            } else {
+              rolloutSelect.value = 'All';
+              currentRolloutFilter = 'All';
+            }
+          } else {
+            rolloutSelect.value = 'All';
           }
         })
         .withFailureHandler(function(error) {

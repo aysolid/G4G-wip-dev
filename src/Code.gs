@@ -1631,7 +1631,8 @@ function exportChecklistCSV(token, filters) {
     participantMap[pid] = {
       fullName: pData[i][pHeaders.indexOf('fullName')],
       site: pData[i][pHeaders.indexOf('site')],
-      schoolName: pData[i][pHeaders.indexOf('schoolName')]
+      schoolName: pData[i][pHeaders.indexOf('schoolName')],
+      rolloutId: pData[i][pHeaders.indexOf('rolloutId')]
     };
   }
 
@@ -1650,6 +1651,9 @@ function exportChecklistCSV(token, filters) {
 
     // Apply filters
     if (filters && filters.site && filters.site !== 'All' && participant.site !== filters.site) {
+      continue;
+    }
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
       continue;
     }
 
