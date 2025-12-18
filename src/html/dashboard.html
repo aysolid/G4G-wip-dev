@@ -2284,13 +2284,20 @@
           </div>
           <div class="form-group">
             <label class="form-label">Username *</label>
-            <input type="text" class="form-input" id="userUsername" placeholder="Enter username">
+            <input type="text" class="form-input" id="userUsername" placeholder="Enter username (for login)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password *</label>
+            <input type="text" class="form-input" id="userPassword" placeholder="Enter password">
+            <p style="font-size: 0.75rem; color: var(--gray-500); margin-top: 0.25rem;">
+              This password will be stored as plain text in the protected Google Sheet.
+            </p>
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Role *</label>
               <select class="form-select" id="userRole">
-                <option value="">Select role...</option>
+                <option value="">-- Select Role --</option>
                 <option value="admin">Admin</option>
                 <option value="facilitator">Facilitator</option>
                 <option value="viewer">Viewer</option>
@@ -2299,22 +2306,18 @@
             <div class="form-group">
               <label class="form-label">Site *</label>
               <select class="form-select" id="userSite">
-                <option value="">Select site...</option>
+                <option value="">-- Select Site --</option>
                 <option value="All">All Sites</option>
                 <option value="UGA">UGA</option>
                 <option value="Missouri">Missouri</option>
               </select>
             </div>
           </div>
-          <p style="font-size: 0.875rem; color: var(--gray-500); margin-top: 0.5rem;">
-            <span class="material-icons" style="font-size: 16px; vertical-align: middle;">info</span>
-            A temporary password will be generated and displayed after creation.
-          </p>
         </div>
       `;
       document.getElementById('modalFooter').innerHTML = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" onclick="saveUser()">
+        <button class="btn btn-primary" type="button" id="createUserBtn" onclick="saveUser()">
           <span class="material-icons">person_add</span>
           Create User
         </button>
@@ -2323,26 +2326,24 @@
     }
 
     function saveUser() {
-      // Get form elements
-      const fullNameEl = document.getElementById('userFullName');
-      const usernameEl = document.getElementById('userUsername');
-      const roleEl = document.getElementById('userRole');
-      const siteEl = document.getElementById('userSite');
+      // Get values directly from elements
+      const fullName = document.getElementById('userFullName').value.trim();
+      const username = document.getElementById('userUsername').value.trim();
+      const password = document.getElementById('userPassword').value.trim();
+      const roleSelect = document.getElementById('userRole');
+      const siteSelect = document.getElementById('userSite');
 
-      // Get values
-      const data = {
-        fullName: fullNameEl ? fullNameEl.value.trim() : '',
-        username: usernameEl ? usernameEl.value.trim() : '',
-        role: roleEl ? roleEl.value : '',
-        site: siteEl ? siteEl.value : ''
-      };
+      // Get selected values from dropdowns
+      const role = roleSelect.options[roleSelect.selectedIndex].value;
+      const site = siteSelect.options[siteSelect.selectedIndex].value;
 
-      // Validate each field and show specific error
+      // Validate each field
       const errors = [];
-      if (!data.fullName) errors.push('Full Name');
-      if (!data.username) errors.push('Username');
-      if (!data.role) errors.push('Role');
-      if (!data.site) errors.push('Site');
+      if (!fullName) errors.push('Full Name');
+      if (!username) errors.push('Username');
+      if (!password) errors.push('Password');
+      if (!role) errors.push('Role');
+      if (!site) errors.push('Site');
 
       if (errors.length > 0) {
         showToast('Please fill in: ' + errors.join(', '), 'error');
@@ -2350,18 +2351,26 @@
       }
 
       // Disable button while saving
-      const saveBtn = document.querySelector('#modalFooter .btn-primary');
+      const saveBtn = document.getElementById('createUserBtn');
       if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px;"></div> Creating...';
+        saveBtn.innerHTML = '<div class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></div> Creating...';
       }
+
+      const data = {
+        fullName: fullName,
+        username: username,
+        password: password,
+        role: role,
+        site: site
+      };
 
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
             closeModal();
-            showToast('User created! Temporary password: ' + result.tempPassword, 'success');
-            alert('User created successfully!\n\nTemporary Password: ' + result.tempPassword + '\n\nPlease share this with the user securely.');
+            showToast('User created successfully!', 'success');
+            alert('User created successfully!\n\nUsername: ' + username + '\nPassword: ' + password + '\n\nPlease share these credentials securely.');
             loadUsers();
           } else {
             showToast(result.message, 'error');

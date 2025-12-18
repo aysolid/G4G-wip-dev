@@ -544,14 +544,14 @@ function createUser(token, userData) {
   }
 
   const userId = generateUUID();
-  const tempPassword = generateRandomPassword();
-  // Store plain text password since the Google Sheet is highly protected
+  // Use provided password or generate one if not provided
+  const password = userData.password || generateRandomPassword();
   const timestamp = new Date().toISOString();
 
   usersSheet.appendRow([
     userId,
     userData.username,
-    tempPassword,  // Plain text password
+    password,  // Plain text password
     userData.fullName,
     userData.role,
     userData.site,
@@ -567,7 +567,7 @@ function createUser(token, userData) {
   return {
     success: true,
     message: 'User created successfully',
-    tempPassword: tempPassword,
+    tempPassword: password,
     userId: userId
   };
 }
