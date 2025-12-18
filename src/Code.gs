@@ -1249,6 +1249,282 @@ function generateParticipantId(site) {
   return prefix + '-' + timestamp + random;
 }
 
+/**
+ * Generate a CSV template for batch participant enrollment
+ */
+function generateEnrollmentTemplate(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  if (!rolloutsSheet) {
+    return { success: false, message: 'Study rollouts sheet not found' };
+  }
+
+  const data = rolloutsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rollouts = [];
+  const isFacilitator = currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All';
+
+  for (let i = 1; i < data.length; i++) {
+    const site = data[i][headers.indexOf('site')];
+    if (isFacilitator && site !== currentUser.site) continue;
+    rollouts.push({
+      rolloutId: data[i][headers.indexOf('rolloutId')],
+      site: site,
+      schoolName: data[i][headers.indexOf('schoolName')],
+      period: data[i][headers.indexOf('period')],
+      year: data[i][headers.indexOf('year')],
+      status: data[i][headers.indexOf('status')]
+    });
+  }
+
+  const csvHeaders = ['participantId', 'fullName', 'rolloutId', 'rolloutName', 'site', 'schoolName', 'period', 'year', 'status', 'notes'];
+  const rows = [csvHeaders];
+
+  rollouts.forEach(r => {
+    const label = `${r.schoolName} (${r.period} ${r.year})`;
+    rows.push([
+      '',
+      'Full Name',
+      r.rolloutId,
+      label,
+      r.site,
+      r.schoolName,
+      r.period,
+      r.year,
+      'active',
+      ''
+    ]);
+  });
+
+  if (rows.length === 1) {
+    rows.push(['', 'Full Name', 'ROLL-000', 'Example Rollout', '', '', '', '', 'active', '']);
+  }
+
+  const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n');
+
+  return {
+    success: true,
+    csv: csv,
+    filename: 'participant_enrollment_template.csv',
+    rolloutCount: rollouts.length
+  };
+}
+
+/**
+ * Import participants from CSV (batch enrollment/upsert)
+ */
+function importParticipantsCSV(token, fileData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!fileData || !fileData.csv) {
+    return { success: false, message: 'No CSV content provided' };
+  }
+
+  let rows;
+  try {
+    rows = Utilities.parseCsv(fileData.csv);
+  } catch (error) {
+    return { success: false, message: 'Unable to parse CSV: ' + error.message };
+  }
+
+  if (!rows || rows.length === 0) {
+    return { success: false, message: 'CSV is empty' };
+  }
+
+  const headers = rows[0].map(h => h.trim());
+  const required = ['fullName', 'rolloutId'];
+  const missing = required.filter(col => headers.indexOf(col) === -1);
+  if (missing.length > 0) {
+    return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
+  }
+
+  const idx = name => headers.indexOf(name);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!participantsSheet || !checklistSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  // Build rollout map for quick lookups
+  const rolloutData = rolloutsSheet.getDataRange().getValues();
+  const rolloutHeaders = rolloutData[0];
+  const rolloutMap = {};
+  const isFacilitator = currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All';
+
+  for (let i = 1; i < rolloutData.length; i++) {
+    const rolloutId = rolloutData[i][rolloutHeaders.indexOf('rolloutId')];
+    const site = rolloutData[i][rolloutHeaders.indexOf('site')];
+    if (isFacilitator && site !== currentUser.site) continue;
+
+    rolloutMap[rolloutId] = {
+      rolloutId: rolloutId,
+      site: site,
+      schoolName: rolloutData[i][rolloutHeaders.indexOf('schoolName')],
+      period: rolloutData[i][rolloutHeaders.indexOf('period')],
+      year: rolloutData[i][rolloutHeaders.indexOf('year')],
+      status: rolloutData[i][rolloutHeaders.indexOf('status')]
+    };
+  }
+
+  if (Object.keys(rolloutMap).length === 0) {
+    return { success: false, message: 'No accessible rollouts found for this user' };
+  }
+
+  // Participant map for upserts
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const participantMap = {};
+  for (let i = 1; i < pData.length; i++) {
+    const pid = pData[i][pHeaders.indexOf('participantId')];
+    participantMap[pid] = {
+      rowIndex: i + 1,
+      data: pData[i]
+    };
+  }
+
+  const summary = {
+    processed: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: []
+  };
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const rowNumber = r + 1; // 1-based CSV row
+
+    const participantId = idx('participantId') !== -1 ? (row[idx('participantId')] || '').trim() : '';
+    const fullName = (row[idx('fullName')] || '').trim();
+    const rolloutId = (row[idx('rolloutId')] || '').trim();
+    const notes = idx('notes') !== -1 ? (row[idx('notes')] || '').trim() : '';
+    const statusRaw = idx('status') !== -1 ? (row[idx('status')] || '').trim() : '';
+    const status = (statusRaw || 'active').toLowerCase();
+
+    if (!fullName && !rolloutId && !participantId) {
+      summary.skipped++;
+      continue;
+    }
+
+    summary.processed++;
+
+    if (!fullName) {
+      summary.errors.push({ row: rowNumber, message: 'Full name is required' });
+      summary.skipped++;
+      continue;
+    }
+    if (!rolloutId) {
+      summary.errors.push({ row: rowNumber, message: 'rolloutId is required' });
+      summary.skipped++;
+      continue;
+    }
+    const rollout = rolloutMap[rolloutId];
+    if (!rollout) {
+      summary.errors.push({ row: rowNumber, message: 'Rollout not found or not accessible: ' + rolloutId });
+      summary.skipped++;
+      continue;
+    }
+
+    if (CONFIG.PARTICIPANT_STATUSES.indexOf(status) === -1) {
+      summary.errors.push({ row: rowNumber, message: 'Invalid status. Allowed: ' + CONFIG.PARTICIPANT_STATUSES.join(', ') });
+      summary.skipped++;
+      continue;
+    }
+
+    if (participantId && participantMap[participantId]) {
+      // Update existing participant
+      const existing = participantMap[participantId];
+      const currentSite = existing.data[pHeaders.indexOf('site')];
+      if (isFacilitator && currentSite !== currentUser.site) {
+        summary.errors.push({ row: rowNumber, message: 'Unauthorized to modify participant outside your site' });
+        summary.skipped++;
+        continue;
+      }
+
+      const updatedRow = existing.data.slice();
+      updatedRow[pHeaders.indexOf('fullName')] = fullName;
+      updatedRow[pHeaders.indexOf('rolloutId')] = rollout.rolloutId;
+      updatedRow[pHeaders.indexOf('site')] = rollout.site;
+      updatedRow[pHeaders.indexOf('schoolName')] = rollout.schoolName;
+      updatedRow[pHeaders.indexOf('period')] = rollout.period;
+      updatedRow[pHeaders.indexOf('year')] = rollout.year;
+      updatedRow[pHeaders.indexOf('status')] = status;
+      updatedRow[pHeaders.indexOf('notes')] = notes;
+
+      participantsSheet.getRange(existing.rowIndex, 1, 1, pHeaders.length).setValues([updatedRow]);
+      summary.updated++;
+
+      logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT_BULK', 'participant', participantId,
+        'Updated via CSV: ' + fullName);
+    } else if (participantId && !participantMap[participantId]) {
+      summary.errors.push({ row: rowNumber, message: 'Participant ID not found: ' + participantId });
+      summary.skipped++;
+      continue;
+    } else {
+      // Create new participant
+      if (isFacilitator && rollout.site !== currentUser.site) {
+        summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + rollout.site });
+        summary.skipped++;
+        continue;
+      }
+
+      const newParticipantId = generateParticipantId(rollout.site);
+      const timestamp = new Date().toISOString();
+
+      participantsSheet.appendRow([
+        newParticipantId,
+        fullName,
+        rollout.site,
+        rollout.rolloutId,
+        rollout.schoolName,
+        rollout.period,
+        rollout.year,
+        timestamp,
+        currentUser.userId,
+        status,
+        notes,
+        0
+      ]);
+
+      CONFIG.INSTRUMENTS.forEach(instrument => {
+        const checklistId = generateUUID();
+        checklistSheet.appendRow([
+          checklistId,
+          newParticipantId,
+          instrument.number,
+          instrument.name,
+          instrument.category,
+          'not_started',
+          '',
+          '',
+          ''
+        ]);
+      });
+
+      logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
+        'Bulk enrolled: ' + fullName + ' into ' + rollout.schoolName);
+
+      summary.created++;
+    }
+  }
+
+  return {
+    success: true,
+    summary: summary
+  };
+}
+
 // ============================================
 // CHECKLIST FUNCTIONS
 // ============================================
@@ -2263,6 +2539,14 @@ function generateRandomPassword() {
  */
 function generateSessionToken() {
   return Utilities.getUuid() + '-' + Utilities.getUuid();
+}
+
+/**
+ * Escape a value for CSV
+ */
+function csvEscape(value) {
+  const str = value === null || value === undefined ? '' : String(value);
+  return '"' + str.replace(/"/g, '""') + '"';
 }
 
 /**
