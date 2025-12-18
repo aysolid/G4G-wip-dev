@@ -590,10 +590,10 @@
         </div>
       </div>
       <div class="header-actions">
-        <a href="#about" class="btn btn-secondary">
+        <button type="button" class="btn btn-secondary" id="aboutStudyButton">
           <span class="material-icons">info</span>
           About Study
-        </a>
+        </button>
         <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="btn btn-primary">
           <span class="material-icons">login</span>
           Staff Login
@@ -781,6 +781,14 @@
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      const aboutStudyButton = document.getElementById('aboutStudyButton');
+      if (aboutStudyButton) {
+        aboutStudyButton.addEventListener('click', function() {
+          window.open('https://coe.uga.edu/research/labs/gaming-4-good/', '_blank');
+          window.open('https://cehd.missouri.edu/information-science-learning-technologies/gaming-for-good/', '_blank');
+        });
+      }
+
       loadPublicRollouts(currentPublicSiteFilter);
       loadDashboardStats();
     });
