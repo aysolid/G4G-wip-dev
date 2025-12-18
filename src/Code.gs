@@ -530,6 +530,24 @@ function createUser(token, userData) {
     return { success: false, message: 'Unauthorized' };
   }
 
+  // Basic validation
+  if (!userData.role || !CONFIG.ROLES.includes(userData.role)) {
+    return { success: false, message: 'Invalid role selected' };
+  }
+
+  if (!userData.site) {
+    return { success: false, message: 'Site is required' };
+  }
+
+  const validSites = CONFIG.SITES.concat(['All']);
+  if (validSites.indexOf(userData.site) === -1) {
+    return { success: false, message: 'Invalid site selected' };
+  }
+
+  if (userData.role === 'facilitator' && userData.site === 'All') {
+    return { success: false, message: 'Facilitators must be assigned to a single site' };
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const usersSheet = ss.getSheetByName('Users');
 
@@ -588,13 +606,26 @@ function updateUser(token, userId, userData) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === userId) {
+      const existingRole = data[i][headers.indexOf('role')];
+      const nextRole = userData.role || existingRole;
+
       if (userData.fullName) {
         usersSheet.getRange(i + 1, headers.indexOf('fullName') + 1).setValue(userData.fullName);
       }
       if (userData.role) {
+        if (!CONFIG.ROLES.includes(userData.role)) {
+          return { success: false, message: 'Invalid role selected' };
+        }
         usersSheet.getRange(i + 1, headers.indexOf('role') + 1).setValue(userData.role);
       }
       if (userData.site) {
+        const validSites = CONFIG.SITES.concat(['All']);
+        if (validSites.indexOf(userData.site) === -1) {
+          return { success: false, message: 'Invalid site selected' };
+        }
+        if (nextRole === 'facilitator' && userData.site === 'All') {
+          return { success: false, message: 'Facilitators must be assigned to a single site' };
+        }
         usersSheet.getRange(i + 1, headers.indexOf('site') + 1).setValue(userData.site);
       }
       if (userData.status) {
@@ -688,6 +719,15 @@ function getAllRollouts(token, siteFilter) {
  * Get rollouts by site
  */
 function getRolloutsBySite(token, site) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && currentUser.site !== site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
   return getAllRollouts(token, site);
 }
 
@@ -857,10 +897,8 @@ function getAllParticipants(token, filters) {
     }
 
     // Facilitators see their site by default unless viewing all
-    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && !filters.viewAll) {
-      if (participant.site !== currentUser.site) {
-        include = false;
-      }
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && participant.site !== currentUser.site) {
+      include = false;
     }
 
     if (include) {
@@ -917,6 +955,10 @@ function getParticipantById(token, participantId) {
     return { success: false, message: 'Participant not found' };
   }
 
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && participant.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
   // Get checklist items
   const cData = checklistSheet.getDataRange().getValues();
   const cHeaders = cData[0];
@@ -961,6 +1003,16 @@ function enrollParticipant(token, participantData) {
   const rollout = getRolloutById(participantData.rolloutId);
   if (!rollout) {
     return { success: false, message: 'Invalid rollout selected' };
+  }
+
+  if (currentUser.role === 'facilitator') {
+    if (!currentUser.site || currentUser.site === 'All') {
+      return { success: false, message: 'Facilitators must be assigned to a single site before enrolling participants' };
+    }
+
+    if (rollout.site !== currentUser.site) {
+      return { success: false, message: 'Unauthorized to enroll participants for this site' };
+    }
   }
 
   // Generate participant ID
@@ -1025,6 +1077,11 @@ function updateParticipant(token, participantId, participantData) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
+      if (currentUser.role === 'facilitator' && currentUser.site !== 'All' &&
+          data[i][headers.indexOf('site')] !== currentUser.site) {
+        return { success: false, message: 'Unauthorized for this site' };
+      }
+
       if (participantData.fullName) {
         participantsSheet.getRange(i + 1, headers.indexOf('fullName') + 1).setValue(participantData.fullName);
       }
@@ -1070,13 +1127,39 @@ function updateChecklistItem(token, checklistId, updateData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const checklistSheet = ss.getSheetByName('Checklist');
+  const participantsSheet = ss.getSheetByName('Participants');
+
+  if (!checklistSheet || !participantsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
   const data = checklistSheet.getDataRange().getValues();
   const headers = data[0];
+
+  // Build participant site map for authorization checks
+  const participantSiteMap = {};
+  if (participantsSheet) {
+    const pData = participantsSheet.getDataRange().getValues();
+    const pHeaders = pData[0];
+    for (let i = 1; i < pData.length; i++) {
+      participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
+    }
+  }
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('checklistId')] === checklistId) {
       const participantId = data[i][headers.indexOf('participantId')];
       const instrumentName = data[i][headers.indexOf('instrumentName')];
+      const participantSite = participantSiteMap[participantId];
+
+      if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+        if (!participantSite) {
+          return { success: false, message: 'Unable to verify participant site' };
+        }
+        if (participantSite !== currentUser.site) {
+          return { success: false, message: 'Unauthorized for this site' };
+        }
+      }
 
       // Update status
       if (updateData.status) {
@@ -1123,7 +1206,8 @@ function bulkUpdateChecklist(token, participantId, updates) {
   let successCount = 0;
   let errorCount = 0;
 
-  updates.forEach(update => {
+  for (let i = 0; i < updates.length; i++) {
+    const update = updates[i];
     const result = updateChecklistItem(token, update.checklistId, {
       status: update.status,
       notes: update.notes
@@ -1133,8 +1217,11 @@ function bulkUpdateChecklist(token, participantId, updates) {
       successCount++;
     } else {
       errorCount++;
+      if (result.message && result.message.toLowerCase().includes('unauthorized')) {
+        return { success: false, message: result.message };
+      }
     }
-  });
+  }
 
   return {
     success: true,
@@ -1475,6 +1562,12 @@ function exportParticipantsCSV(token, filters) {
     return { success: false, message: 'Unauthorized' };
   }
 
+  // Enforce facilitator site scope
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters = filters || {};
+    filters.site = currentUser.site;
+  }
+
   const result = getAllParticipants(token, filters);
   if (!result.success) return result;
 
@@ -1512,6 +1605,12 @@ function exportChecklistCSV(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {
     return { success: false, message: 'Unauthorized' };
+  }
+
+  // Enforce facilitator site scope
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters = filters || {};
+    filters.site = currentUser.site;
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();

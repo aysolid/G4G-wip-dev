@@ -1396,6 +1396,13 @@
     // ============================================
     // PARTICIPANTS
     // ============================================
+    function getParticipantSiteFilter() {
+      if (currentUser && currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All') {
+        return currentUser.site;
+      }
+      return currentSiteFilter;
+    }
+
     function loadParticipants() {
       const section = document.getElementById('participantsSection');
       section.innerHTML = `
@@ -1429,7 +1436,7 @@
       google.script.run
         .withSuccessHandler(renderParticipants)
         .withFailureHandler(handleError)
-        .getAllParticipants(sessionToken, { site: currentSiteFilter });
+        .getAllParticipants(sessionToken, { site: getParticipantSiteFilter() });
     }
 
     function renderParticipants(result) {
@@ -1847,6 +1854,14 @@
           </div>
         </div>
       `;
+
+      // Limit facilitators to their assigned site for enrollment
+      const enrollSite = document.getElementById('enrollSite');
+      if (currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All') {
+        enrollSite.value = currentUser.site;
+        enrollSite.disabled = true;
+        loadRolloutsForSite();
+      }
     }
 
     function loadRolloutsForSite() {
@@ -1863,7 +1878,14 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success && result.rollouts.length > 0) {
+          if (!result.success) {
+            rolloutSelect.innerHTML = `<option value="">${result.message || 'Unable to load rollouts'}</option>`;
+            rolloutSelect.disabled = true;
+            showToast(result.message || 'Unable to load rollouts', 'error');
+            return;
+          }
+
+          if (result.rollouts.length > 0) {
             let options = '<option value="">Select rollout...</option>';
             result.rollouts.filter(r => r.status === 'active').forEach(r => {
               options += `<option value="${r.rolloutId}">${r.schoolName} (${r.period} ${r.year})</option>`;
@@ -2291,6 +2313,36 @@
       document.getElementById('usersList').innerHTML = tableHtml;
     }
 
+    function configureRoleSiteSelect(roleSelectId, siteSelectId, initialSite) {
+      const roleSelect = document.getElementById(roleSelectId);
+      const siteSelect = document.getElementById(siteSelectId);
+      if (!roleSelect || !siteSelect) return;
+
+      const refreshSites = () => {
+        const selectedRole = (roleSelect.value || '').toLowerCase();
+        const includeAll = selectedRole !== 'facilitator';
+        const sites = includeAll ? ['All', 'UGA', 'Missouri'] : ['UGA', 'Missouri'];
+        const currentSelection = siteSelect.value || initialSite || '';
+
+        siteSelect.innerHTML = '<option value="">-- Select Site --</option>';
+        sites.forEach(site => {
+          const opt = document.createElement('option');
+          opt.value = site;
+          opt.textContent = site === 'All' ? 'All Sites' : site;
+          siteSelect.appendChild(opt);
+        });
+
+        if (currentSelection && sites.includes(currentSelection)) {
+          siteSelect.value = currentSelection;
+        } else if (selectedRole === 'admin') {
+          siteSelect.value = 'All';
+        }
+      };
+
+      roleSelect.addEventListener('change', refreshSites);
+      refreshSites();
+    }
+
     function showAddUserModal() {
       document.getElementById('modalTitle').textContent = 'Add New User';
       document.getElementById('modalBody').innerHTML = `
@@ -2339,6 +2391,12 @@
           Create User
         </button>
       `;
+      configureRoleSiteSelect('userRole', 'userSite', 'All');
+      const defaultRole = document.getElementById('userRole');
+      if (defaultRole && !defaultRole.value) {
+        defaultRole.value = 'admin';
+        defaultRole.dispatchEvent(new Event('change'));
+      }
       openModal();
     }
 
@@ -2361,8 +2419,8 @@
         const fullName = fullNameEl.value ? fullNameEl.value.trim() : '';
         const username = usernameEl.value ? usernameEl.value.trim() : '';
         const password = passwordEl.value ? passwordEl.value.trim() : '';
-        const role = roleEl.value || '';
-        const site = siteEl.value || '';
+        const role = roleEl.value ? roleEl.value.trim() : '';
+        const site = siteEl.value ? siteEl.value.trim() : '';
 
         // Validate each field
         const errors = [];
@@ -2374,6 +2432,11 @@
 
         if (errors.length > 0) {
           showToast('Please fill in: ' + errors.join(', '), 'error');
+          return;
+        }
+
+        if (role === 'facilitator' && site === 'All') {
+          showToast('Facilitators must be assigned to a single site', 'error');
           return;
         }
 
@@ -2468,19 +2531,25 @@
           Save Changes
         </button>
       `;
+      configureRoleSiteSelect('editUserRole', 'editUserSite', site);
       openModal();
     }
 
     function updateUser(userId) {
       const data = {
         fullName: document.getElementById('editUserFullName').value.trim(),
-        role: document.getElementById('editUserRole').value,
-        site: document.getElementById('editUserSite').value,
+        role: document.getElementById('editUserRole').value.trim(),
+        site: document.getElementById('editUserSite').value.trim(),
         status: document.getElementById('editUserStatus').value
       };
 
       if (!data.fullName || !data.role || !data.site) {
         showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      if (data.role === 'facilitator' && data.site === 'All') {
+        showToast('Facilitators must be assigned to a single site', 'error');
         return;
       }
 
