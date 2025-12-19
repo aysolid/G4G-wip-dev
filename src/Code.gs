@@ -2619,8 +2619,18 @@ function exportSummaryReport(token, filters) {
     });
   });
 
-  const file = DriveApp.getFileById(spreadsheet.getId());
-  const blob = file.getBlob().getAs(MimeType.MICROSOFT_EXCEL);
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to export workbook: ' + response.getContentText() };
+  }
+
+  const blob = response.getBlob().setName('summary_report_' + new Date().toISOString().split('T')[0] + '.xlsx');
   const base64 = Utilities.base64Encode(blob.getBytes());
 
   DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
