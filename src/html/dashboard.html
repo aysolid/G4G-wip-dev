@@ -457,6 +457,32 @@
       font-size: 18px;
     }
 
+    .icon-button {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--gray-500);
+      padding: 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+
+    .icon-button:hover {
+      background: var(--gray-100);
+      border-color: var(--gray-200);
+      color: var(--primary-color);
+    }
+
+    .icon-button:disabled {
+      cursor: not-allowed;
+      color: var(--gray-300);
+      border-color: transparent;
+      background: transparent;
+    }
+
     /* Tables */
     .table-container {
       overflow-x: auto;
@@ -1047,6 +1073,7 @@
     let batchChecklistState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
     let batchEnrollmentUpload = null;
     let batchEnrollmentResult = null;
+    let instrumentStatsLookup = {};
 
     // ============================================
     // INITIALIZATION
@@ -3221,6 +3248,7 @@
     // REPORTS
     // ============================================
     function loadReports() {
+      instrumentStatsLookup = {};
       const section = document.getElementById('reportsSection');
       section.innerHTML = `
         <div id="analyticsOverview">
@@ -3322,6 +3350,10 @@
       const rollouts = result.rollouts || [];
       const instrumentStats = result.instrumentStats || [];
       const totalParticipants = overview.totalParticipants || 0;
+
+      instrumentStats.forEach(inst => {
+        instrumentStatsLookup[inst.number] = inst;
+      });
 
       overviewContainer.innerHTML = `
         <div class="stats-grid">
@@ -3473,18 +3505,80 @@
           </div>
         `;
       } else {
-        instrumentContainer.innerHTML = instrumentStats.map(inst => `
-          <div style="margin-bottom: 0.85rem;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-              <div style="font-weight: 600;">${inst.name}</div>
-              <div class="stat-label">${inst.completed}/${inst.total} completed (${inst.percentage}%)</div>
+        instrumentContainer.innerHTML = instrumentStats.map(inst => {
+          const pendingCount = (inst.pendingParticipants || []).length;
+          const badgeClass = pendingCount > 0 ? 'badge-warning' : 'badge-success';
+          const badgeText = pendingCount > 0 ? `${pendingCount} pending` : 'All completed';
+
+          return `
+            <div style="margin-bottom: 0.85rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; gap: 0.5rem; flex-wrap: wrap;">
+                <div style="font-weight: 600;">${inst.name}</div>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <div class="stat-label">${inst.completed}/${inst.total} completed (${inst.percentage}%)</div>
+                  <span class="badge ${badgeClass}">${badgeText}</span>
+                  <button class="icon-button" onclick="showInstrumentPending(${inst.number})" title="View participants who haven't completed" ${pendingCount === 0 ? 'disabled' : ''}>
+                    <span class="material-icons" style="font-size: 18px;">list</span>
+                  </button>
+                </div>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill ${inst.percentage >= 80 ? 'success' : inst.percentage >= 50 ? 'warning' : 'primary'}" style="width: ${inst.percentage}%"></div>
+              </div>
             </div>
-            <div class="progress-bar">
-              <div class="progress-fill ${inst.percentage >= 80 ? 'success' : inst.percentage >= 50 ? 'warning' : 'primary'}" style="width: ${inst.percentage}%"></div>
-            </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       }
+    }
+
+    function showInstrumentPending(instrumentNumber) {
+      const instrument = instrumentStatsLookup[instrumentNumber];
+
+      if (!instrument) {
+        showToast('Instrument details are not available right now.', 'error');
+        return;
+      }
+
+      const pendingList = instrument.pendingParticipants || [];
+
+      if (pendingList.length === 0) {
+        showToast(`All participants have completed ${instrument.name}`, 'success');
+        return;
+      }
+
+      const participantRows = pendingList.map(person => {
+        const statusTag = getChecklistStatusTag(person.status);
+        return `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0; border-bottom: 1px solid var(--gray-100);">
+            <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(person.name || 'Unknown Participant')}</div>
+            <span class="badge ${statusTag.className}">${statusTag.label}</span>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('modalTitle').textContent = `${instrument.name} - Remaining Participants`;
+      document.getElementById('modalBody').innerHTML = `
+        <p class="stat-label" style="margin-bottom: 0.75rem;">${pendingList.length} participant${pendingList.length === 1 ? '' : 's'} have not completed this instrument.</p>
+        <div style="max-height: 320px; overflow-y: auto;">
+          ${participantRows}
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">
+          <span class="material-icons">close</span>
+          Close
+        </button>
+      `;
+      openModal();
+    }
+
+    function getChecklistStatusTag(status) {
+      const normalized = (status || '').toLowerCase();
+
+      if (normalized === 'missing') return { label: 'Missing', className: 'badge-danger' };
+      if (normalized === 'completed') return { label: 'Completed', className: 'badge-info' };
+      if (normalized === 'not_started') return { label: 'Not started', className: 'badge-neutral' };
+      return { label: 'In progress', className: 'badge-warning' };
     }
 
     function renderActivityLog(result) {
@@ -3592,20 +3686,12 @@
 
     function exportSummary() {
       google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            const blob = new Blob([result.report], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = result.filename;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('Report downloaded', 'success');
-          }
-        })
+        .withSuccessHandler(downloadFileFromResult)
         .withFailureHandler(handleError)
-        .exportSummaryReport(sessionToken);
+        .exportSummaryReport(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function downloadCSV(result) {
@@ -3644,7 +3730,7 @@
         a.download = result.filename || 'download';
         a.click();
         URL.revokeObjectURL(url);
-        showToast('Template downloaded', 'success');
+        showToast(result.downloadMessage || 'Download complete', 'success');
         return;
       }
 
@@ -3869,6 +3955,18 @@
     function handleError(error) {
       console.error('Error:', error);
       showToast('An error occurred. Please try again.', 'error');
+    }
+
+    function escapeHtml(text) {
+      const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+      };
+
+      return (text || '').replace(/[&<>"']/g, m => map[m]);
     }
 
     function formatDate(dateString) {
