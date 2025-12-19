@@ -3730,7 +3730,7 @@
         a.download = result.filename || 'download';
         a.click();
         URL.revokeObjectURL(url);
-        showToast('Template downloaded', 'success');
+        showToast(result.downloadMessage || 'Download complete', 'success');
         return;
       }
 

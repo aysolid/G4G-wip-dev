@@ -2609,8 +2609,8 @@ function exportSummaryReport(token, filters) {
         .setOption('legend', { position: 'top' })
         .setOption('isStacked', false)
         .setOption('series', {
-          0: { color: '#10b981' },
-          1: { color: '#ef4444' }
+          0: { color: '#10b981', labelInLegend: 'Complete' },
+          1: { color: '#ef4444', labelInLegend: 'Incomplete' }
         })
         .setPosition(range.positionRow, range.positionCol, 0, 0)
         .build();
@@ -2639,7 +2639,8 @@ function exportSummaryReport(token, filters) {
     success: true,
     file: base64,
     mimeType: MimeType.MICROSOFT_EXCEL,
-    filename: 'summary_report_' + new Date().toISOString().split('T')[0] + '.xlsx'
+    filename: 'summary_report_' + new Date().toISOString().split('T')[0] + '.xlsx',
+    downloadMessage: 'Summary downloaded'
   };
 }
 
