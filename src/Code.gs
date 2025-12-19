@@ -2079,6 +2079,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
   const includedParticipantIds = [];
+  const participantNameMap = {};
   let completionSum = 0;
 
   for (let i = 1; i < pData.length; i++) {
@@ -2092,6 +2093,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
+    participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
@@ -2144,9 +2146,13 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     const cData = checklistSheet.getDataRange().getValues();
     const cHeaders = cData[0];
     const counts = {};
+    const pendingByInstrument = {};
+    const pendingSets = {};
 
     CONFIG.INSTRUMENTS.forEach(inst => {
       counts[inst.number] = { total: 0, completed: 0, name: inst.name, category: inst.category };
+      pendingByInstrument[inst.number] = [];
+      pendingSets[inst.number] = new Set();
     });
 
     for (let i = 1; i < cData.length; i++) {
@@ -2160,9 +2166,22 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
         counts[instrumentNumber].total++;
         if (status === 'completed') {
           counts[instrumentNumber].completed++;
+        } else {
+          if (!pendingSets[instrumentNumber].has(participantId)) {
+            pendingSets[instrumentNumber].add(participantId);
+            pendingByInstrument[instrumentNumber].push({
+              participantId: participantId,
+              name: participantNameMap[participantId] || 'Unknown Participant',
+              status: status || 'not_started'
+            });
+          }
         }
       }
     }
+
+    Object.keys(pendingByInstrument).forEach(key => {
+      pendingByInstrument[key].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    });
 
     instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
       number: inst.number,
@@ -2172,7 +2191,8 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       completed: counts[inst.number].completed,
       percentage: counts[inst.number].total > 0
         ? Math.round((counts[inst.number].completed / counts[inst.number].total) * 100)
-        : 0
+        : 0,
+      pendingParticipants: pendingByInstrument[inst.number]
     }));
 
     overview.instrumentsCompleted = instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
