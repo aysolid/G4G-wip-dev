@@ -2422,57 +2422,62 @@ function exportChecklistCSV(token, filters) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  // Get participant data for reference
+  // Build participant map scoped to filters
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
   const participantMap = {};
 
   for (let i = 1; i < pData.length; i++) {
     const pid = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][pHeaders.indexOf('site')];
+    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
+
+    if (filters && filters.site && filters.site !== 'All' && site !== filters.site) {
+      continue;
+    }
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) {
+      continue;
+    }
+
     participantMap[pid] = {
       fullName: pData[i][pHeaders.indexOf('fullName')],
-      site: pData[i][pHeaders.indexOf('site')],
       schoolName: pData[i][pHeaders.indexOf('schoolName')],
-      rolloutId: pData[i][pHeaders.indexOf('rolloutId')]
+      completed: 0,
+      total: 0
     };
   }
 
-  // Get checklist data
+  // Aggregate checklist data by participant
   const cData = checklistSheet.getDataRange().getValues();
   const cHeaders = cData[0];
 
-  const headers = ['Participant ID', 'Participant Name', 'Site', 'School',
-    'Instrument #', 'Instrument Name', 'Category', 'Status', 'Completed Date', 'Completed By', 'Notes'];
-
-  let csv = headers.join(',') + '\n';
-
   for (let i = 1; i < cData.length; i++) {
     const pid = cData[i][cHeaders.indexOf('participantId')];
-    const participant = participantMap[pid] || {};
+    if (!participantMap[pid]) continue;
 
-    // Apply filters
-    if (filters && filters.site && filters.site !== 'All' && participant.site !== filters.site) {
-      continue;
+    participantMap[pid].total++;
+    if (cData[i][cHeaders.indexOf('status')] === 'completed') {
+      participantMap[pid].completed++;
     }
-    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
-      continue;
-    }
+  }
+
+  const headers = ['Participant Name', 'School', 'Completed Instruments', 'Incomplete Instruments', 'Completion %'];
+  let csv = headers.join(',') + '\n';
+
+  Object.keys(participantMap).forEach(pid => {
+    const p = participantMap[pid];
+    const incomplete = Math.max(p.total - p.completed, 0);
+    const percentage = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
 
     const row = [
-      pid,
-      '"' + (participant.fullName || '').replace(/"/g, '""') + '"',
-      participant.site || '',
-      '"' + (participant.schoolName || '').replace(/"/g, '""') + '"',
-      cData[i][cHeaders.indexOf('instrumentNumber')],
-      '"' + (cData[i][cHeaders.indexOf('instrumentName')] || '').replace(/"/g, '""') + '"',
-      cData[i][cHeaders.indexOf('category')],
-      cData[i][cHeaders.indexOf('status')],
-      cData[i][cHeaders.indexOf('completedDate')],
-      '"' + (cData[i][cHeaders.indexOf('completedBy')] || '').replace(/"/g, '""') + '"',
-      '"' + (cData[i][cHeaders.indexOf('notes')] || '').replace(/"/g, '""') + '"'
+      '"' + (p.fullName || '').replace(/"/g, '""') + '"',
+      '"' + (p.schoolName || '').replace(/"/g, '""') + '"',
+      p.completed,
+      incomplete,
+      percentage
     ];
     csv += row.join(',') + '\n';
-  }
+  });
 
   return { success: true, csv: csv, filename: 'checklist_export_' + new Date().toISOString().split('T')[0] + '.csv' };
 }
