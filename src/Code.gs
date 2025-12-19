@@ -2079,6 +2079,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
   const includedParticipantIds = [];
+  const participantNameMap = {};
   let completionSum = 0;
 
   for (let i = 1; i < pData.length; i++) {
@@ -2092,6 +2093,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
+    participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
@@ -2144,9 +2146,13 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     const cData = checklistSheet.getDataRange().getValues();
     const cHeaders = cData[0];
     const counts = {};
+    const pendingByInstrument = {};
+    const pendingSets = {};
 
     CONFIG.INSTRUMENTS.forEach(inst => {
       counts[inst.number] = { total: 0, completed: 0, name: inst.name, category: inst.category };
+      pendingByInstrument[inst.number] = [];
+      pendingSets[inst.number] = new Set();
     });
 
     for (let i = 1; i < cData.length; i++) {
@@ -2160,9 +2166,22 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
         counts[instrumentNumber].total++;
         if (status === 'completed') {
           counts[instrumentNumber].completed++;
+        } else {
+          if (!pendingSets[instrumentNumber].has(participantId)) {
+            pendingSets[instrumentNumber].add(participantId);
+            pendingByInstrument[instrumentNumber].push({
+              participantId: participantId,
+              name: participantNameMap[participantId] || 'Unknown Participant',
+              status: status || 'not_started'
+            });
+          }
         }
       }
     }
+
+    Object.keys(pendingByInstrument).forEach(key => {
+      pendingByInstrument[key].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    });
 
     instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
       number: inst.number,
@@ -2172,7 +2191,8 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       completed: counts[inst.number].completed,
       percentage: counts[inst.number].total > 0
         ? Math.round((counts[inst.number].completed / counts[inst.number].total) * 100)
-        : 0
+        : 0,
+      pendingParticipants: pendingByInstrument[inst.number]
     }));
 
     overview.instrumentsCompleted = instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
@@ -2402,57 +2422,62 @@ function exportChecklistCSV(token, filters) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  // Get participant data for reference
+  // Build participant map scoped to filters
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
   const participantMap = {};
 
   for (let i = 1; i < pData.length; i++) {
     const pid = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][pHeaders.indexOf('site')];
+    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
+
+    if (filters && filters.site && filters.site !== 'All' && site !== filters.site) {
+      continue;
+    }
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) {
+      continue;
+    }
+
     participantMap[pid] = {
       fullName: pData[i][pHeaders.indexOf('fullName')],
-      site: pData[i][pHeaders.indexOf('site')],
       schoolName: pData[i][pHeaders.indexOf('schoolName')],
-      rolloutId: pData[i][pHeaders.indexOf('rolloutId')]
+      completed: 0,
+      total: 0
     };
   }
 
-  // Get checklist data
+  // Aggregate checklist data by participant
   const cData = checklistSheet.getDataRange().getValues();
   const cHeaders = cData[0];
 
-  const headers = ['Participant ID', 'Participant Name', 'Site', 'School',
-    'Instrument #', 'Instrument Name', 'Category', 'Status', 'Completed Date', 'Completed By', 'Notes'];
-
-  let csv = headers.join(',') + '\n';
-
   for (let i = 1; i < cData.length; i++) {
     const pid = cData[i][cHeaders.indexOf('participantId')];
-    const participant = participantMap[pid] || {};
+    if (!participantMap[pid]) continue;
 
-    // Apply filters
-    if (filters && filters.site && filters.site !== 'All' && participant.site !== filters.site) {
-      continue;
+    participantMap[pid].total++;
+    if (cData[i][cHeaders.indexOf('status')] === 'completed') {
+      participantMap[pid].completed++;
     }
-    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
-      continue;
-    }
+  }
+
+  const headers = ['Participant Name', 'School', 'Completed Instruments', 'Incomplete Instruments', 'Completion %'];
+  let csv = headers.join(',') + '\n';
+
+  Object.keys(participantMap).forEach(pid => {
+    const p = participantMap[pid];
+    const incomplete = Math.max(p.total - p.completed, 0);
+    const percentage = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
 
     const row = [
-      pid,
-      '"' + (participant.fullName || '').replace(/"/g, '""') + '"',
-      participant.site || '',
-      '"' + (participant.schoolName || '').replace(/"/g, '""') + '"',
-      cData[i][cHeaders.indexOf('instrumentNumber')],
-      '"' + (cData[i][cHeaders.indexOf('instrumentName')] || '').replace(/"/g, '""') + '"',
-      cData[i][cHeaders.indexOf('category')],
-      cData[i][cHeaders.indexOf('status')],
-      cData[i][cHeaders.indexOf('completedDate')],
-      '"' + (cData[i][cHeaders.indexOf('completedBy')] || '').replace(/"/g, '""') + '"',
-      '"' + (cData[i][cHeaders.indexOf('notes')] || '').replace(/"/g, '""') + '"'
+      '"' + (p.fullName || '').replace(/"/g, '""') + '"',
+      '"' + (p.schoolName || '').replace(/"/g, '""') + '"',
+      p.completed,
+      incomplete,
+      percentage
     ];
     csv += row.join(',') + '\n';
-  }
+  });
 
   return { success: true, csv: csv, filename: 'checklist_export_' + new Date().toISOString().split('T')[0] + '.csv' };
 }
@@ -2460,42 +2485,152 @@ function exportChecklistCSV(token, filters) {
 /**
  * Export summary report
  */
-function exportSummaryReport(token) {
+function exportSummaryReport(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  const stats = getDashboardStats(token, 'All');
-  const ugaStats = getDashboardStats(token, 'UGA');
-  const missouriStats = getDashboardStats(token, 'Missouri');
+  let siteFilter = (filters && filters.site) ? filters.site : 'All';
+  const rolloutFilter = (filters && filters.rolloutId) ? filters.rolloutId : 'All';
 
-  let report = 'G4G Research Operations Summary Report\n';
-  report += 'Generated: ' + new Date().toLocaleString() + '\n\n';
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    siteFilter = currentUser.site;
+  }
 
-  report += '=== OVERALL STATISTICS ===\n';
-  report += 'Total Participants: ' + stats.totalParticipants + '\n';
-  report += 'Active Participants: ' + stats.activeParticipants + '\n';
-  report += 'Completed: ' + stats.completedParticipants + '\n';
-  report += 'Withdrawn: ' + stats.withdrawnParticipants + '\n';
-  report += 'Overall Completion: ' + stats.overallCompletion + '%\n\n';
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
 
-  report += '=== UGA STATISTICS ===\n';
-  report += 'Total Participants: ' + ugaStats.totalParticipants + '\n';
-  report += 'Active: ' + ugaStats.activeParticipants + '\n';
-  report += 'Completion: ' + ugaStats.overallCompletion + '%\n\n';
+  if (!participantsSheet || !checklistSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
 
-  report += '=== MISSOURI STATISTICS ===\n';
-  report += 'Total Participants: ' + missouriStats.totalParticipants + '\n';
-  report += 'Active: ' + missouriStats.activeParticipants + '\n';
-  report += 'Completion: ' + missouriStats.overallCompletion + '%\n\n';
+  const rolloutsData = rolloutsSheet.getDataRange().getValues();
+  const rHeaders = rolloutsData[0];
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const pHeaders = participantsData[0];
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const cHeaders = checklistData[0];
 
-  report += '=== INSTRUMENT COMPLETION ===\n';
-  stats.instrumentStats.forEach(inst => {
-    report += inst.number + '. ' + inst.name + ': ' + inst.percentage + '% (' + inst.completed + '/' + inst.total + ')\n';
+  const rolloutEntries = rolloutsData.slice(1).filter(r => {
+    const rolloutSite = r[rHeaders.indexOf('site')];
+    const rolloutId = r[rHeaders.indexOf('rolloutId')];
+
+    if (siteFilter && siteFilter !== 'All' && rolloutSite !== siteFilter) return false;
+    if (rolloutFilter && rolloutFilter !== 'All' && rolloutId !== rolloutFilter) return false;
+    return true;
+  }).map(r => ({
+    rolloutId: r[rHeaders.indexOf('rolloutId')],
+    site: r[rHeaders.indexOf('site')],
+    schoolName: r[rHeaders.indexOf('schoolName')],
+    period: r[rHeaders.indexOf('period')],
+    year: r[rHeaders.indexOf('year')]
+  }));
+
+  function getInstrumentStatsForRollout(rolloutId) {
+    const participantIds = participantsData.slice(1)
+      .filter(p => p[pHeaders.indexOf('rolloutId')] === rolloutId &&
+        (!siteFilter || siteFilter === 'All' || p[pHeaders.indexOf('site')] === siteFilter))
+      .map(p => p[pHeaders.indexOf('participantId')]);
+
+    const counts = {};
+    CONFIG.INSTRUMENTS.forEach(inst => {
+      counts[inst.number] = { name: inst.name, completed: 0, total: 0 };
+    });
+
+    checklistData.slice(1).forEach(row => {
+      const pid = row[cHeaders.indexOf('participantId')];
+      if (!participantIds.includes(pid)) return;
+
+      const instNum = row[cHeaders.indexOf('instrumentNumber')];
+      const status = row[cHeaders.indexOf('status')];
+      if (!counts[instNum]) return;
+
+      counts[instNum].total++;
+      if (status === 'completed') {
+        counts[instNum].completed++;
+      }
+    });
+
+    return CONFIG.INSTRUMENTS.map(inst => {
+      const entry = counts[inst.number];
+      const pct = entry.total > 0 ? Math.round((entry.completed / entry.total) * 100) : 0;
+      return {
+        name: inst.name,
+        percentComplete: pct,
+        percentIncomplete: 100 - pct
+      };
+    });
+  }
+
+  const spreadsheet = SpreadsheetApp.create('Summary Report ' + new Date().toISOString());
+  const defaultSheet = spreadsheet.getSheets()[0];
+  defaultSheet.setName('Summary');
+  defaultSheet.getRange(1, 1).setValue('Summary Report');
+  defaultSheet.getRange(2, 1).setValue('Generated: ' + new Date().toLocaleString());
+  defaultSheet.autoResizeColumns(1, 2);
+
+  rolloutEntries.forEach((rollout, index) => {
+    const sheetName = (rollout.schoolName || 'Rollout') + ' ' + (rollout.period || '') + ' ' + (rollout.year || '');
+    const safeName = sheetName.substring(0, 90) || 'Rollout ' + (index + 1);
+    const sheet = spreadsheet.insertSheet(safeName);
+
+    const instrumentStats = getInstrumentStatsForRollout(rollout.rolloutId);
+
+    sheet.getRange('A1').setValue('Instrument');
+    sheet.getRange('B1').setValue('Complete %');
+    sheet.getRange('C1').setValue('Incomplete %');
+
+    instrumentStats.forEach((inst, idx) => {
+      const row = idx + 2;
+      sheet.getRange(row, 1).setValue(inst.name);
+      sheet.getRange(row, 2).setValue(inst.percentComplete / 100);
+      sheet.getRange(row, 3).setValue(inst.percentIncomplete / 100);
+    });
+
+    sheet.getRange(1, 2, instrumentStats.length + 1, 2).setNumberFormat('0%');
+    sheet.autoResizeColumns(1, 3);
+
+    const ranges = [
+      { start: 2, end: Math.min(11, instrumentStats.length + 1), positionRow: 2, positionCol: 5 },
+      { start: 12, end: instrumentStats.length + 1, positionRow: 20, positionCol: 5 }
+    ];
+
+    ranges.forEach(range => {
+      if (range.start > range.end || range.start > instrumentStats.length + 1) return;
+      const dataRange = sheet.getRange(`A${range.start}:C${range.end}`);
+
+      const chart = sheet.newChart()
+        .addRange(dataRange)
+        .setChartType(Charts.ChartType.COLUMN)
+        .setOption('title', `${sheetName} – Instrument Completion`)
+        .setOption('legend', { position: 'top' })
+        .setOption('isStacked', false)
+        .setOption('series', {
+          0: { color: '#10b981' },
+          1: { color: '#ef4444' }
+        })
+        .setPosition(range.positionRow, range.positionCol, 0, 0)
+        .build();
+
+      sheet.insertChart(chart);
+    });
   });
 
-  return { success: true, report: report, filename: 'summary_report_' + new Date().toISOString().split('T')[0] + '.txt' };
+  const file = DriveApp.getFileById(spreadsheet.getId());
+  const blob = file.getBlob().getAs(MimeType.MICROSOFT_EXCEL);
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+
+  return {
+    success: true,
+    file: base64,
+    mimeType: MimeType.MICROSOFT_EXCEL,
+    filename: 'summary_report_' + new Date().toISOString().split('T')[0] + '.xlsx'
+  };
 }
 
 // ============================================
