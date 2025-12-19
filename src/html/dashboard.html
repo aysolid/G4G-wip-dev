@@ -3686,20 +3686,12 @@
 
     function exportSummary() {
       google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            const blob = new Blob([result.report], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = result.filename;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('Report downloaded', 'success');
-          }
-        })
+        .withSuccessHandler(downloadFileFromResult)
         .withFailureHandler(handleError)
-        .exportSummaryReport(sessionToken);
+        .exportSummaryReport(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function downloadCSV(result) {
