@@ -609,7 +609,7 @@
       <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
         <div>
           <h2>Cross-Site Research Operations</h2>
-          <p>Tracking participant progress across University of Georgia (UGA) and University of Missouri (Mizzou) research sites. Engaging neurodiverse learners in video game design using Game Builder Garage.</p>
+          <p>Monitor and standardize participant progress across the University of Georgia (UGA) and University of Missouri (Mizzou) research sites.</p>
         </div>
         <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -623,7 +623,7 @@
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <label for="publicRolloutFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Rollout:</label>
             <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
-              <option value="All">All Rollouts</option>
+              <option value="All">All cohorts</option>
             </select>
           </div>
         </div>
@@ -698,29 +698,29 @@
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">person_add</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Enroll Participant</div>
+                  <div class="quick-link-title">Enroll a Participant</div>
                   <div class="quick-link-desc">Add a new participant to the study</div>
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">edit_note</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Update Checklist</div>
-                  <div class="quick-link-desc">Mark instruments as complete</div>
+                  <div class="quick-link-title">Update Milestones</div>
+                  <div class="quick-link-desc">Mark instruments as completed</div>
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">analytics</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">View Reports</div>
-                  <div class="quick-link-desc">Cross-site analytics and exports</div>
+                  <div class="quick-link-title">View Reports & Exports</div>
+                  <div class="quick-link-desc">Cross-site analytics and CSV downloads</div>
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">groups</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Manage Cohorts</div>
-                  <div class="quick-link-desc">Set up study rollouts</div>
+                  <div class="quick-link-title">Manage Cohorts/Rollouts</div>
+                  <div class="quick-link-desc">Set up study cohorts and schedules</div>
                 </div>
               </a>
             </div>
@@ -815,7 +815,7 @@
           if (!rolloutSelect) return;
 
           // Clear existing options
-          rolloutSelect.innerHTML = '<option value="All">All Rollouts</option>';
+          rolloutSelect.innerHTML = '<option value="All">All cohorts</option>';
 
           if (result.success && result.rollouts && result.rollouts.length > 0) {
             result.rollouts.forEach(function(rollout) {
@@ -866,7 +866,7 @@
             </div>
           </div>
           <div class="stat-value">${stats.totalParticipants || 0}</div>
-          <div class="stat-label">Total Participants</div>
+          <div class="stat-label">Total Enrolled</div>
         </div>
 
         <div class="stat-card success">
@@ -886,7 +886,7 @@
             </div>
           </div>
           <div class="stat-value">${stats.overallCompletion || 0}%</div>
-          <div class="stat-label">Overall Completion</div>
+          <div class="stat-label">Overall Completion Rate</div>
         </div>
 
         <div class="stat-card warning">
