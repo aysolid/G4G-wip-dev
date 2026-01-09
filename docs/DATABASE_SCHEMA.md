@@ -167,6 +167,62 @@ notes: Completed during session 1
 
 ---
 
+## Sheet: StudySessions
+
+Stores individual session dates for each study rollout.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| sessionId | String (UUID) | Unique identifier for the session |
+| rolloutId | String | Reference to StudyRollouts.rolloutId |
+| sessionNumber | Number | Sequential session number within the rollout (1, 2, 3, etc.) |
+| sessionDate | ISO Date | Scheduled date for this session |
+| sessionName | String | Optional name/description (e.g., "Lesson 1", "Pre-test Session") |
+| status | Enum | Session status: `scheduled`, `completed`, `cancelled` |
+| createdAt | ISO DateTime | When the session was created |
+| createdBy | String | userId of the user who created this session |
+
+### Example Row
+```
+sessionId: ss1e2s3-s4i5-...
+rolloutId: r1o2l3l4-o5u6-...
+sessionNumber: 1
+sessionDate: 2025-01-22
+sessionName: Lesson 1 - Introduction
+status: scheduled
+createdAt: 2025-01-10T09:00:00Z
+createdBy: admin-uuid-here
+```
+
+---
+
+## Sheet: SessionAttendance
+
+Stores attendance records for participants at each session.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| attendanceId | String (UUID) | Unique identifier for the attendance record |
+| sessionId | String | Reference to StudySessions.sessionId |
+| participantId | String | Reference to Participants.participantId |
+| status | Enum | Attendance status: `present`, `absent`, `excused` |
+| markedAt | ISO DateTime | When attendance was marked |
+| markedBy | String | userId of the user who marked attendance |
+| notes | String | Optional notes about attendance |
+
+### Example Row
+```
+attendanceId: a1t2t3e4-n5d6-...
+sessionId: ss1e2s3-s4i5-...
+participantId: UGA-LXYZ1234
+status: present
+markedAt: 2025-01-22T10:30:00Z
+markedBy: facilitator-uuid-here
+notes: Arrived 5 minutes late
+```
+
+---
+
 ## Sheet: Sessions
 
 Stores active user sessions for authentication.
@@ -219,6 +275,11 @@ Stores audit trail of all actions in the system.
 - `ENROLL_PARTICIPANT` - New participant enrolled
 - `UPDATE_PARTICIPANT` - Participant info updated
 - `UPDATE_CHECKLIST` - Checklist item status changed
+- `CREATE_SESSION` - Study session created
+- `UPDATE_SESSION` - Study session updated
+- `DELETE_SESSION` - Study session deleted
+- `MARK_ATTENDANCE` - Attendance marked for a participant
+- `BULK_MARK_ATTENDANCE` - Bulk attendance marking
 
 ### Example Row
 ```
@@ -254,14 +315,21 @@ Users
   ├── Creates → StudyRollouts (createdBy)
   ├── Creates → Participants (enrolledBy)
   ├── Creates → Users (createdBy)
+  ├── Creates → StudySessions (createdBy)
+  ├── Marks → SessionAttendance (markedBy)
   └── Has → Sessions (userId)
 
 StudyRollouts
-  └── Has Many → Participants (rolloutId)
+  ├── Has Many → Participants (rolloutId)
+  └── Has Many → StudySessions (rolloutId)
+
+StudySessions
+  └── Has Many → SessionAttendance (sessionId)
 
 Participants
-  └── Has Many → Checklist (participantId)
-       └── 18 items per participant
+  ├── Has Many → Checklist (participantId)
+  │    └── 18 items per participant
+  └── Has Many → SessionAttendance (participantId)
 
 ActivityLog
   └── References → Users (userId)

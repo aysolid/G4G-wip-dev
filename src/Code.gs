@@ -149,6 +149,17 @@ function initializeDatabase() {
     'status', 'completedDate', 'completedBy', 'notes'
   ]);
 
+  // Create StudySessions sheet
+  createSheetIfNotExists(ss, 'StudySessions', [
+    'sessionId', 'rolloutId', 'sessionNumber', 'sessionDate', 'sessionName',
+    'status', 'createdAt', 'createdBy'
+  ]);
+
+  // Create SessionAttendance sheet
+  createSheetIfNotExists(ss, 'SessionAttendance', [
+    'attendanceId', 'sessionId', 'participantId', 'status', 'markedAt', 'markedBy', 'notes'
+  ]);
+
   // Create ActivityLog sheet
   createSheetIfNotExists(ss, 'ActivityLog', [
     'logId', 'timestamp', 'userId', 'userName', 'action', 'targetType', 'targetId', 'details'
@@ -903,6 +914,533 @@ function getRolloutById(rolloutId) {
   }
 
   return null;
+}
+
+// ============================================
+// STUDY SESSION FUNCTIONS
+// ============================================
+
+/**
+ * Get all sessions for a specific rollout
+ */
+function getSessionsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+
+  if (!sessionsSheet) {
+    return { success: false, message: 'StudySessions sheet not found' };
+  }
+
+  const data = sessionsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const sessions = [];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
+      sessions.push({
+        sessionId: data[i][headers.indexOf('sessionId')],
+        rolloutId: data[i][headers.indexOf('rolloutId')],
+        sessionNumber: data[i][headers.indexOf('sessionNumber')],
+        sessionDate: data[i][headers.indexOf('sessionDate')],
+        sessionName: data[i][headers.indexOf('sessionName')],
+        status: data[i][headers.indexOf('status')],
+        createdAt: data[i][headers.indexOf('createdAt')],
+        createdBy: data[i][headers.indexOf('createdBy')]
+      });
+    }
+  }
+
+  // Sort by session number
+  sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+  return { success: true, sessions: sessions };
+}
+
+/**
+ * Create a new study session
+ */
+function createSession(token, sessionData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'facilitator')) {
+    return { success: false, message: 'Unauthorized - Admin or Facilitator access required' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+
+  const sessionId = generateUUID();
+  const timestamp = new Date().toISOString();
+
+  sessionsSheet.appendRow([
+    sessionId,
+    sessionData.rolloutId,
+    sessionData.sessionNumber,
+    sessionData.sessionDate,
+    sessionData.sessionName || '',
+    'scheduled',
+    timestamp,
+    currentUser.userId
+  ]);
+
+  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'session', sessionId,
+    'Created session #' + sessionData.sessionNumber + ' for rollout ' + sessionData.rolloutId);
+
+  return { success: true, message: 'Session created successfully', sessionId: sessionId };
+}
+
+/**
+ * Batch create multiple sessions for a rollout
+ */
+function batchCreateSessions(token, rolloutId, sessionsData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'facilitator')) {
+    return { success: false, message: 'Unauthorized - Admin or Facilitator access required' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const timestamp = new Date().toISOString();
+  const createdSessions = [];
+
+  for (let sessionData of sessionsData) {
+    const sessionId = generateUUID();
+
+    sessionsSheet.appendRow([
+      sessionId,
+      rolloutId,
+      sessionData.sessionNumber,
+      sessionData.sessionDate,
+      sessionData.sessionName || '',
+      'scheduled',
+      timestamp,
+      currentUser.userId
+    ]);
+
+    createdSessions.push({
+      sessionId: sessionId,
+      sessionNumber: sessionData.sessionNumber
+    });
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'rollout', rolloutId,
+    'Created ' + sessionsData.length + ' sessions for rollout');
+
+  return {
+    success: true,
+    message: sessionsData.length + ' sessions created successfully',
+    sessions: createdSessions
+  };
+}
+
+/**
+ * Update a study session
+ */
+function updateSession(token, sessionId, sessionData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'facilitator')) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const data = sessionsSheet.getDataRange().getValues();
+  const headers = data[0];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('sessionId')] === sessionId) {
+      if (sessionData.sessionDate) {
+        sessionsSheet.getRange(i + 1, headers.indexOf('sessionDate') + 1).setValue(sessionData.sessionDate);
+      }
+      if (sessionData.sessionName !== undefined) {
+        sessionsSheet.getRange(i + 1, headers.indexOf('sessionName') + 1).setValue(sessionData.sessionName);
+      }
+      if (sessionData.status) {
+        sessionsSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(sessionData.status);
+      }
+
+      logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_SESSION', 'session', sessionId,
+        'Updated session');
+
+      return { success: true, message: 'Session updated successfully' };
+    }
+  }
+
+  return { success: false, message: 'Session not found' };
+}
+
+/**
+ * Delete a study session
+ */
+function deleteSession(token, sessionId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') {
+    return { success: false, message: 'Unauthorized - Admin access required' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+
+  // Delete the session
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sessionHeaders = sessionData[0];
+
+  for (let i = 1; i < sessionData.length; i++) {
+    if (sessionData[i][sessionHeaders.indexOf('sessionId')] === sessionId) {
+      sessionsSheet.deleteRow(i + 1);
+      break;
+    }
+  }
+
+  // Delete all attendance records for this session
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+
+  for (let i = attendanceData.length - 1; i >= 1; i--) {
+    if (attendanceData[i][attendanceHeaders.indexOf('sessionId')] === sessionId) {
+      attendanceSheet.deleteRow(i + 1);
+    }
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'DELETE_SESSION', 'session', sessionId,
+    'Deleted session and related attendance records');
+
+  return { success: true, message: 'Session deleted successfully' };
+}
+
+// ============================================
+// ATTENDANCE FUNCTIONS
+// ============================================
+
+/**
+ * Mark attendance for a participant at a session
+ */
+function markAttendance(token, attendanceData) {
+  const currentUser = validateSession(token);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'facilitator')) {
+    return { success: false, message: 'Unauthorized - Admin or Facilitator access required' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const data = attendanceSheet.getDataRange().getValues();
+  const headers = data[0];
+
+  // Check if attendance already exists
+  let existingRow = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('sessionId')] === attendanceData.sessionId &&
+        data[i][headers.indexOf('participantId')] === attendanceData.participantId) {
+      existingRow = i;
+      break;
+    }
+  }
+
+  const timestamp = new Date().toISOString();
+
+  if (existingRow > 0) {
+    // Update existing attendance
+    attendanceSheet.getRange(existingRow + 1, headers.indexOf('status') + 1).setValue(attendanceData.status);
+    attendanceSheet.getRange(existingRow + 1, headers.indexOf('markedAt') + 1).setValue(timestamp);
+    attendanceSheet.getRange(existingRow + 1, headers.indexOf('markedBy') + 1).setValue(currentUser.userId);
+    attendanceSheet.getRange(existingRow + 1, headers.indexOf('notes') + 1).setValue(attendanceData.notes || '');
+
+    logActivity(currentUser.userId, currentUser.fullName, 'MARK_ATTENDANCE', 'attendance',
+      data[existingRow][headers.indexOf('attendanceId')],
+      'Updated attendance: ' + attendanceData.participantId + ' -> ' + attendanceData.status);
+
+    return { success: true, message: 'Attendance updated successfully' };
+  } else {
+    // Create new attendance record
+    const attendanceId = generateUUID();
+
+    attendanceSheet.appendRow([
+      attendanceId,
+      attendanceData.sessionId,
+      attendanceData.participantId,
+      attendanceData.status,
+      timestamp,
+      currentUser.userId,
+      attendanceData.notes || ''
+    ]);
+
+    logActivity(currentUser.userId, currentUser.fullName, 'MARK_ATTENDANCE', 'attendance', attendanceId,
+      'Marked attendance: ' + attendanceData.participantId + ' -> ' + attendanceData.status);
+
+    return { success: true, message: 'Attendance marked successfully', attendanceId: attendanceId };
+  }
+}
+
+/**
+ * Bulk mark attendance for multiple participants at once
+ */
+function bulkMarkAttendance(token, sessionId, attendanceRecords) {
+  const currentUser = validateSession(token);
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'facilitator')) {
+    return { success: false, message: 'Unauthorized - Admin or Facilitator access required' };
+  }
+
+  let successCount = 0;
+  let errors = [];
+
+  for (let record of attendanceRecords) {
+    const result = markAttendance(token, {
+      sessionId: sessionId,
+      participantId: record.participantId,
+      status: record.status,
+      notes: record.notes || ''
+    });
+
+    if (result.success) {
+      successCount++;
+    } else {
+      errors.push({ participantId: record.participantId, error: result.message });
+    }
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_MARK_ATTENDANCE', 'session', sessionId,
+    'Bulk marked attendance for ' + successCount + ' participants');
+
+  return {
+    success: true,
+    message: successCount + ' attendance records processed',
+    successCount: successCount,
+    errors: errors
+  };
+}
+
+/**
+ * Get attendance for a specific session
+ */
+function getAttendanceBySession(token, sessionId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+
+  if (!attendanceSheet) {
+    return { success: false, message: 'SessionAttendance sheet not found' };
+  }
+
+  const data = attendanceSheet.getDataRange().getValues();
+  const headers = data[0];
+  const attendanceRecords = [];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('sessionId')] === sessionId) {
+      attendanceRecords.push({
+        attendanceId: data[i][headers.indexOf('attendanceId')],
+        sessionId: data[i][headers.indexOf('sessionId')],
+        participantId: data[i][headers.indexOf('participantId')],
+        status: data[i][headers.indexOf('status')],
+        markedAt: data[i][headers.indexOf('markedAt')],
+        markedBy: data[i][headers.indexOf('markedBy')],
+        notes: data[i][headers.indexOf('notes')]
+      });
+    }
+  }
+
+  return { success: true, attendance: attendanceRecords };
+}
+
+/**
+ * Get attendance records for a specific participant
+ */
+function getAttendanceByParticipant(token, participantId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+
+  if (!attendanceSheet || !sessionsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sessionHeaders = sessionData[0];
+
+  const attendanceRecords = [];
+
+  for (let i = 1; i < attendanceData.length; i++) {
+    if (attendanceData[i][attendanceHeaders.indexOf('participantId')] === participantId) {
+      const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
+
+      // Find the session details
+      let sessionInfo = null;
+      for (let j = 1; j < sessionData.length; j++) {
+        if (sessionData[j][sessionHeaders.indexOf('sessionId')] === sessionId) {
+          sessionInfo = {
+            sessionNumber: sessionData[j][sessionHeaders.indexOf('sessionNumber')],
+            sessionDate: sessionData[j][sessionHeaders.indexOf('sessionDate')],
+            sessionName: sessionData[j][sessionHeaders.indexOf('sessionName')]
+          };
+          break;
+        }
+      }
+
+      attendanceRecords.push({
+        attendanceId: attendanceData[i][attendanceHeaders.indexOf('attendanceId')],
+        sessionId: sessionId,
+        participantId: attendanceData[i][attendanceHeaders.indexOf('participantId')],
+        status: attendanceData[i][attendanceHeaders.indexOf('status')],
+        markedAt: attendanceData[i][attendanceHeaders.indexOf('markedAt')],
+        markedBy: attendanceData[i][attendanceHeaders.indexOf('markedBy')],
+        notes: attendanceData[i][attendanceHeaders.indexOf('notes')],
+        sessionInfo: sessionInfo
+      });
+    }
+  }
+
+  // Sort by session number
+  attendanceRecords.sort((a, b) => {
+    if (a.sessionInfo && b.sessionInfo) {
+      return a.sessionInfo.sessionNumber - b.sessionInfo.sessionNumber;
+    }
+    return 0;
+  });
+
+  return { success: true, attendance: attendanceRecords };
+}
+
+/**
+ * Get attendance statistics for a rollout
+ */
+function getAttendanceStatsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const participantsSheet = ss.getSheetByName('Participants');
+
+  // Get all sessions for this rollout
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sessionHeaders = sessionData[0];
+  const sessions = [];
+
+  for (let i = 1; i < sessionData.length; i++) {
+    if (sessionData[i][sessionHeaders.indexOf('rolloutId')] === rolloutId) {
+      sessions.push({
+        sessionId: sessionData[i][sessionHeaders.indexOf('sessionId')],
+        sessionNumber: sessionData[i][sessionHeaders.indexOf('sessionNumber')],
+        sessionDate: sessionData[i][sessionHeaders.indexOf('sessionDate')],
+        sessionName: sessionData[i][sessionHeaders.indexOf('sessionName')]
+      });
+    }
+  }
+
+  // Get all participants for this rollout
+  const participantData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantData[0];
+  const participants = [];
+
+  for (let i = 1; i < participantData.length; i++) {
+    if (participantData[i][participantHeaders.indexOf('rolloutId')] === rolloutId) {
+      participants.push({
+        participantId: participantData[i][participantHeaders.indexOf('participantId')],
+        fullName: participantData[i][participantHeaders.indexOf('fullName')]
+      });
+    }
+  }
+
+  // Get all attendance records
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+  const attendanceMap = {};
+
+  for (let i = 1; i < attendanceData.length; i++) {
+    const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
+    const participantId = attendanceData[i][attendanceHeaders.indexOf('participantId')];
+    const status = attendanceData[i][attendanceHeaders.indexOf('status')];
+
+    const key = sessionId + '_' + participantId;
+    attendanceMap[key] = status;
+  }
+
+  // Calculate statistics
+  const stats = {
+    totalSessions: sessions.length,
+    totalParticipants: participants.length,
+    sessionStats: [],
+    participantStats: []
+  };
+
+  // Per-session statistics
+  for (let session of sessions) {
+    let present = 0;
+    let absent = 0;
+    let excused = 0;
+    let notMarked = 0;
+
+    for (let participant of participants) {
+      const key = session.sessionId + '_' + participant.participantId;
+      const status = attendanceMap[key];
+
+      if (status === 'present') present++;
+      else if (status === 'absent') absent++;
+      else if (status === 'excused') excused++;
+      else notMarked++;
+    }
+
+    stats.sessionStats.push({
+      sessionId: session.sessionId,
+      sessionNumber: session.sessionNumber,
+      sessionDate: session.sessionDate,
+      sessionName: session.sessionName,
+      present: present,
+      absent: absent,
+      excused: excused,
+      notMarked: notMarked,
+      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0
+    });
+  }
+
+  // Per-participant statistics
+  for (let participant of participants) {
+    let present = 0;
+    let absent = 0;
+    let excused = 0;
+    let notMarked = 0;
+
+    for (let session of sessions) {
+      const key = session.sessionId + '_' + participant.participantId;
+      const status = attendanceMap[key];
+
+      if (status === 'present') present++;
+      else if (status === 'absent') absent++;
+      else if (status === 'excused') excused++;
+      else notMarked++;
+    }
+
+    stats.participantStats.push({
+      participantId: participant.participantId,
+      fullName: participant.fullName,
+      present: present,
+      absent: absent,
+      excused: excused,
+      notMarked: notMarked,
+      attendanceRate: sessions.length > 0 ? Math.round((present / sessions.length) * 100) : 0
+    });
+  }
+
+  return { success: true, stats: stats };
 }
 
 // ============================================
