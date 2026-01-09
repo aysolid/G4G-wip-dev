@@ -1319,6 +1319,12 @@
             </div>
             <div class="quick-action-label">Update Checklist</div>
           </div>
+          <div class="quick-action-card" onclick="showSection('attendance')">
+            <div class="quick-action-icon">
+              <span class="material-icons">how_to_reg</span>
+            </div>
+            <div class="quick-action-label">Mark Attendance</div>
+          </div>
           ${currentUser.role === 'admin' ? `
           <div class="quick-action-card" onclick="showSection('rollouts')">
             <div class="quick-action-icon">
@@ -2919,16 +2925,155 @@
             <label class="form-label">Description (optional)</label>
             <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${rollout.description || ''}</textarea>
           </div>
+
+          <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--gray-200);">
+
+          <div class="loading" id="editSessionsLoading">
+            <div class="spinner"></div>
+            <p>Loading sessions...</p>
+          </div>
+          <div id="editSessionsContainer" class="hidden">
+            <!-- Sessions will be loaded here -->
+          </div>
         </div>
       `;
       document.getElementById('modalFooter').innerHTML = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" onclick="updateRollout('${rollout.rolloutId}')">
+        <button class="btn btn-primary" type="button" onclick="updateRolloutWithSessions('${rollout.rolloutId}')">
           <span class="material-icons">save</span>
           Save Changes
         </button>
       `;
       openModal();
+
+      // Load sessions for this rollout
+      loadSessionsForEdit(rollout.rolloutId);
+    }
+
+    function loadSessionsForEdit(rolloutId) {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          document.getElementById('editSessionsLoading').classList.add('hidden');
+          document.getElementById('editSessionsContainer').classList.remove('hidden');
+
+          if (result.success) {
+            renderEditSessionsInterface(result.sessions || []);
+          } else {
+            document.getElementById('editSessionsContainer').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <p>Error loading sessions: ${result.message}</p>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('editSessionsLoading').classList.add('hidden');
+          document.getElementById('editSessionsContainer').classList.remove('hidden');
+          document.getElementById('editSessionsContainer').innerHTML = `
+            <div class="empty-state">
+              <span class="material-icons">error</span>
+              <p>Error loading sessions</p>
+            </div>
+          `;
+        })
+        .getSessionsByRollout(sessionToken, rolloutId);
+    }
+
+    function renderEditSessionsInterface(sessions) {
+      // Sort sessions by session number
+      sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+      let html = `
+        <div class="form-group">
+          <label class="form-label">Sessions</label>
+          <small style="color: var(--gray-500);">Edit session dates or delete sessions. You can also add new sessions below.</small>
+        </div>
+        <div id="existingSessionsList" style="max-height: 250px; overflow-y: auto;">
+      `;
+
+      if (sessions.length === 0) {
+        html += `
+          <div class="empty-state" style="padding: 1rem;">
+            <span class="material-icons">event</span>
+            <p>No sessions found. Add sessions below.</p>
+          </div>
+        `;
+      } else {
+        sessions.forEach(session => {
+          const sessionDate = session.sessionDate ? session.sessionDate.split('T')[0] : '';
+          html += `
+            <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; align-items: center; gap: 0.75rem;" id="editSession_${session.sessionId}">
+              <div style="flex: 1;">
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label" style="font-size: 0.75rem;">${session.sessionName || 'Session ' + session.sessionNumber}</label>
+                  <input type="date" class="form-input" id="editSessionDate_${session.sessionId}" value="${sessionDate}" style="font-size: 0.875rem;">
+                  <input type="hidden" id="editSessionId_${session.sessionId}" value="${session.sessionId}">
+                  <input type="hidden" id="editSessionNumber_${session.sessionId}" value="${session.sessionNumber}">
+                </div>
+              </div>
+              <button type="button" class="btn btn-sm btn-danger" onclick="removeSessionFromEdit('${session.sessionId}')" title="Delete Session">
+                <span class="material-icons">delete</span>
+              </button>
+            </div>
+          `;
+        });
+      }
+
+      html += `
+        </div>
+        <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--gray-200);">
+        <div class="form-group">
+          <label class="form-label">Add New Sessions</label>
+          <input type="number" class="form-input" id="numNewSessions" min="0" max="20" value="0" onchange="generateNewSessionFields()">
+          <small style="color: var(--gray-500);">How many additional sessions do you want to add?</small>
+        </div>
+        <div id="newSessionsContainer">
+          <!-- New session fields will be generated here -->
+        </div>
+      `;
+
+      document.getElementById('editSessionsContainer').innerHTML = html;
+    }
+
+    function removeSessionFromEdit(sessionId) {
+      const sessionElement = document.getElementById('editSession_' + sessionId);
+      if (sessionElement) {
+        // Mark as deleted by adding a hidden input
+        const deletedMarker = document.createElement('input');
+        deletedMarker.type = 'hidden';
+        deletedMarker.id = 'deletedSession_' + sessionId;
+        deletedMarker.value = sessionId;
+        sessionElement.appendChild(deletedMarker);
+        // Hide the session
+        sessionElement.style.display = 'none';
+      }
+    }
+
+    function generateNewSessionFields() {
+      const numNewSessions = parseInt(document.getElementById('numNewSessions')?.value || 0);
+      const container = document.getElementById('newSessionsContainer');
+
+      if (numNewSessions === 0) {
+        container.innerHTML = '';
+        return;
+      }
+
+      let html = '<div style="margin-top: 1rem;"><h4 style="font-size: 0.875rem; font-weight: 600; color: var(--gray-700); margin-bottom: 1rem;">New Sessions</h4>';
+
+      for (let i = 1; i <= numNewSessions; i++) {
+        html += `
+          <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 0.75rem;">New Session ${i} Date (optional)</label>
+              <input type="date" class="form-input" id="newSessionDate${i}" style="font-size: 0.875rem;">
+            </div>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
     }
 
     function updateRollout(rolloutId) {
@@ -2959,6 +3104,142 @@
         .updateRollout(sessionToken, rolloutId, data);
     }
 
+    function updateRolloutWithSessions(rolloutId) {
+      const data = {
+        schoolName: document.getElementById('editRolloutSchool').value.trim(),
+        period: document.getElementById('editRolloutPeriod').value,
+        year: document.getElementById('editRolloutYear').value,
+        status: document.getElementById('editRolloutStatus').value,
+        description: document.getElementById('editRolloutDescription').value.trim()
+      };
+
+      if (!data.schoolName || !data.period || !data.year) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+      }
+
+      // First update the rollout basic info
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            // Now handle session updates/deletions/additions
+            handleSessionUpdates(rolloutId);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .updateRollout(sessionToken, rolloutId, data);
+    }
+
+    function handleSessionUpdates(rolloutId) {
+      // Collect all existing sessions for updates and deletions
+      const existingSessionsList = document.getElementById('existingSessionsList');
+      const sessionsToUpdate = [];
+      const sessionsToDelete = [];
+
+      if (existingSessionsList) {
+        // Get all session elements
+        const sessionElements = existingSessionsList.querySelectorAll('[id^="editSession_"]');
+        sessionElements.forEach(element => {
+          const sessionId = element.id.replace('editSession_', '');
+
+          // Check if this session is marked for deletion
+          if (document.getElementById('deletedSession_' + sessionId)) {
+            sessionsToDelete.push(sessionId);
+          } else {
+            // Session should be updated
+            const dateInput = document.getElementById('editSessionDate_' + sessionId);
+            const sessionNumberInput = document.getElementById('editSessionNumber_' + sessionId);
+
+            if (dateInput && sessionNumberInput) {
+              sessionsToUpdate.push({
+                sessionId: sessionId,
+                sessionDate: dateInput.value || '',
+                sessionNumber: parseInt(sessionNumberInput.value)
+              });
+            }
+          }
+        });
+      }
+
+      // Collect new sessions to create
+      const numNewSessions = parseInt(document.getElementById('numNewSessions')?.value || 0);
+      const newSessions = [];
+
+      // Calculate the next session number based on existing sessions
+      let nextSessionNumber = 1;
+      if (sessionsToUpdate.length > 0) {
+        const maxSessionNumber = Math.max(...sessionsToUpdate.map(s => s.sessionNumber));
+        nextSessionNumber = maxSessionNumber + 1;
+      }
+
+      for (let i = 1; i <= numNewSessions; i++) {
+        const dateInput = document.getElementById('newSessionDate' + i);
+        newSessions.push({
+          sessionNumber: nextSessionNumber,
+          sessionDate: dateInput?.value || '',
+          sessionName: 'Session ' + nextSessionNumber
+        });
+        nextSessionNumber++;
+      }
+
+      // Execute all session operations
+      let completedOperations = 0;
+      const totalOperations = sessionsToDelete.length + sessionsToUpdate.length + (newSessions.length > 0 ? 1 : 0);
+
+      if (totalOperations === 0) {
+        showToast('Rollout updated successfully', 'success');
+        closeModal();
+        loadRollouts();
+        return;
+      }
+
+      const checkCompletion = () => {
+        completedOperations++;
+        if (completedOperations >= totalOperations) {
+          showToast('Rollout and sessions updated successfully', 'success');
+          closeModal();
+          loadRollouts();
+        }
+      };
+
+      // Delete sessions
+      sessionsToDelete.forEach(sessionId => {
+        google.script.run
+          .withSuccessHandler(checkCompletion)
+          .withFailureHandler(function(error) {
+            showToast('Error deleting session: ' + error, 'error');
+            checkCompletion();
+          })
+          .deleteSession(sessionToken, sessionId);
+      });
+
+      // Update existing sessions
+      sessionsToUpdate.forEach(session => {
+        google.script.run
+          .withSuccessHandler(checkCompletion)
+          .withFailureHandler(function(error) {
+            showToast('Error updating session: ' + error, 'error');
+            checkCompletion();
+          })
+          .updateSession(sessionToken, session.sessionId, {
+            sessionDate: session.sessionDate
+          });
+      });
+
+      // Create new sessions
+      if (newSessions.length > 0) {
+        google.script.run
+          .withSuccessHandler(checkCompletion)
+          .withFailureHandler(function(error) {
+            showToast('Error creating new sessions: ' + error, 'error');
+            checkCompletion();
+          })
+          .batchCreateSessions(sessionToken, rolloutId, newSessions);
+      }
+    }
+
     function confirmDeleteRollout(rolloutId, schoolName, period, year) {
       const rolloutName = `${schoolName} (${period} ${year})`;
       const confirmMsg = `Are you sure you want to delete this rollout?\n\n${rolloutName}\n\nWARNING: This will permanently delete:\n- The rollout\n- All participants enrolled in this rollout\n- All checklist data for those participants\n- All sessions for this rollout\n- All attendance records\n\nThis action cannot be undone.`;
@@ -2973,7 +3254,13 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showToast(`Rollout deleted successfully (${result.deletedParticipants} participants, ${result.deletedSessions} sessions removed)`, 'success');
+            const deletionSummary = [
+              `${result.deletedParticipants} participants`,
+              `${result.deletedChecklistItems} checklist items`,
+              `${result.deletedSessions} sessions`,
+              `${result.deletedAttendance} attendance records`
+            ].join(', ');
+            showToast(`Rollout deleted successfully (${deletionSummary} removed)`, 'success');
             loadRollouts();
             // Reload rollout filter
             loadRolloutsForFilter(currentSiteFilter);
@@ -3357,13 +3644,29 @@
             .getAllParticipants(sessionToken, { rolloutId: currentRolloutFilter });
         })
       ]).then(([sessionsResult, participantsResult]) => {
+        // Check if results are valid
+        if (!sessionsResult || !participantsResult) {
+          throw new Error('Failed to load data. Please ensure the database is properly initialized.');
+        }
+
+        if (!sessionsResult.success) {
+          throw new Error(sessionsResult.message || 'Failed to load sessions');
+        }
+
+        if (!participantsResult.success) {
+          throw new Error(participantsResult.message || 'Failed to load participants');
+        }
+
         renderAttendanceInterfaceInline(currentRolloutFilter, sessionsResult.sessions || [], participantsResult.participants || []);
       }).catch(error => {
         document.getElementById('attendanceCardBody').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
             <h3>Error loading data</h3>
-            <p>${error}</p>
+            <p>${typeof error === 'string' ? error : error.message || 'Unknown error'}</p>
+            <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+              If this is a new installation, please ensure the database is initialized by running the <code>initializeDatabase()</code> function from the Apps Script editor.
+            </p>
           </div>
         `;
       });
@@ -3485,6 +3788,20 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
+          if (!result) {
+            document.getElementById('attendanceReportBody').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Error loading report</h3>
+                <p>Failed to load attendance statistics. Please ensure the database is properly initialized.</p>
+                <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+                  Run <code>initializeDatabase()</code> from the Apps Script editor to create the required sheets.
+                </p>
+              </div>
+            `;
+            return;
+          }
+
           if (result.success) {
             const stats = result.stats;
             let html = `
@@ -4701,6 +5018,14 @@
 
       if (isSectionVisible('reports')) {
         loadReports();
+      }
+
+      if (isSectionVisible('attendance')) {
+        loadAttendance();
+      }
+
+      if (isSectionVisible('attendanceReports')) {
+        loadAttendanceReports();
       }
     }
 
