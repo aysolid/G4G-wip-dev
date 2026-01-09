@@ -1319,6 +1319,12 @@
             </div>
             <div class="quick-action-label">Update Checklist</div>
           </div>
+          <div class="quick-action-card" onclick="showSection('attendance')">
+            <div class="quick-action-icon">
+              <span class="material-icons">how_to_reg</span>
+            </div>
+            <div class="quick-action-label">Mark Attendance</div>
+          </div>
           ${currentUser.role === 'admin' ? `
           <div class="quick-action-card" onclick="showSection('rollouts')">
             <div class="quick-action-icon">
@@ -3357,13 +3363,29 @@
             .getAllParticipants(sessionToken, { rolloutId: currentRolloutFilter });
         })
       ]).then(([sessionsResult, participantsResult]) => {
+        // Check if results are valid
+        if (!sessionsResult || !participantsResult) {
+          throw new Error('Failed to load data. Please ensure the database is properly initialized.');
+        }
+
+        if (!sessionsResult.success) {
+          throw new Error(sessionsResult.message || 'Failed to load sessions');
+        }
+
+        if (!participantsResult.success) {
+          throw new Error(participantsResult.message || 'Failed to load participants');
+        }
+
         renderAttendanceInterfaceInline(currentRolloutFilter, sessionsResult.sessions || [], participantsResult.participants || []);
       }).catch(error => {
         document.getElementById('attendanceCardBody').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
             <h3>Error loading data</h3>
-            <p>${error}</p>
+            <p>${typeof error === 'string' ? error : error.message || 'Unknown error'}</p>
+            <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+              If this is a new installation, please ensure the database is initialized by running the <code>initializeDatabase()</code> function from the Apps Script editor.
+            </p>
           </div>
         `;
       });
@@ -3485,6 +3507,20 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
+          if (!result) {
+            document.getElementById('attendanceReportBody').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Error loading report</h3>
+                <p>Failed to load attendance statistics. Please ensure the database is properly initialized.</p>
+                <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+                  Run <code>initializeDatabase()</code> from the Apps Script editor to create the required sheets.
+                </p>
+              </div>
+            `;
+            return;
+          }
+
           if (result.success) {
             const stats = result.stats;
             let html = `
@@ -4701,6 +4737,14 @@
 
       if (isSectionVisible('reports')) {
         loadReports();
+      }
+
+      if (isSectionVisible('attendance')) {
+        loadAttendance();
+      }
+
+      if (isSectionVisible('attendanceReports')) {
+        loadAttendanceReports();
       }
     }
 

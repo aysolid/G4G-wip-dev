@@ -1032,7 +1032,7 @@ function getSessionsByRollout(token, rolloutId) {
   const sessionsSheet = ss.getSheetByName('StudySessions');
 
   if (!sessionsSheet) {
-    return { success: false, message: 'StudySessions sheet not found' };
+    return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
   }
 
   const data = sessionsSheet.getDataRange().getValues();
@@ -1428,6 +1428,14 @@ function getAttendanceStatsByRollout(token, rolloutId) {
   const sessionsSheet = ss.getSheetByName('StudySessions');
   const attendanceSheet = ss.getSheetByName('SessionAttendance');
   const participantsSheet = ss.getSheetByName('Participants');
+
+  // Check if required sheets exist
+  if (!sessionsSheet || !attendanceSheet || !participantsSheet) {
+    return {
+      success: false,
+      message: 'Required sheets not found. Please run initializeDatabase() from the Apps Script editor to create all required sheets (StudySessions, SessionAttendance).'
+    };
+  }
 
   // Get all sessions for this rollout
   const sessionData = sessionsSheet.getDataRange().getValues();
