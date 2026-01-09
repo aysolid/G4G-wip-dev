@@ -916,6 +916,105 @@ function getRolloutById(rolloutId) {
   return null;
 }
 
+/**
+ * Delete a rollout and all related data (Admin only)
+ * This will cascade delete:
+ * - All participants in the rollout
+ * - All checklist items for those participants
+ * - All sessions for the rollout
+ * - All attendance records for those sessions
+ */
+function deleteRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') {
+    return { success: false, message: 'Unauthorized - Admin access required' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+
+  // Get all participants in this rollout
+  const participantData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantData[0];
+  const participantIds = [];
+
+  for (let i = 1; i < participantData.length; i++) {
+    if (participantData[i][participantHeaders.indexOf('rolloutId')] === rolloutId) {
+      participantIds.push(participantData[i][participantHeaders.indexOf('participantId')]);
+    }
+  }
+
+  // Get all sessions in this rollout
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sessionHeaders = sessionData[0];
+  const sessionIds = [];
+
+  for (let i = 1; i < sessionData.length; i++) {
+    if (sessionData[i][sessionHeaders.indexOf('rolloutId')] === rolloutId) {
+      sessionIds.push(sessionData[i][sessionHeaders.indexOf('sessionId')]);
+    }
+  }
+
+  // Delete all attendance records for the sessions
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+
+  for (let i = attendanceData.length - 1; i >= 1; i--) {
+    if (sessionIds.includes(attendanceData[i][attendanceHeaders.indexOf('sessionId')])) {
+      attendanceSheet.deleteRow(i + 1);
+    }
+  }
+
+  // Delete all sessions for this rollout
+  for (let i = sessionData.length - 1; i >= 1; i--) {
+    if (sessionData[i][sessionHeaders.indexOf('rolloutId')] === rolloutId) {
+      sessionsSheet.deleteRow(i + 1);
+    }
+  }
+
+  // Delete all checklist items for participants in this rollout
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const checklistHeaders = checklistData[0];
+
+  for (let i = checklistData.length - 1; i >= 1; i--) {
+    if (participantIds.includes(checklistData[i][checklistHeaders.indexOf('participantId')])) {
+      checklistSheet.deleteRow(i + 1);
+    }
+  }
+
+  // Delete all participants in this rollout
+  for (let i = participantData.length - 1; i >= 1; i--) {
+    if (participantData[i][participantHeaders.indexOf('rolloutId')] === rolloutId) {
+      participantsSheet.deleteRow(i + 1);
+    }
+  }
+
+  // Delete the rollout itself
+  const rolloutData = rolloutsSheet.getDataRange().getValues();
+  const rolloutHeaders = rolloutData[0];
+
+  for (let i = 1; i < rolloutData.length; i++) {
+    if (rolloutData[i][rolloutHeaders.indexOf('rolloutId')] === rolloutId) {
+      rolloutsSheet.deleteRow(i + 1);
+      break;
+    }
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'DELETE_ROLLOUT', 'rollout', rolloutId,
+    'Deleted rollout and all related data (' + participantIds.length + ' participants, ' + sessionIds.length + ' sessions)');
+
+  return {
+    success: true,
+    message: 'Rollout deleted successfully',
+    deletedParticipants: participantIds.length,
+    deletedSessions: sessionIds.length
+  };
+}
+
 // ============================================
 // STUDY SESSION FUNCTIONS
 // ============================================
