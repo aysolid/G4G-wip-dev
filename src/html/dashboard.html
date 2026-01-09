@@ -933,6 +933,18 @@
           </a>
         </div>
 
+        <div class="nav-section" id="attendanceSection">
+          <div class="nav-section-title">Attendance</div>
+          <a class="nav-item" onclick="showSection('attendance')">
+            <span class="material-icons">how_to_reg</span>
+            Mark Attendance
+          </a>
+          <a class="nav-item" onclick="showSection('attendanceReports')">
+            <span class="material-icons">assessment</span>
+            Attendance Reports
+          </a>
+        </div>
+
         <div class="nav-section" id="adminSection">
           <div class="nav-section-title">Administration</div>
           <a class="nav-item" onclick="showSection('rollouts')">
@@ -1023,6 +1035,12 @@
 
         <!-- Enroll Section -->
         <section id="enrollSection" class="hidden"></section>
+
+        <!-- Attendance Section -->
+        <section id="attendanceSection" class="hidden"></section>
+
+        <!-- Attendance Reports Section -->
+        <section id="attendanceReportsSection" class="hidden"></section>
 
         <!-- Rollouts Section -->
         <section id="rolloutsSection" class="hidden"></section>
@@ -1159,7 +1177,7 @@
     // ============================================
     function showSection(section) {
       // Hide all sections
-      const sections = ['dashboard', 'participants', 'enroll', 'rollouts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'rollouts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
       sections.forEach(s => {
         const el = document.getElementById(s + 'Section');
         if (el) el.classList.add('hidden');
@@ -1173,6 +1191,8 @@
         'dashboard': 'dashboard',
         'participants': 'participants',
         'enroll': 'enroll',
+        'attendance': 'attendance',
+        'attendanceReports': 'attendanceReports',
         'rollouts': 'rollouts',
         'users': 'users',
         'reports': 'reports',
@@ -1197,6 +1217,8 @@
         dashboard: 'Dashboard',
         participants: 'Participants',
         enroll: 'Enroll Participant',
+        attendance: 'Mark Attendance',
+        attendanceReports: 'Attendance Reports',
         rollouts: 'Study Rollouts',
         users: 'User Management',
         reports: 'Analytics',
@@ -1215,6 +1237,12 @@
           break;
         case 'enroll':
           loadEnrollForm();
+          break;
+        case 'attendance':
+          loadAttendance();
+          break;
+        case 'attendanceReports':
+          loadAttendanceReports();
           break;
         case 'rollouts':
           loadRollouts();
@@ -2669,7 +2697,10 @@
                   <td><span class="badge badge-${r.status === 'active' ? 'success' : r.status === 'completed' ? 'info' : 'neutral'}">${r.status}</span></td>
                   <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${r.description || '-'}</td>
                   <td>
-                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')">
+                    <button class="btn btn-sm btn-primary" onclick="showAttendanceInterface('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Manage Attendance">
+                      <span class="material-icons">how_to_reg</span>
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Rollout">
                       <span class="material-icons">edit</span>
                     </button>
                   </td>
@@ -2718,6 +2749,18 @@
             <label class="form-label">Description (optional)</label>
             <textarea class="form-textarea" id="rolloutDescription" rows="2" placeholder="Brief description of this cohort..."></textarea>
           </div>
+
+          <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--gray-200);">
+
+          <div class="form-group">
+            <label class="form-label">Number of Sessions *</label>
+            <input type="number" class="form-input" id="numSessions" required min="1" max="20" value="8" onchange="generateSessionFields()">
+            <small style="color: var(--gray-500);">How many data collection days will this rollout have?</small>
+          </div>
+
+          <div id="sessionsContainer" style="max-height: 300px; overflow-y: auto;">
+            <!-- Session fields will be generated here -->
+          </div>
         </form>
       `;
       document.getElementById('modalFooter').innerHTML = `
@@ -2728,6 +2771,32 @@
         </button>
       `;
       openModal();
+      generateSessionFields();
+    }
+
+    function generateSessionFields() {
+      const numSessions = parseInt(document.getElementById('numSessions')?.value || 8);
+      const container = document.getElementById('sessionsContainer');
+
+      let html = '<div style="margin-top: 1rem;"><h4 style="font-size: 0.875rem; font-weight: 600; color: var(--gray-700); margin-bottom: 1rem;">Session Schedule</h4>';
+
+      for (let i = 1; i <= numSessions; i++) {
+        html += `
+          <div class="form-row" style="margin-bottom: 0.75rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 0.75rem;">Session ${i} Date</label>
+              <input type="date" class="form-input" id="sessionDate${i}" style="font-size: 0.875rem;">
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 0.75rem;">Session ${i} Name (optional)</label>
+              <input type="text" class="form-input" id="sessionName${i}" placeholder="e.g., Lesson ${i}" style="font-size: 0.875rem;">
+            </div>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
     }
 
     function saveRollout() {
@@ -2744,12 +2813,48 @@
         return;
       }
 
+      // Collect session data
+      const numSessions = parseInt(document.getElementById('numSessions').value);
+      const sessions = [];
+
+      for (let i = 1; i <= numSessions; i++) {
+        const dateInput = document.getElementById('sessionDate' + i);
+        const nameInput = document.getElementById('sessionName' + i);
+
+        sessions.push({
+          sessionNumber: i,
+          sessionDate: dateInput.value || '',
+          sessionName: nameInput.value.trim() || ''
+        });
+      }
+
+      // Create the rollout first
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showToast('Rollout created successfully', 'success');
-            closeModal();
-            loadRollouts();
+            // Then create the sessions
+            if (sessions.length > 0) {
+              google.script.run
+                .withSuccessHandler(function(sessionsResult) {
+                  if (sessionsResult.success) {
+                    showToast('Rollout and sessions created successfully', 'success');
+                  } else {
+                    showToast('Rollout created, but sessions failed: ' + sessionsResult.message, 'warning');
+                  }
+                  closeModal();
+                  loadRollouts();
+                })
+                .withFailureHandler(function(error) {
+                  showToast('Rollout created, but sessions failed: ' + error, 'warning');
+                  closeModal();
+                  loadRollouts();
+                })
+                .batchCreateSessions(sessionToken, result.rolloutId, sessions);
+            } else {
+              showToast('Rollout created successfully', 'success');
+              closeModal();
+              loadRollouts();
+            }
           } else {
             showToast(result.message, 'error');
           }
@@ -2853,6 +2958,578 @@
         })
         .withFailureHandler(handleError)
         .updateRollout(sessionToken, rolloutId, data);
+    }
+
+    // ============================================
+    // ATTENDANCE MANAGEMENT
+    // ============================================
+
+    function showAttendanceInterface(rolloutId, schoolName, period, year) {
+      const rolloutName = `${schoolName} (${period} ${year})`;
+      document.getElementById('modalTitle').textContent = 'Attendance Management - ' + rolloutName;
+      document.getElementById('modalBody').innerHTML = `
+        <div class="loading" id="attendanceLoading">
+          <div class="spinner"></div>
+          <p>Loading attendance data...</p>
+        </div>
+        <div id="attendanceContent" class="hidden"></div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+      `;
+      openModal();
+
+      // Load sessions and participants
+      Promise.all([
+        new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .getSessionsByRollout(sessionToken, rolloutId);
+        }),
+        new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .getAllParticipants(sessionToken, { rolloutId: rolloutId });
+        })
+      ]).then(([sessionsResult, participantsResult]) => {
+        renderAttendanceInterface(rolloutId, sessionsResult.sessions || [], participantsResult.participants || []);
+      }).catch(error => {
+        document.getElementById('attendanceLoading').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <h3>Error loading data</h3>
+            <p>${error}</p>
+          </div>
+        `;
+      });
+    }
+
+    function renderAttendanceInterface(rolloutId, sessions, participants) {
+      document.getElementById('attendanceLoading').classList.add('hidden');
+      document.getElementById('attendanceContent').classList.remove('hidden');
+
+      if (sessions.length === 0) {
+        document.getElementById('attendanceContent').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">event_busy</span>
+            <h3>No sessions configured</h3>
+            <p>Please edit the rollout to add sessions before marking attendance.</p>
+          </div>
+        `;
+        return;
+      }
+
+      if (participants.length === 0) {
+        document.getElementById('attendanceContent').innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">person_off</span>
+            <h3>No participants enrolled</h3>
+            <p>Enroll participants in this rollout before marking attendance.</p>
+          </div>
+        `;
+        return;
+      }
+
+      // Create tabs for each session
+      let html = `
+        <div class="tabs" style="margin-bottom: 1rem; border-bottom: 2px solid var(--gray-200);">
+          ${sessions.map((session, idx) => `
+            <button class="tab-button ${idx === 0 ? 'active' : ''}" onclick="switchAttendanceTab(${idx})" data-tab="${idx}">
+              Session ${session.sessionNumber}
+              ${session.sessionName ? `<br><small style="font-weight: 400;">${session.sessionName}</small>` : ''}
+              ${session.sessionDate ? `<br><small style="font-weight: 400;">${formatDate(session.sessionDate)}</small>` : ''}
+            </button>
+          `).join('')}
+        </div>
+
+        <div id="attendanceTabsContainer">
+          ${sessions.map((session, idx) => `
+            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" id="sessionTab${idx}">
+              <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <strong>Session ${session.sessionNumber}</strong>
+                    ${session.sessionName ? ` - ${session.sessionName}` : ''}
+                    ${session.sessionDate ? `<br><small>${formatDate(session.sessionDate)}</small>` : ''}
+                  </div>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm btn-success" onclick="markAllAttendance('${session.sessionId}', 'present')">
+                      <span class="material-icons">check_circle</span>
+                      Mark All Present
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadSessionAttendance('${session.sessionId}', ${idx})">
+                      <span class="material-icons">refresh</span>
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div id="sessionAttendance${idx}">
+                <div class="loading"><div class="spinner"></div></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+
+      document.getElementById('attendanceContent').innerHTML = html;
+
+      // Add CSS for tabs
+      if (!document.getElementById('tabStyles')) {
+        const style = document.createElement('style');
+        style.id = 'tabStyles';
+        style.textContent = `
+          .tabs {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+          }
+          .tab-button {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+          }
+          .tab-button:hover {
+            background: var(--gray-50);
+          }
+          .tab-button.active {
+            border-bottom-color: var(--primary-color);
+            font-weight: 600;
+            color: var(--primary-color);
+          }
+          .tab-content {
+            display: none;
+          }
+          .tab-content.active {
+            display: block;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // Load attendance for first session
+      loadSessionAttendance(sessions[0].sessionId, 0, participants);
+    }
+
+    function switchAttendanceTab(tabIndex) {
+      document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+      document.querySelector(`.tab-button[data-tab="${tabIndex}"]`).classList.add('active');
+      document.querySelector(`.tab-content[data-tab="${tabIndex}"]`).classList.add('active');
+    }
+
+    function loadSessionAttendance(sessionId, tabIndex, participantsList = null) {
+      const container = document.getElementById('sessionAttendance' + tabIndex);
+      container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+      Promise.all([
+        new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .getAttendanceBySession(sessionToken, sessionId);
+        }),
+        participantsList ? Promise.resolve({ participants: participantsList }) : new Promise((resolve, reject) => {
+          google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(reject)
+            .getAllParticipants(sessionToken, {});
+        })
+      ]).then(([attendanceResult, participantsResult]) => {
+        const attendance = attendanceResult.attendance || [];
+        const participants = participantsResult.participants || participantsList || [];
+
+        // Create attendance map
+        const attendanceMap = {};
+        attendance.forEach(att => {
+          attendanceMap[att.participantId] = att;
+        });
+
+        let html = `
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Participant ID</th>
+                  <th>Name</th>
+                  <th>Attendance</th>
+                  <th>Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${participants.map(p => {
+                  const att = attendanceMap[p.participantId];
+                  const status = att ? att.status : 'not_marked';
+                  return `
+                    <tr>
+                      <td><code>${p.participantId}</code></td>
+                      <td><strong>${p.fullName}</strong></td>
+                      <td>
+                        <span class="badge badge-${status === 'present' ? 'success' : status === 'absent' ? 'danger' : status === 'excused' ? 'warning' : 'neutral'}">
+                          ${status === 'present' ? 'Present' : status === 'absent' ? 'Absent' : status === 'excused' ? 'Excused' : 'Not Marked'}
+                        </span>
+                      </td>
+                      <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis;">
+                        ${att && att.notes ? att.notes : '-'}
+                      </td>
+                      <td>
+                        <div style="display: flex; gap: 0.25rem;">
+                          <button class="btn btn-sm btn-success" onclick="quickMarkAttendance('${sessionId}', '${p.participantId}', 'present', ${tabIndex})" title="Mark Present">
+                            <span class="material-icons">check</span>
+                          </button>
+                          <button class="btn btn-sm btn-danger" onclick="quickMarkAttendance('${sessionId}', '${p.participantId}', 'absent', ${tabIndex})" title="Mark Absent">
+                            <span class="material-icons">close</span>
+                          </button>
+                          <button class="btn btn-sm btn-warning" onclick="quickMarkAttendance('${sessionId}', '${p.participantId}', 'excused', ${tabIndex})" title="Mark Excused">
+                            <span class="material-icons">schedule</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        container.innerHTML = html;
+      }).catch(error => {
+        container.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">error</span>
+            <p>Error loading attendance: ${error}</p>
+          </div>
+        `;
+      });
+    }
+
+    function quickMarkAttendance(sessionId, participantId, status, tabIndex) {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(`Attendance marked as ${status}`, 'success');
+            loadSessionAttendance(sessionId, tabIndex);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .markAttendance(sessionToken, {
+          sessionId: sessionId,
+          participantId: participantId,
+          status: status,
+          notes: ''
+        });
+    }
+
+    function markAllAttendance(sessionId, status) {
+      const tabIndex = Array.from(document.querySelectorAll('.tab-content')).findIndex(el => el.classList.contains('active'));
+
+      // Get all participants in the current session
+      const table = document.querySelector(`#sessionAttendance${tabIndex} table`);
+      if (!table) return;
+
+      const rows = table.querySelectorAll('tbody tr');
+      const attendanceRecords = [];
+
+      rows.forEach(row => {
+        const participantId = row.querySelector('code').textContent;
+        attendanceRecords.push({
+          participantId: participantId,
+          status: status,
+          notes: ''
+        });
+      });
+
+      if (attendanceRecords.length === 0) return;
+
+      const confirmMsg = `Mark all ${attendanceRecords.length} participants as ${status}?`;
+      if (!confirm(confirmMsg)) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(`Marked ${result.successCount} participants as ${status}`, 'success');
+            loadSessionAttendance(sessionId, tabIndex);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .bulkMarkAttendance(sessionToken, sessionId, attendanceRecords);
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function loadAttendance() {
+      const section = document.getElementById('attendanceSection');
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">how_to_reg</span>
+              Mark Attendance
+            </h3>
+          </div>
+          <div class="card-body" id="attendanceRolloutsList">
+            <div class="loading">
+              <div class="spinner"></div>
+              <p>Loading rollouts...</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.rollouts.length > 0) {
+            const activeRollouts = result.rollouts.filter(r => r.status === 'active');
+
+            if (activeRollouts.length === 0) {
+              document.getElementById('attendanceRolloutsList').innerHTML = `
+                <div class="empty-state">
+                  <span class="material-icons">event_busy</span>
+                  <h3>No active rollouts</h3>
+                  <p>There are no active rollouts to mark attendance for.</p>
+                </div>
+              `;
+              return;
+            }
+
+            let html = `
+              <p style="margin-bottom: 1rem; color: var(--gray-600);">Select a rollout to mark attendance:</p>
+              <div style="display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
+                ${activeRollouts.map(r => `
+                  <div class="card" style="cursor: pointer; transition: transform 0.2s;" onclick="showAttendanceInterface('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')">
+                    <div class="card-body">
+                      <div style="display: flex; align-items: start; gap: 1rem;">
+                        <div style="width: 48px; height: 48px; background: var(--primary-color); color: white; border-radius: var(--border-radius); display: flex; align-items: center; justify-content: center;">
+                          <span class="material-icons">event</span>
+                        </div>
+                        <div style="flex: 1;">
+                          <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem;">${r.schoolName}</h4>
+                          <p style="margin: 0; font-size: 0.875rem; color: var(--gray-600);">${r.period} ${r.year}</p>
+                          <div style="margin-top: 0.5rem;">
+                            <span class="badge ${r.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${r.site}</span>
+                            <span class="badge badge-success">${r.status}</span>
+                          </div>
+                        </div>
+                        <span class="material-icons" style="color: var(--gray-400);">chevron_right</span>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+
+            document.getElementById('attendanceRolloutsList').innerHTML = html;
+          } else {
+            document.getElementById('attendanceRolloutsList').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">event</span>
+                <h3>No rollouts found</h3>
+                <p>Create a rollout first to mark attendance.</p>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(handleError)
+        .getAllRollouts(sessionToken, currentSiteFilter);
+    }
+
+    function loadAttendanceReports() {
+      const section = document.getElementById('attendanceReportsSection');
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">assessment</span>
+              Attendance Reports
+            </h3>
+          </div>
+          <div class="card-body" id="attendanceReportsList">
+            <div class="loading">
+              <div class="spinner"></div>
+              <p>Loading rollouts...</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success && result.rollouts.length > 0) {
+            let html = `
+              <p style="margin-bottom: 1rem; color: var(--gray-600);">Select a rollout to view attendance report:</p>
+              <div style="display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
+                ${result.rollouts.map(r => `
+                  <div class="card" style="cursor: pointer; transition: transform 0.2s;" onclick="showAttendanceReport('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')">
+                    <div class="card-body">
+                      <div style="display: flex; align-items: start; gap: 1rem;">
+                        <div style="width: 48px; height: 48px; background: var(--success-color); color: white; border-radius: var(--border-radius); display: flex; align-items: center; justify-content: center;">
+                          <span class="material-icons">bar_chart</span>
+                        </div>
+                        <div style="flex: 1;">
+                          <h4 style="margin: 0 0 0.25rem 0; font-size: 1rem;">${r.schoolName}</h4>
+                          <p style="margin: 0; font-size: 0.875rem; color: var(--gray-600);">${r.period} ${r.year}</p>
+                          <div style="margin-top: 0.5rem;">
+                            <span class="badge ${r.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${r.site}</span>
+                            <span class="badge badge-${r.status === 'active' ? 'success' : 'info'}">${r.status}</span>
+                          </div>
+                        </div>
+                        <span class="material-icons" style="color: var(--gray-400);">chevron_right</span>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+
+            document.getElementById('attendanceReportsList').innerHTML = html;
+          } else {
+            document.getElementById('attendanceReportsList').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">event</span>
+                <h3>No rollouts found</h3>
+                <p>Create a rollout first to view attendance reports.</p>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(handleError)
+        .getAllRollouts(sessionToken, currentSiteFilter);
+    }
+
+    function showAttendanceReport(rolloutId, schoolName, period, year) {
+      const rolloutName = `${schoolName} (${period} ${year})`;
+      document.getElementById('modalTitle').textContent = 'Attendance Report - ' + rolloutName;
+      document.getElementById('modalBody').innerHTML = `
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Loading attendance statistics...</p>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+      `;
+      openModal();
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            const stats = result.stats;
+            let html = `
+              <div style="margin-bottom: 1.5rem;">
+                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Overview</h4>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
+                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Sessions</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalSessions}</div>
+                  </div>
+                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
+                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Participants</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalParticipants}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-bottom: 1.5rem;">
+                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Session Attendance</h4>
+                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Session</th>
+                        <th>Date</th>
+                        <th>Present</th>
+                        <th>Absent</th>
+                        <th>Excused</th>
+                        <th>Not Marked</th>
+                        <th>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${stats.sessionStats.map(s => `
+                        <tr>
+                          <td><strong>Session ${s.sessionNumber}</strong>${s.sessionName ? '<br><small>' + s.sessionName + '</small>' : ''}</td>
+                          <td>${formatDate(s.sessionDate)}</td>
+                          <td><span class="badge badge-success">${s.present}</span></td>
+                          <td><span class="badge badge-danger">${s.absent}</span></td>
+                          <td><span class="badge badge-warning">${s.excused}</span></td>
+                          <td><span class="badge badge-neutral">${s.notMarked}</span></td>
+                          <td><strong>${s.attendanceRate}%</strong></td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Participant Attendance</h4>
+                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Participant</th>
+                        <th>Present</th>
+                        <th>Absent</th>
+                        <th>Excused</th>
+                        <th>Not Marked</th>
+                        <th>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${stats.participantStats.map(p => `
+                        <tr>
+                          <td><strong>${p.fullName}</strong><br><small><code>${p.participantId}</code></small></td>
+                          <td><span class="badge badge-success">${p.present}</span></td>
+                          <td><span class="badge badge-danger">${p.absent}</span></td>
+                          <td><span class="badge badge-warning">${p.excused}</span></td>
+                          <td><span class="badge badge-neutral">${p.notMarked}</span></td>
+                          <td><strong>${p.attendanceRate}%</strong></td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+
+            document.getElementById('modalBody').innerHTML = html;
+          } else {
+            document.getElementById('modalBody').innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Error loading report</h3>
+                <p>${result.message}</p>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('modalBody').innerHTML = `
+            <div class="empty-state">
+              <span class="material-icons">error</span>
+              <h3>Error loading report</h3>
+              <p>${error}</p>
+            </div>
+          `;
+        })
+        .getAttendanceStatsByRollout(sessionToken, rolloutId);
     }
 
     // ============================================
