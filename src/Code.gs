@@ -937,6 +937,11 @@ function deleteRollout(token, rolloutId) {
   const sessionsSheet = ss.getSheetByName('StudySessions');
   const attendanceSheet = ss.getSheetByName('SessionAttendance');
 
+  // Verify all sheets exist
+  if (!rolloutsSheet || !participantsSheet || !checklistSheet || !sessionsSheet || !attendanceSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
   // Get all participants in this rollout
   const participantData = participantsSheet.getDataRange().getValues();
   const participantHeaders = participantData[0];
@@ -959,41 +964,57 @@ function deleteRollout(token, rolloutId) {
     }
   }
 
-  // Delete all attendance records for the sessions
+  // COUNT items before deletion for logging
+  let deletedChecklistCount = 0;
+  let deletedAttendanceCount = 0;
+
+  // DELETE ORDER (from most dependent to least dependent):
+
+  // 1. Delete all attendance records for the sessions
   const attendanceData = attendanceSheet.getDataRange().getValues();
   const attendanceHeaders = attendanceData[0];
 
   for (let i = attendanceData.length - 1; i >= 1; i--) {
     if (sessionIds.includes(attendanceData[i][attendanceHeaders.indexOf('sessionId')])) {
       attendanceSheet.deleteRow(i + 1);
+      deletedAttendanceCount++;
     }
   }
 
-  // Delete all sessions for this rollout
+  // 2. Delete all sessions for this rollout
   for (let i = sessionData.length - 1; i >= 1; i--) {
     if (sessionData[i][sessionHeaders.indexOf('rolloutId')] === rolloutId) {
       sessionsSheet.deleteRow(i + 1);
     }
   }
 
-  // Delete all checklist items for participants in this rollout
+  // 3. Delete all checklist items for participants in this rollout
+  // IMPORTANT: Must get fresh data after any deletions
   const checklistData = checklistSheet.getDataRange().getValues();
   const checklistHeaders = checklistData[0];
 
+  Logger.log('Deleting checklists for participantIds: ' + participantIds.join(', '));
+  Logger.log('Total checklist rows: ' + (checklistData.length - 1));
+
   for (let i = checklistData.length - 1; i >= 1; i--) {
-    if (participantIds.includes(checklistData[i][checklistHeaders.indexOf('participantId')])) {
+    const rowParticipantId = checklistData[i][checklistHeaders.indexOf('participantId')];
+    if (participantIds.includes(rowParticipantId)) {
+      Logger.log('Deleting checklist row ' + (i + 1) + ' for participant ' + rowParticipantId);
       checklistSheet.deleteRow(i + 1);
+      deletedChecklistCount++;
     }
   }
 
-  // Delete all participants in this rollout
+  Logger.log('Deleted ' + deletedChecklistCount + ' checklist items');
+
+  // 4. Delete all participants in this rollout
   for (let i = participantData.length - 1; i >= 1; i--) {
     if (participantData[i][participantHeaders.indexOf('rolloutId')] === rolloutId) {
       participantsSheet.deleteRow(i + 1);
     }
   }
 
-  // Delete the rollout itself
+  // 5. Delete the rollout itself
   const rolloutData = rolloutsSheet.getDataRange().getValues();
   const rolloutHeaders = rolloutData[0];
 
@@ -1005,13 +1026,17 @@ function deleteRollout(token, rolloutId) {
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'DELETE_ROLLOUT', 'rollout', rolloutId,
-    'Deleted rollout and all related data (' + participantIds.length + ' participants, ' + sessionIds.length + ' sessions)');
+    'Deleted rollout and all related data (' + participantIds.length + ' participants, ' +
+    deletedChecklistCount + ' checklist items, ' + sessionIds.length + ' sessions, ' +
+    deletedAttendanceCount + ' attendance records)');
 
   return {
     success: true,
     message: 'Rollout deleted successfully',
     deletedParticipants: participantIds.length,
-    deletedSessions: sessionIds.length
+    deletedChecklistItems: deletedChecklistCount,
+    deletedSessions: sessionIds.length,
+    deletedAttendance: deletedAttendanceCount
   };
 }
 
