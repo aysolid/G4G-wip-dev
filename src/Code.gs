@@ -1048,41 +1048,66 @@ function deleteRollout(token, rolloutId) {
  * Get all sessions for a specific rollout
  */
 function getSessionsByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) {
-    return { success: false, message: 'Unauthorized' };
-  }
+  try {
+    Logger.log('getSessionsByRollout called with rolloutId: ' + rolloutId);
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('StudySessions');
-
-  if (!sessionsSheet) {
-    return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
-  }
-
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const sessions = [];
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
-      sessions.push({
-        sessionId: data[i][headers.indexOf('sessionId')],
-        rolloutId: data[i][headers.indexOf('rolloutId')],
-        sessionNumber: data[i][headers.indexOf('sessionNumber')],
-        sessionDate: data[i][headers.indexOf('sessionDate')],
-        sessionName: data[i][headers.indexOf('sessionName')],
-        status: data[i][headers.indexOf('status')],
-        createdAt: data[i][headers.indexOf('createdAt')],
-        createdBy: data[i][headers.indexOf('createdBy')]
-      });
+    const currentUser = validateSession(token);
+    if (!currentUser) {
+      Logger.log('getSessionsByRollout: Unauthorized user');
+      return { success: false, message: 'Unauthorized' };
     }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sessionsSheet = ss.getSheetByName('StudySessions');
+
+    if (!sessionsSheet) {
+      Logger.log('getSessionsByRollout: StudySessions sheet not found');
+      return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
+    }
+
+    const data = sessionsSheet.getDataRange().getValues();
+    if (!data || data.length === 0) {
+      Logger.log('getSessionsByRollout: No data in StudySessions sheet');
+      return { success: true, sessions: [] };
+    }
+
+    const headers = data[0];
+    Logger.log('getSessionsByRollout: Headers = ' + JSON.stringify(headers));
+
+    const rolloutIdIndex = headers.indexOf('rolloutId');
+    if (rolloutIdIndex === -1) {
+      Logger.log('getSessionsByRollout: rolloutId column not found in headers');
+      return { success: false, message: 'StudySessions sheet is missing rolloutId column. Please run initializeDatabase().' };
+    }
+
+    const sessions = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const rowRolloutId = data[i][rolloutIdIndex];
+      if (rowRolloutId === rolloutId) {
+        sessions.push({
+          sessionId: data[i][headers.indexOf('sessionId')],
+          rolloutId: data[i][headers.indexOf('rolloutId')],
+          sessionNumber: data[i][headers.indexOf('sessionNumber')],
+          sessionDate: data[i][headers.indexOf('sessionDate')],
+          sessionName: data[i][headers.indexOf('sessionName')],
+          status: data[i][headers.indexOf('status')],
+          createdAt: data[i][headers.indexOf('createdAt')],
+          createdBy: data[i][headers.indexOf('createdBy')]
+        });
+      }
+    }
+
+    // Sort by session number
+    sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+    Logger.log('getSessionsByRollout: Found ' + sessions.length + ' sessions for rolloutId ' + rolloutId);
+    return { success: true, sessions: sessions };
+  } catch (error) {
+    Logger.log('getSessionsByRollout ERROR: ' + error.toString());
+    Logger.log('Error stack: ' + error.stack);
+    return { success: false, message: 'Error loading sessions: ' + error.toString() };
   }
-
-  // Sort by session number
-  sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
-
-  return { success: true, sessions: sessions };
 }
 
 /**
