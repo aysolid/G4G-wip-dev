@@ -3604,7 +3604,7 @@ function exportAttendanceCSV(token, filters) {
     sheet.setConditionalFormatRules(rules);
   }
 
-  sheet.autoResizeColumns(1, headerRow.length);
+  sheet.autoResizeColumns(1, Math.min(headerRow.length, sheet.getMaxColumns()));
   sheet.setColumnWidth(1, 180);
   sheet.setColumnWidth(2, 150);
   sheet.setColumnWidth(3, 90);
