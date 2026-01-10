@@ -5161,7 +5161,7 @@
 
     function exportAttendance() {
       google.script.run
-        .withSuccessHandler(downloadCSV)
+        .withSuccessHandler(downloadFileFromResult)
         .withFailureHandler(handleError)
         .exportAttendanceCSV(sessionToken, {
           site: currentSiteFilter,

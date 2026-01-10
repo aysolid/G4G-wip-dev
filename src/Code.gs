@@ -3325,6 +3325,7 @@ function exportAttendanceCSV(token, filters) {
     const participant = {
       participantId: participantsData[i][participantsHeaders.indexOf('participantId')],
       fullName: participantsData[i][participantsHeaders.indexOf('fullName')],
+      site: participantsData[i][participantsHeaders.indexOf('site')],
       rolloutId: rolloutId
     };
 
@@ -3365,49 +3366,247 @@ function exportAttendanceCSV(token, filters) {
     attendanceMap[sessionId + '_' + participantId] = attendanceData[i][attendanceHeaders.indexOf('status')] || 'not_marked';
   }
 
-  let csv = '';
+  const rolloutLookup = {};
+  rolloutEntries.forEach(entry => {
+    rolloutLookup[entry.rolloutId] = entry;
+  });
 
-  rolloutEntries.forEach((rollout, index) => {
-    const rolloutLabel = `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim();
+  const maxSessionCount = rolloutEntries.reduce((max, rollout) => {
+    const sessions = sessionsByRollout[rollout.rolloutId] || [];
+    const maxSessionNumber = sessions.reduce((count, session) => {
+      return Math.max(count, session.sessionNumber || 0);
+    }, 0);
+    return Math.max(max, maxSessionNumber);
+  }, 0);
+
+  const headerRow = [
+    'Participant Name',
+    'Participant ID',
+    'Site',
+    'Rollout'
+  ];
+
+  for (let i = 1; i <= maxSessionCount; i++) {
+    headerRow.push(`Session ${i}`);
+  }
+
+  headerRow.push(
+    'Total Sessions',
+    'Sessions Attended',
+    'Sessions Missed',
+    'Attendance %',
+    'Missed Sessions'
+  );
+
+  const rows = [];
+  const attendanceRates = [];
+  const bandCounts = {
+    high: 0,
+    mid: 0,
+    low: 0
+  };
+
+  const sessionSummaryRows = [];
+  rolloutEntries.forEach(rollout => {
     const sessions = (sessionsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => a.sessionNumber - b.sessionNumber);
-    const participants = participantsByRollout[rollout.rolloutId] || [];
+    const participants = (participantsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => {
+      return (a.fullName || '').localeCompare(b.fullName || '');
+    });
+    const sessionMap = {};
+    sessions.forEach(session => {
+      sessionMap[session.sessionNumber] = session.sessionId;
+    });
 
-    csv += `Rollout: ${rolloutLabel}\n`;
-    csv += ['Participant Name', 'Attendance Rate', 'Remarks'].join(',') + '\n';
+    // Assumption: if a participant has no attendance record for a session, count as Absent.
+    sessions.forEach(session => {
+      let presentCount = 0;
+      participants.forEach(participant => {
+        const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+        if (status === 'present') presentCount++;
+      });
+      const total = participants.length;
+      const absentCount = total - presentCount;
+      const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+      sessionSummaryRows.push([
+        `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim(),
+        'Session ' + session.sessionNumber,
+        presentCount,
+        absentCount,
+        rate + '%'
+      ]);
+    });
 
     participants.forEach(participant => {
       let presentCount = 0;
-      const remarks = [];
+      let missedCount = 0;
+      const missedLabels = [];
+      const sessionValues = [];
 
-      sessions.forEach(session => {
-        const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
-        if (status === 'present') {
-          presentCount++;
-          return;
+      for (let i = 1; i <= maxSessionCount; i++) {
+        if (!sessionMap[i]) {
+          sessionValues.push('');
+          continue;
         }
 
-        const label = session.sessionName || `Session ${session.sessionNumber}`;
-        const statusLabel = status === 'not_marked' ? 'not marked' : status;
-        remarks.push(`${label} (${statusLabel})`);
-      });
+        const status = attendanceMap[sessionMap[i] + '_' + participant.participantId] || 'not_marked';
+        // Assumption: missing attendance is treated as absent, excused counts as non-present.
+        if (status === 'present') {
+          presentCount++;
+          sessionValues.push('P');
+        } else if (status === 'excused') {
+          missedCount++;
+          sessionValues.push('E');
+          missedLabels.push('S' + i);
+        } else {
+          missedCount++;
+          sessionValues.push('A');
+          missedLabels.push('S' + i);
+        }
+      }
 
       const totalSessions = sessions.length;
       const attendanceRate = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
+      attendanceRates.push(attendanceRate);
 
-      const row = [
-        csvEscape(participant.fullName),
-        csvEscape(attendanceRate + '%'),
-        csvEscape(remarks.length > 0 ? remarks.join('; ') : 'All sessions present')
-      ];
-      csv += row.join(',') + '\n';
+      if (attendanceRate >= 90) bandCounts.high++;
+      else if (attendanceRate >= 70) bandCounts.mid++;
+      else bandCounts.low++;
+
+      rows.push([
+        participant.fullName || '',
+        participant.participantId || '',
+        participant.site || rollout.site || '',
+        `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim(),
+        ...sessionValues,
+        totalSessions,
+        presentCount,
+        missedCount,
+        attendanceRate + '%',
+        missedLabels.length > 0 ? missedLabels.join(', ') : ''
+      ]);
     });
-
-    if (index < rolloutEntries.length - 1) {
-      csv += '\n';
-    }
   });
 
-  return { success: true, csv: csv, filename: 'attendance_export_' + new Date().toISOString().split('T')[0] + '.csv' };
+  rows.sort((a, b) => {
+    const rolloutCompare = a[3].localeCompare(b[3]);
+    if (rolloutCompare !== 0) return rolloutCompare;
+    return a[0].localeCompare(b[0]);
+  });
+
+  const exportDate = new Date();
+  const siteLabel = (filters && filters.site) ? filters.site : 'All';
+  let rolloutLabel = 'All Rollouts';
+  if (filters && filters.rolloutId && filters.rolloutId !== 'All') {
+    const rolloutMatch = rolloutLookup[filters.rolloutId];
+    if (rolloutMatch) {
+      rolloutLabel = `${rolloutMatch.schoolName || 'Rollout'} (${rolloutMatch.period || ''} ${rolloutMatch.year || ''})`
+        .replace(/\s+/g, ' ')
+        .trim();
+    } else {
+      rolloutLabel = filters.rolloutId;
+    }
+  }
+
+  const spreadsheet = SpreadsheetApp.create('Attendance Export ' + exportDate.toISOString());
+  const sheet = spreadsheet.getSheets()[0];
+  sheet.setName('Attendance Export');
+
+  let rowCursor = 1;
+  sheet.getRange(rowCursor, 1).setValue('Attendance Export');
+  rowCursor++;
+  sheet.getRange(rowCursor, 1).setValue('Site: ' + (siteLabel === 'All' ? 'All Sites' : siteLabel));
+  sheet.getRange(rowCursor, 2).setValue('Rollout: ' + rolloutLabel);
+  sheet.getRange(rowCursor, 3).setValue('Exported: ' + exportDate.toLocaleString());
+  rowCursor += 2;
+
+  const totalParticipants = rows.length;
+  const averageAttendance = attendanceRates.length > 0
+    ? Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)
+    : 0;
+
+  sheet.getRange(rowCursor, 1).setValue('Summary');
+  rowCursor++;
+  sheet.getRange(rowCursor, 1, 5, 2).setValues([
+    ['Total Participants', totalParticipants],
+    ['Average Attendance %', averageAttendance + '%'],
+    ['90–100%', bandCounts.high],
+    ['70–89%', bandCounts.mid],
+    ['<70%', bandCounts.low]
+  ]);
+  rowCursor += 6;
+
+  sheet.getRange(rowCursor, 1).setValue('Session Summary');
+  rowCursor++;
+  sheet.getRange(rowCursor, 1, 1, 5).setValues([['Rollout', 'Session', 'Present', 'Absent', 'Attendance %']]);
+  rowCursor++;
+  if (sessionSummaryRows.length > 0) {
+    sheet.getRange(rowCursor, 1, sessionSummaryRows.length, 5).setValues(sessionSummaryRows);
+    rowCursor += sessionSummaryRows.length + 1;
+  } else {
+    rowCursor++;
+  }
+
+  const tableHeaderRow = rowCursor;
+  sheet.getRange(tableHeaderRow, 1, 1, headerRow.length).setValues([headerRow]);
+  sheet.getRange(tableHeaderRow, 1, 1, headerRow.length).setFontWeight('bold').setBackground('#f3f4f6');
+  rowCursor++;
+
+  if (rows.length > 0) {
+    sheet.getRange(rowCursor, 1, rows.length, headerRow.length).setValues(rows);
+  }
+
+  sheet.setFrozenRows(tableHeaderRow);
+  sheet.setFrozenColumns(4);
+
+  if (rows.length > 0 && maxSessionCount > 0) {
+    const sessionStartCol = 5;
+    const sessionEndCol = 4 + maxSessionCount;
+    const sessionRange = sheet.getRange(rowCursor, sessionStartCol, rows.length, maxSessionCount);
+    const rules = [
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo('P')
+        .setBackground('#dcfce7')
+        .setRanges([sessionRange])
+        .build(),
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo('A')
+        .setBackground('#fee2e2')
+        .setRanges([sessionRange])
+        .build(),
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo('E')
+        .setBackground('#fef3c7')
+        .setRanges([sessionRange])
+        .build()
+    ];
+    sheet.setConditionalFormatRules(rules);
+  }
+
+  sheet.autoResizeColumns(1, headerRow.length);
+
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to export attendance report: ' + response.getContentText() };
+  }
+
+  const blob = response.getBlob().setName('attendance_export_' + exportDate.toISOString().split('T')[0] + '.xlsx');
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+
+  return {
+    success: true,
+    file: base64,
+    mimeType: MimeType.MICROSOFT_EXCEL,
+    filename: 'attendance_export_' + exportDate.toISOString().split('T')[0] + '.xlsx',
+    downloadMessage: 'Attendance export downloaded'
+  };
 }
 
 /**
