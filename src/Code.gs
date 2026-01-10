@@ -3508,106 +3508,145 @@ function exportAttendanceCSV(token, filters) {
   }
 
   const spreadsheet = SpreadsheetApp.create('Attendance Export ' + exportDate.toISOString());
-  const sheet = spreadsheet.getSheets()[0];
+  let sheet = spreadsheet.getSheets()[0];
   sheet.setName('Attendance Export');
 
-  let rowCursor = 1;
-  sheet.getRange(rowCursor, 1).setValue('Attendance Export');
-  rowCursor++;
-  sheet.getRange(rowCursor, 1).setValue('Site: ' + (siteLabel === 'All' ? 'All Sites' : siteLabel));
-  sheet.getRange(rowCursor, 2).setValue('Rollout: ' + rolloutLabel);
-  sheet.getRange(rowCursor, 3).setValue('Exported: ' + exportDate.toLocaleString());
-  rowCursor += 2;
+  const buildSheetName = rollout => {
+    const label = `${rollout.schoolName || 'Rollout'} ${rollout.period || ''} ${rollout.year || ''}`.replace(/\s+/g, ' ').trim();
+    return label.substring(0, 90) || 'Rollout';
+  };
 
-  const totalColumns = headerRow.length;
-  const titleRange = sheet.getRange(1, 1, 1, totalColumns);
-  titleRange.setFontSize(16).setFontWeight('bold').setFontFamily('Arial');
-  titleRange.setBackground('#1f2937').setFontColor('#ffffff');
+  const renderAttendanceSheet = (targetSheet, sheetRows, sessionSummary, sessionCount, sheetRolloutLabel) => {
+    const totalColumns = headerRow.length;
+    let rowCursor = 1;
 
-  const metaRange = sheet.getRange(2, 1, 1, totalColumns);
-  metaRange.setFontSize(10).setFontFamily('Arial').setFontColor('#111827');
-
-  const totalParticipants = rows.length;
-  const averageAttendance = attendanceRates.length > 0
-    ? Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)
-    : 0;
-
-  sheet.getRange(rowCursor, 1).setValue('Summary');
-  sheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
-  rowCursor++;
-  const summaryRange = sheet.getRange(rowCursor, 1, 5, 2);
-  summaryRange.setValues([
-    ['Total Participants', totalParticipants],
-    ['Average Attendance %', averageAttendance + '%'],
-    ['90–100%', bandCounts.high],
-    ['70–89%', bandCounts.mid],
-    ['<70%', bandCounts.low]
-  ]);
-  summaryRange.setFontFamily('Arial').setFontSize(10);
-  sheet.getRange(rowCursor, 1, 5, 1).setFontWeight('bold').setBackground('#f3f4f6');
-  rowCursor += 6;
-
-  sheet.getRange(rowCursor, 1).setValue('Session Summary');
-  sheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
-  rowCursor++;
-  const sessionHeaderRange = sheet.getRange(rowCursor, 1, 1, 5);
-  sessionHeaderRange.setValues([['Rollout', 'Session', 'Present', 'Absent', 'Attendance %']]);
-  sessionHeaderRange.setFontWeight('bold').setBackground('#f3f4f6').setFontFamily('Arial');
-  rowCursor++;
-  if (sessionSummaryRows.length > 0) {
-    const sessionSummaryRange = sheet.getRange(rowCursor, 1, sessionSummaryRows.length, 5);
-    sessionSummaryRange.setValues(sessionSummaryRows);
-    sessionSummaryRange.setFontFamily('Arial').setFontSize(10);
-    rowCursor += sessionSummaryRows.length + 1;
-  } else {
+    targetSheet.getRange(rowCursor, 1).setValue('Attendance Export');
     rowCursor++;
+    targetSheet.getRange(rowCursor, 1).setValue('Site: ' + (siteLabel === 'All' ? 'All Sites' : siteLabel));
+    targetSheet.getRange(rowCursor, 2).setValue('Rollout: ' + sheetRolloutLabel);
+    targetSheet.getRange(rowCursor, 3).setValue('Exported: ' + exportDate.toLocaleString());
+    rowCursor += 2;
+
+    const titleRange = targetSheet.getRange(1, 1, 1, totalColumns);
+    titleRange.setFontSize(16).setFontWeight('bold').setFontFamily('Arial');
+    titleRange.setBackground('#1f2937').setFontColor('#ffffff');
+
+    const metaRange = targetSheet.getRange(2, 1, 1, totalColumns);
+    metaRange.setFontSize(10).setFontFamily('Arial').setFontColor('#111827');
+
+    const totalParticipants = sheetRows.length;
+    const sheetAttendanceRates = sheetRows.map(row => {
+      const rateValue = String(row[headerRow.length - 2]).replace('%', '');
+      return Number(rateValue) || 0;
+    });
+    const averageAttendance = sheetAttendanceRates.length > 0
+      ? Math.round(sheetAttendanceRates.reduce((sum, rate) => sum + rate, 0) / sheetAttendanceRates.length)
+      : 0;
+
+    const bandCounts = {
+      high: sheetAttendanceRates.filter(rate => rate >= 90).length,
+      mid: sheetAttendanceRates.filter(rate => rate >= 70 && rate < 90).length,
+      low: sheetAttendanceRates.filter(rate => rate < 70).length
+    };
+
+    targetSheet.getRange(rowCursor, 1).setValue('Summary');
+    targetSheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
+    rowCursor++;
+    const summaryRange = targetSheet.getRange(rowCursor, 1, 5, 2);
+    summaryRange.setValues([
+      ['Total Participants', totalParticipants],
+      ['Average Attendance %', averageAttendance + '%'],
+      ['90–100%', bandCounts.high],
+      ['70–89%', bandCounts.mid],
+      ['<70%', bandCounts.low]
+    ]);
+    summaryRange.setFontFamily('Arial').setFontSize(10);
+    targetSheet.getRange(rowCursor, 1, 5, 1).setFontWeight('bold').setBackground('#f3f4f6');
+    rowCursor += 6;
+
+    targetSheet.getRange(rowCursor, 1).setValue('Session Summary');
+    targetSheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
+    rowCursor++;
+    const sessionHeaderRange = targetSheet.getRange(rowCursor, 1, 1, 5);
+    sessionHeaderRange.setValues([['Rollout', 'Session', 'Present', 'Absent', 'Attendance %']]);
+    sessionHeaderRange.setFontWeight('bold').setBackground('#f3f4f6').setFontFamily('Arial');
+    rowCursor++;
+    if (sessionSummary.length > 0) {
+      const sessionSummaryRange = targetSheet.getRange(rowCursor, 1, sessionSummary.length, 5);
+      sessionSummaryRange.setValues(sessionSummary);
+      sessionSummaryRange.setFontFamily('Arial').setFontSize(10);
+      rowCursor += sessionSummary.length + 1;
+    } else {
+      rowCursor++;
+    }
+
+    const tableHeaderRow = rowCursor;
+    const headerRange = targetSheet.getRange(tableHeaderRow, 1, 1, headerRow.length);
+    headerRange.setValues([headerRow]);
+    headerRange.setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff');
+    headerRange.setFontFamily('Arial').setFontSize(10);
+    rowCursor++;
+
+    if (sheetRows.length > 0) {
+      const dataRange = targetSheet.getRange(rowCursor, 1, sheetRows.length, headerRow.length);
+      dataRange.setValues(sheetRows);
+      dataRange.setFontFamily('Arial').setFontSize(10);
+    }
+
+    targetSheet.setFrozenRows(tableHeaderRow);
+    targetSheet.setFrozenColumns(4);
+
+    if (sheetRows.length > 0 && sessionCount > 0) {
+      const sessionStartCol = 5;
+      const sessionRange = targetSheet.getRange(rowCursor, sessionStartCol, sheetRows.length, sessionCount);
+      const rules = [
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('P')
+          .setBackground('#dcfce7')
+          .setRanges([sessionRange])
+          .build(),
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('A')
+          .setBackground('#fee2e2')
+          .setRanges([sessionRange])
+          .build(),
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('E')
+          .setBackground('#fef3c7')
+          .setRanges([sessionRange])
+          .build()
+      ];
+      targetSheet.setConditionalFormatRules(rules);
+    }
+
+    targetSheet.autoResizeColumns(1, Math.min(headerRow.length, targetSheet.getMaxColumns()));
+    targetSheet.setColumnWidth(1, 180);
+    targetSheet.setColumnWidth(2, 150);
+    targetSheet.setColumnWidth(3, 90);
+    targetSheet.setColumnWidth(4, 220);
+  };
+
+  if (rolloutEntries.length > 1) {
+    rolloutEntries.forEach((rollout, index) => {
+      const sheetName = buildSheetName(rollout);
+      const targetSheet = index === 0 ? sheet : spreadsheet.insertSheet(sheetName);
+      if (index !== 0) {
+        targetSheet.setName(sheetName);
+      } else {
+        sheet.setName(sheetName);
+      }
+
+      const sheetRows = rows.filter(row => row[3] === `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
+      const sheetSessionSummary = sessionSummaryRows.filter(row => row[0] === `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
+      const sessionCount = (sessionsByRollout[rollout.rolloutId] || []).reduce((count, session) => {
+        return Math.max(count, session.sessionNumber || 0);
+      }, 0);
+
+      renderAttendanceSheet(targetSheet, sheetRows, sheetSessionSummary, sessionCount, `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
+    });
+  } else {
+    renderAttendanceSheet(sheet, rows, sessionSummaryRows, maxSessionCount, rolloutLabel);
   }
-
-  const tableHeaderRow = rowCursor;
-  const headerRange = sheet.getRange(tableHeaderRow, 1, 1, headerRow.length);
-  headerRange.setValues([headerRow]);
-  headerRange.setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff');
-  headerRange.setFontFamily('Arial').setFontSize(10);
-  rowCursor++;
-
-  if (rows.length > 0) {
-    const dataRange = sheet.getRange(rowCursor, 1, rows.length, headerRow.length);
-    dataRange.setValues(rows);
-    dataRange.setFontFamily('Arial').setFontSize(10);
-  }
-
-  sheet.setFrozenRows(tableHeaderRow);
-  sheet.setFrozenColumns(4);
-
-  if (rows.length > 0 && maxSessionCount > 0) {
-    const sessionStartCol = 5;
-    const sessionEndCol = 4 + maxSessionCount;
-    const sessionRange = sheet.getRange(rowCursor, sessionStartCol, rows.length, maxSessionCount);
-    const rules = [
-      SpreadsheetApp.newConditionalFormatRule()
-        .whenTextEqualTo('P')
-        .setBackground('#dcfce7')
-        .setRanges([sessionRange])
-        .build(),
-      SpreadsheetApp.newConditionalFormatRule()
-        .whenTextEqualTo('A')
-        .setBackground('#fee2e2')
-        .setRanges([sessionRange])
-        .build(),
-      SpreadsheetApp.newConditionalFormatRule()
-        .whenTextEqualTo('E')
-        .setBackground('#fef3c7')
-        .setRanges([sessionRange])
-        .build()
-    ];
-    sheet.setConditionalFormatRules(rules);
-  }
-
-  sheet.autoResizeColumns(1, Math.min(headerRow.length, sheet.getMaxColumns()));
-  sheet.setColumnWidth(1, 180);
-  sheet.setColumnWidth(2, 150);
-  sheet.setColumnWidth(3, 90);
-  sheet.setColumnWidth(4, 220);
 
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
