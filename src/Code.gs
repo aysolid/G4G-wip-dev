@@ -57,7 +57,7 @@ function doGet(e) {
   const sessionToken = e.parameter.token || '';
 
   // Validate session for protected pages
-  const protectedPages = ['dashboard', 'users', 'rollouts', 'participants', 'participant-detail', 'reports'];
+  const protectedPages = ['users', 'rollouts', 'participants', 'participant-detail', 'reports'];
 
   if (protectedPages.includes(page)) {
     const session = validateSession(sessionToken);
@@ -358,7 +358,7 @@ function createSession(userId) {
   const sessionId = generateUUID();
   const token = generateSessionToken();
   const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+  const expiresAt = new Date(createdAt.getTime() + 60 * 60 * 1000); // 1 hour
 
   sessionsSheet.appendRow([
     sessionId,
