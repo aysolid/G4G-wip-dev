@@ -1549,13 +1549,20 @@ function getAttendanceStatsByRollout(token, rolloutId) {
     let absent = 0;
     let excused = 0;
     let notMarked = 0;
+    const absentParticipants = [];
 
     for (let participant of participants) {
       const key = session.sessionId + '_' + participant.participantId;
       const status = attendanceMap[key];
 
       if (status === 'present') present++;
-      else if (status === 'absent') absent++;
+      else if (status === 'absent') {
+        absent++;
+        absentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+      }
       else if (status === 'excused') excused++;
       else notMarked++;
     }
@@ -1569,7 +1576,8 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       absent: absent,
       excused: excused,
       notMarked: notMarked,
-      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0
+      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0,
+      absentParticipants: absentParticipants
     });
   }
 
@@ -3179,6 +3187,141 @@ function exportChecklistCSV(token, filters) {
   });
 
   return { success: true, csv: csv, filename: 'checklist_export_' + new Date().toISOString().split('T')[0] + '.csv' };
+}
+
+/**
+ * Export attendance data to CSV format
+ */
+function exportAttendanceCSV(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  // Enforce facilitator site scope
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters = filters || {};
+    filters.site = currentUser.site;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!participantsSheet || !sessionsSheet || !attendanceSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const rolloutsData = rolloutsSheet.getDataRange().getValues();
+  const rolloutsHeaders = rolloutsData[0];
+  const rolloutIds = new Set();
+
+  for (let i = 1; i < rolloutsData.length; i++) {
+    const rolloutId = rolloutsData[i][rolloutsHeaders.indexOf('rolloutId')];
+    const rolloutSite = rolloutsData[i][rolloutsHeaders.indexOf('site')];
+
+    if (filters && filters.site && filters.site !== 'All' && rolloutSite !== filters.site) continue;
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+
+    rolloutIds.add(rolloutId);
+  }
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantsHeaders = participantsData[0];
+  const participants = [];
+  const participantMap = {};
+
+  for (let i = 1; i < participantsData.length; i++) {
+    const rolloutId = participantsData[i][participantsHeaders.indexOf('rolloutId')];
+    if (!rolloutIds.has(rolloutId)) continue;
+
+    const participantId = participantsData[i][participantsHeaders.indexOf('participantId')];
+    const participant = {
+      participantId: participantId,
+      fullName: participantsData[i][participantsHeaders.indexOf('fullName')],
+      site: participantsData[i][participantsHeaders.indexOf('site')],
+      schoolName: participantsData[i][participantsHeaders.indexOf('schoolName')],
+      period: participantsData[i][participantsHeaders.indexOf('period')],
+      year: participantsData[i][participantsHeaders.indexOf('year')],
+      rolloutId: rolloutId
+    };
+
+    participants.push(participant);
+    participantMap[participantId] = participant;
+  }
+
+  const sessionsData = sessionsSheet.getDataRange().getValues();
+  const sessionsHeaders = sessionsData[0];
+  const sessions = [];
+
+  for (let i = 1; i < sessionsData.length; i++) {
+    const rolloutId = sessionsData[i][sessionsHeaders.indexOf('rolloutId')];
+    if (!rolloutIds.has(rolloutId)) continue;
+
+    sessions.push({
+      sessionId: sessionsData[i][sessionsHeaders.indexOf('sessionId')],
+      rolloutId: rolloutId,
+      sessionNumber: sessionsData[i][sessionsHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(sessionsData[i][sessionsHeaders.indexOf('sessionDate')]),
+      sessionName: sessionsData[i][sessionsHeaders.indexOf('sessionName')]
+    });
+  }
+
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+  const attendanceMap = {};
+
+  for (let i = 1; i < attendanceData.length; i++) {
+    const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
+    const participantId = attendanceData[i][attendanceHeaders.indexOf('participantId')];
+    if (!participantMap[participantId]) continue;
+
+    attendanceMap[sessionId + '_' + participantId] = attendanceData[i][attendanceHeaders.indexOf('status')] || 'not_marked';
+  }
+
+  const headers = [
+    'Rollout ID',
+    'Site',
+    'School',
+    'Period',
+    'Year',
+    'Session ID',
+    'Session Name',
+    'Session Number',
+    'Session Date',
+    'Participant ID',
+    'Participant Name',
+    'Status'
+  ];
+
+  let csv = headers.join(',') + '\n';
+
+  sessions.forEach(session => {
+    participants.forEach(participant => {
+      if (participant.rolloutId !== session.rolloutId) return;
+      const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+
+      const row = [
+        csvEscape(participant.rolloutId),
+        csvEscape(participant.site),
+        csvEscape(participant.schoolName),
+        csvEscape(participant.period),
+        csvEscape(participant.year),
+        csvEscape(session.sessionId),
+        csvEscape(session.sessionName || ('Session ' + session.sessionNumber)),
+        csvEscape(session.sessionNumber),
+        csvEscape(session.sessionDate),
+        csvEscape(participant.participantId),
+        csvEscape(participant.fullName),
+        csvEscape(status)
+      ];
+      csv += row.join(',') + '\n';
+    });
+  });
+
+  return { success: true, csv: csv, filename: 'attendance_export_' + new Date().toISOString().split('T')[0] + '.csv' };
 }
 
 /**
