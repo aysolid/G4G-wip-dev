@@ -4181,7 +4181,6 @@
         attendanceReportSessionLookup[session.sessionId] = session;
 
         const rateClass = session.attendanceRate >= 80 ? 'success' : session.attendanceRate >= 50 ? 'warning' : 'primary';
-        const absentCount = (session.absentParticipants || []).length || 0;
         const sessionTitle = session.sessionName || 'Session ' + session.sessionNumber;
 
         return `
@@ -4197,7 +4196,7 @@
                 <span class="badge badge-warning">${session.excused} excused</span>
                 <span class="badge badge-neutral">${session.notMarked} not marked</span>
                 <span class="badge badge-${rateClass}">${session.attendanceRate}%</span>
-                <button class="icon-button" onclick="showSessionAbsentees('${session.sessionId}')" title="View absent participants" ${absentCount === 0 ? 'disabled' : ''}>
+                <button class="icon-button" onclick="showSessionAbsentees('${session.sessionId}')" title="View attendance details">
                   <span class="material-icons" style="font-size: 18px;">list</span>
                 </button>
               </div>
@@ -4238,23 +4237,35 @@
         return;
       }
 
-      const absentList = session.absentParticipants || [];
-      if (absentList.length === 0) {
-        showToast('All participants were present for this session.', 'success');
+      const nonPresentList = session.nonPresentParticipants || [];
+      if (nonPresentList.length === 0) {
+        showToast('All participants were marked present for this session.', 'success');
         return;
       }
 
-      const participantRows = absentList.map(person => `
+      const statusBadge = status => {
+        if (status === 'absent') return { label: 'Absent', className: 'badge-danger' };
+        if (status === 'excused') return { label: 'Excused', className: 'badge-warning' };
+        return { label: 'Not marked', className: 'badge-neutral' };
+      };
+
+      const participantRows = nonPresentList.map(person => {
+        const badge = statusBadge(person.status);
+        return `
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0; border-bottom: 1px solid var(--gray-100);">
           <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(person.fullName || 'Unknown Participant')}</div>
-          <span class="badge badge-danger">Absent</span>
+          <span class="badge ${badge.className}">${badge.label}</span>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       const sessionTitle = session.sessionName || 'Session ' + session.sessionNumber;
-      document.getElementById('modalTitle').textContent = `${sessionTitle} - Absent Participants`;
+      document.getElementById('modalTitle').textContent = `${sessionTitle} - Attendance Details`;
       document.getElementById('modalBody').innerHTML = `
-        <p class="stat-label" style="margin-bottom: 0.75rem;">${absentList.length} participant${absentList.length === 1 ? '' : 's'} marked absent.</p>
+        <p class="stat-label" style="margin-bottom: 0.5rem;">
+          ${session.present} present • ${session.absent} absent • ${session.excused} excused • ${session.notMarked} not marked
+        </p>
+        <p class="stat-label" style="margin-bottom: 0.75rem;">${nonPresentList.length} participant${nonPresentList.length === 1 ? '' : 's'} need attention.</p>
         <div style="max-height: 320px; overflow-y: auto;">
           ${participantRows}
         </div>
@@ -5104,7 +5115,7 @@
               <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
                 <div>
                   <div style="font-weight: 500;">Attendance Export</div>
-                  <div style="font-size: 0.8rem; color: var(--gray-500);">Session attendance (present/absent) as CSV</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Participant attendance summary by rollout</div>
                 </div>
                 <button class="btn btn-primary" onclick="exportAttendance()">
                   <span class="material-icons">download</span>

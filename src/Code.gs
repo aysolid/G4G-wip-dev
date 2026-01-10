@@ -1591,22 +1591,56 @@ function getAttendanceStatsByRollout(token, rolloutId) {
     let absent = 0;
     let excused = 0;
     let notMarked = 0;
+    const presentParticipants = [];
     const absentParticipants = [];
+    const excusedParticipants = [];
+    const notMarkedParticipants = [];
+    const nonPresentParticipants = [];
 
     for (let participant of participants) {
       const key = session.sessionId + '_' + participant.participantId;
       const status = attendanceMap[key];
 
-      if (status === 'present') present++;
-      else if (status === 'absent') {
+      if (status === 'present') {
+        present++;
+        presentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+      } else if (status === 'absent') {
         absent++;
         absentParticipants.push({
           participantId: participant.participantId,
           fullName: participant.fullName
         });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'absent'
+        });
+      } else if (status === 'excused') {
+        excused++;
+        excusedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'excused'
+        });
+      } else {
+        notMarked++;
+        notMarkedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'not_marked'
+        });
       }
-      else if (status === 'excused') excused++;
-      else notMarked++;
     }
 
     stats.sessionStats.push({
@@ -1619,7 +1653,11 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       excused: excused,
       notMarked: notMarked,
       attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0,
-      absentParticipants: absentParticipants
+      presentParticipants: presentParticipants,
+      absentParticipants: absentParticipants,
+      excusedParticipants: excusedParticipants,
+      notMarkedParticipants: notMarkedParticipants,
+      nonPresentParticipants: nonPresentParticipants
     });
   }
 
@@ -3258,7 +3296,7 @@ function exportAttendanceCSV(token, filters) {
 
   const rolloutsData = rolloutsSheet.getDataRange().getValues();
   const rolloutsHeaders = rolloutsData[0];
-  const rolloutIds = new Set();
+  const rolloutEntries = [];
 
   for (let i = 1; i < rolloutsData.length; i++) {
     const rolloutId = rolloutsData[i][rolloutsHeaders.indexOf('rolloutId')];
@@ -3267,48 +3305,54 @@ function exportAttendanceCSV(token, filters) {
     if (filters && filters.site && filters.site !== 'All' && rolloutSite !== filters.site) continue;
     if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
 
-    rolloutIds.add(rolloutId);
+    rolloutEntries.push({
+      rolloutId: rolloutId,
+      site: rolloutSite,
+      schoolName: rolloutsData[i][rolloutsHeaders.indexOf('schoolName')],
+      period: rolloutsData[i][rolloutsHeaders.indexOf('period')],
+      year: rolloutsData[i][rolloutsHeaders.indexOf('year')]
+    });
   }
 
   const participantsData = participantsSheet.getDataRange().getValues();
   const participantsHeaders = participantsData[0];
-  const participants = [];
-  const participantMap = {};
+  const participantsByRollout = {};
 
   for (let i = 1; i < participantsData.length; i++) {
     const rolloutId = participantsData[i][participantsHeaders.indexOf('rolloutId')];
-    if (!rolloutIds.has(rolloutId)) continue;
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
 
-    const participantId = participantsData[i][participantsHeaders.indexOf('participantId')];
     const participant = {
-      participantId: participantId,
+      participantId: participantsData[i][participantsHeaders.indexOf('participantId')],
       fullName: participantsData[i][participantsHeaders.indexOf('fullName')],
-      site: participantsData[i][participantsHeaders.indexOf('site')],
-      schoolName: participantsData[i][participantsHeaders.indexOf('schoolName')],
-      period: participantsData[i][participantsHeaders.indexOf('period')],
-      year: participantsData[i][participantsHeaders.indexOf('year')],
       rolloutId: rolloutId
     };
 
-    participants.push(participant);
-    participantMap[participantId] = participant;
+    if (!participantsByRollout[rolloutId]) {
+      participantsByRollout[rolloutId] = [];
+    }
+    participantsByRollout[rolloutId].push(participant);
   }
 
   const sessionsData = sessionsSheet.getDataRange().getValues();
   const sessionsHeaders = sessionsData[0];
-  const sessions = [];
+  const sessionsByRollout = {};
 
   for (let i = 1; i < sessionsData.length; i++) {
     const rolloutId = sessionsData[i][sessionsHeaders.indexOf('rolloutId')];
-    if (!rolloutIds.has(rolloutId)) continue;
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
 
-    sessions.push({
+    const session = {
       sessionId: sessionsData[i][sessionsHeaders.indexOf('sessionId')],
-      rolloutId: rolloutId,
       sessionNumber: sessionsData[i][sessionsHeaders.indexOf('sessionNumber')],
       sessionDate: normalizeSessionDateValue(sessionsData[i][sessionsHeaders.indexOf('sessionDate')]),
       sessionName: sessionsData[i][sessionsHeaders.indexOf('sessionName')]
-    });
+    };
+
+    if (!sessionsByRollout[rolloutId]) {
+      sessionsByRollout[rolloutId] = [];
+    }
+    sessionsByRollout[rolloutId].push(session);
   }
 
   const attendanceData = attendanceSheet.getDataRange().getValues();
@@ -3318,49 +3362,49 @@ function exportAttendanceCSV(token, filters) {
   for (let i = 1; i < attendanceData.length; i++) {
     const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
     const participantId = attendanceData[i][attendanceHeaders.indexOf('participantId')];
-    if (!participantMap[participantId]) continue;
-
     attendanceMap[sessionId + '_' + participantId] = attendanceData[i][attendanceHeaders.indexOf('status')] || 'not_marked';
   }
 
-  const headers = [
-    'Rollout ID',
-    'Site',
-    'School',
-    'Period',
-    'Year',
-    'Session ID',
-    'Session Name',
-    'Session Number',
-    'Session Date',
-    'Participant ID',
-    'Participant Name',
-    'Status'
-  ];
+  let csv = '';
 
-  let csv = headers.join(',') + '\n';
+  rolloutEntries.forEach((rollout, index) => {
+    const rolloutLabel = `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim();
+    const sessions = (sessionsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => a.sessionNumber - b.sessionNumber);
+    const participants = participantsByRollout[rollout.rolloutId] || [];
 
-  sessions.forEach(session => {
+    csv += `Rollout: ${rolloutLabel}\n`;
+    csv += ['Participant Name', 'Attendance Rate', 'Remarks'].join(',') + '\n';
+
     participants.forEach(participant => {
-      if (participant.rolloutId !== session.rolloutId) return;
-      const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+      let presentCount = 0;
+      const remarks = [];
+
+      sessions.forEach(session => {
+        const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+        if (status === 'present') {
+          presentCount++;
+          return;
+        }
+
+        const label = session.sessionName || `Session ${session.sessionNumber}`;
+        const statusLabel = status === 'not_marked' ? 'not marked' : status;
+        remarks.push(`${label} (${statusLabel})`);
+      });
+
+      const totalSessions = sessions.length;
+      const attendanceRate = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
 
       const row = [
-        csvEscape(participant.rolloutId),
-        csvEscape(participant.site),
-        csvEscape(participant.schoolName),
-        csvEscape(participant.period),
-        csvEscape(participant.year),
-        csvEscape(session.sessionId),
-        csvEscape(session.sessionName || ('Session ' + session.sessionNumber)),
-        csvEscape(session.sessionNumber),
-        csvEscape(session.sessionDate),
-        csvEscape(participant.participantId),
         csvEscape(participant.fullName),
-        csvEscape(status)
+        csvEscape(attendanceRate + '%'),
+        csvEscape(remarks.length > 0 ? remarks.join('; ') : 'All sessions present')
       ];
       csv += row.join(',') + '\n';
     });
+
+    if (index < rolloutEntries.length - 1) {
+      csv += '\n';
+    }
   });
 
   return { success: true, csv: csv, filename: 'attendance_export_' + new Date().toISOString().split('T')[0] + '.csv' };
