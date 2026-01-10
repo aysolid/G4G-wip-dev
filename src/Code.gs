@@ -353,7 +353,12 @@ function authenticateUser(username, password) {
  */
 function createSession(userId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
+  let sessionsSheet = ss.getSheetByName('Sessions');
+  if (!sessionsSheet) {
+    sessionsSheet = createSheetIfNotExists(ss, 'Sessions', [
+      'sessionId', 'userId', 'token', 'createdAt', 'expiresAt', 'isActive'
+    ]);
+  }
 
   const sessionId = generateUUID();
   const token = generateSessionToken();
