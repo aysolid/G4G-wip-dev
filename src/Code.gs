@@ -3516,8 +3516,18 @@ function exportAttendanceCSV(token, filters) {
     return label.substring(0, 90) || 'Rollout';
   };
 
+  const buildHeaderRow = sessionCount => {
+    const base = ['Participant Name', 'Participant ID', 'Site', 'Rollout'];
+    for (let i = 1; i <= sessionCount; i++) {
+      base.push(`Session ${i}`);
+    }
+    base.push('Total Sessions', 'Sessions Attended', 'Sessions Missed', 'Attendance %', 'Missed Sessions');
+    return base;
+  };
+
   const renderAttendanceSheet = (targetSheet, sheetRows, sessionSummary, sessionCount, sheetRolloutLabel) => {
-    const totalColumns = headerRow.length;
+    const sheetHeaderRow = buildHeaderRow(sessionCount);
+    const totalColumns = sheetHeaderRow.length;
     let rowCursor = 1;
 
     targetSheet.getRange(rowCursor, 1).setValue('Attendance Export');
@@ -3536,7 +3546,7 @@ function exportAttendanceCSV(token, filters) {
 
     const totalParticipants = sheetRows.length;
     const sheetAttendanceRates = sheetRows.map(row => {
-      const rateValue = String(row[headerRow.length - 2]).replace('%', '');
+      const rateValue = String(row[sheetHeaderRow.length - 2]).replace('%', '');
       return Number(rateValue) || 0;
     });
     const averageAttendance = sheetAttendanceRates.length > 0
@@ -3581,15 +3591,15 @@ function exportAttendanceCSV(token, filters) {
     }
 
     const tableHeaderRow = rowCursor;
-    const headerRange = targetSheet.getRange(tableHeaderRow, 1, 1, headerRow.length);
-    headerRange.setValues([headerRow]);
+    const headerRange = targetSheet.getRange(tableHeaderRow, 1, 1, sheetHeaderRow.length);
+    headerRange.setValues([sheetHeaderRow]);
     headerRange.setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff');
     headerRange.setFontFamily('Arial').setFontSize(10);
     rowCursor++;
 
     if (sheetRows.length > 0) {
-      const dataRange = targetSheet.getRange(rowCursor, 1, sheetRows.length, headerRow.length);
-      dataRange.setValues(sheetRows);
+      const dataRange = targetSheet.getRange(rowCursor, 1, sheetRows.length, sheetHeaderRow.length);
+      dataRange.setValues(sheetRows.map(row => row.slice(0, sheetHeaderRow.length)));
       dataRange.setFontFamily('Arial').setFontSize(10);
     }
 
@@ -3619,7 +3629,7 @@ function exportAttendanceCSV(token, filters) {
       targetSheet.setConditionalFormatRules(rules);
     }
 
-    targetSheet.autoResizeColumns(1, Math.min(headerRow.length, targetSheet.getMaxColumns()));
+    targetSheet.autoResizeColumns(1, Math.min(sheetHeaderRow.length, targetSheet.getMaxColumns()));
     targetSheet.setColumnWidth(1, 180);
     targetSheet.setColumnWidth(2, 150);
     targetSheet.setColumnWidth(3, 90);
