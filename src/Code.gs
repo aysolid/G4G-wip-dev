@@ -317,9 +317,7 @@ function authenticateUser(username, password) {
       Logger.log('Input password hash: ' + hashPassword(password));
 
       if (verifyPassword(password, rowPasswordHash)) {
-        // Create session
         const userId = row[headers.indexOf('userId')];
-        const session = createSession(userId);
 
         // Update last login
         const lastLoginCol = headers.indexOf('lastLogin') + 1;
@@ -330,7 +328,7 @@ function authenticateUser(username, password) {
 
         return {
           success: true,
-          token: session.token,
+          token: rowUsername,
           user: {
             userId: userId,
             username: rowUsername,
@@ -386,27 +384,27 @@ function validateSession(token) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('Sessions');
 
-  if (!sessionsSheet) return null;
+  if (sessionsSheet) {
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const tokenCol = headers.indexOf('token');
+    const expiresCol = headers.indexOf('expiresAt');
+    const isActiveCol = headers.indexOf('isActive');
+    const userIdCol = headers.indexOf('userId');
 
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const tokenCol = headers.indexOf('token');
-  const expiresCol = headers.indexOf('expiresAt');
-  const isActiveCol = headers.indexOf('isActive');
-  const userIdCol = headers.indexOf('userId');
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
-      const expiresAt = new Date(data[i][expiresCol]);
-      if (expiresAt > new Date()) {
-        // Session is valid, get user info
-        const userId = data[i][userIdCol];
-        return getUserById(userId);
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
+        const expiresAt = new Date(data[i][expiresCol]);
+        if (expiresAt > new Date()) {
+          // Session is valid, get user info
+          const userId = data[i][userIdCol];
+          return getUserById(userId);
+        }
       }
     }
   }
 
-  return null;
+  return getUserByUsername(token);
 }
 
 /**
@@ -492,6 +490,39 @@ function getUserById(userId) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === userId) {
+      return {
+        userId: data[i][headers.indexOf('userId')],
+        username: data[i][headers.indexOf('username')],
+        fullName: data[i][headers.indexOf('fullName')],
+        role: data[i][headers.indexOf('role')],
+        site: data[i][headers.indexOf('site')],
+        status: data[i][headers.indexOf('status')],
+        createdAt: data[i][headers.indexOf('createdAt')],
+        lastLogin: data[i][headers.indexOf('lastLogin')]
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get user by username
+ */
+function getUserByUsername(username) {
+  if (!username) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const usersSheet = ss.getSheetByName('Users');
+
+  if (!usersSheet) return null;
+
+  const data = usersSheet.getDataRange().getValues();
+  const headers = data[0];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('username')] === username &&
+        data[i][headers.indexOf('status')] === 'active') {
       return {
         userId: data[i][headers.indexOf('userId')],
         username: data[i][headers.indexOf('username')],
