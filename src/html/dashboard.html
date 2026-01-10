@@ -1092,6 +1092,8 @@
     let batchEnrollmentUpload = null;
     let batchEnrollmentResult = null;
     let instrumentStatsLookup = {};
+    let attendanceParticipantsCache = [];
+    let attendanceParticipantsRolloutId = null;
 
     // ============================================
     // INITIALIZATION
@@ -3575,6 +3577,8 @@
     function renderAttendanceInterface(rolloutId, sessions, participants) {
       document.getElementById('attendanceLoading').classList.add('hidden');
       document.getElementById('attendanceContent').classList.remove('hidden');
+      attendanceParticipantsCache = participants;
+      attendanceParticipantsRolloutId = rolloutId;
 
       if (sessions.length === 0) {
         document.getElementById('attendanceContent').innerHTML = `
@@ -3612,7 +3616,7 @@
 
         <div id="attendanceTabsContainer">
           ${sessions.map((session, idx) => `
-            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" id="sessionTab${idx}">
+            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" data-session-id="${session.sessionId}" id="sessionTab${idx}">
               <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -3621,6 +3625,10 @@
                     ${session.sessionDate ? `<br><small>${formatDate(session.sessionDate)}</small>` : ''}
                   </div>
                   <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm btn-primary" onclick="markSelectedAttendance('${session.sessionId}', ${idx})">
+                      <span class="material-icons">checklist</span>
+                      Mark Selected Present
+                    </button>
                     <button class="btn btn-sm btn-success" onclick="markAllAttendance('${session.sessionId}', 'present')">
                       <span class="material-icons">check_circle</span>
                       Mark All Present
@@ -3688,12 +3696,21 @@
       document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
       document.querySelector(`.tab-button[data-tab="${tabIndex}"]`).classList.add('active');
-      document.querySelector(`.tab-content[data-tab="${tabIndex}"]`).classList.add('active');
+      const activeTab = document.querySelector(`.tab-content[data-tab="${tabIndex}"]`);
+      activeTab.classList.add('active');
+      const sessionId = activeTab.dataset.sessionId;
+      if (sessionId) {
+        loadSessionAttendance(sessionId, tabIndex, attendanceParticipantsCache);
+      }
     }
 
     function loadSessionAttendance(sessionId, tabIndex, participantsList = null) {
       const container = document.getElementById('sessionAttendance' + tabIndex);
       container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+      const cachedParticipants = attendanceParticipantsRolloutId === currentRolloutFilter
+        ? attendanceParticipantsCache
+        : [];
 
       Promise.all([
         new Promise((resolve, reject) => {
@@ -3702,15 +3719,23 @@
             .withFailureHandler(reject)
             .getAttendanceBySession(sessionToken, sessionId);
         }),
-        participantsList ? Promise.resolve({ participants: participantsList }) : new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            .getAllParticipants(sessionToken, {});
-        })
+        participantsList
+          ? Promise.resolve({ participants: participantsList })
+          : cachedParticipants.length
+            ? Promise.resolve({ participants: cachedParticipants })
+            : new Promise((resolve, reject) => {
+              google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .getAllParticipants(sessionToken, { rolloutId: currentRolloutFilter });
+            })
       ]).then(([attendanceResult, participantsResult]) => {
         const attendance = attendanceResult.attendance || [];
         const participants = participantsResult.participants || participantsList || [];
+        if (participants.length && currentRolloutFilter !== 'All') {
+          attendanceParticipantsCache = participants;
+          attendanceParticipantsRolloutId = currentRolloutFilter;
+        }
 
         // Create attendance map
         const attendanceMap = {};
@@ -3723,6 +3748,9 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th style="width: 40px;">
+                    <input type="checkbox" id="selectAllAttendance${tabIndex}" onchange="toggleSessionAttendanceSelection(${tabIndex}, this.checked)">
+                  </th>
                   <th>Participant ID</th>
                   <th>Name</th>
                   <th>Attendance</th>
@@ -3736,6 +3764,9 @@
                   const status = att ? att.status : 'not_marked';
                   return `
                     <tr>
+                      <td>
+                        <input type="checkbox" class="attendance-select" data-participant-id="${p.participantId}">
+                      </td>
                       <td><code>${p.participantId}</code></td>
                       <td><strong>${p.fullName}</strong></td>
                       <td>
@@ -3795,6 +3826,46 @@
           status: status,
           notes: ''
         });
+    }
+
+    function toggleSessionAttendanceSelection(tabIndex, isChecked) {
+      const container = document.getElementById('sessionAttendance' + tabIndex);
+      if (!container) return;
+      container.querySelectorAll('.attendance-select').forEach(checkbox => {
+        checkbox.checked = isChecked;
+      });
+    }
+
+    function markSelectedAttendance(sessionId, tabIndex) {
+      const container = document.getElementById('sessionAttendance' + tabIndex);
+      if (!container) return;
+
+      const selected = Array.from(container.querySelectorAll('.attendance-select:checked'));
+      if (selected.length === 0) {
+        showToast('Select at least one participant to mark present', 'warning');
+        return;
+      }
+
+      const confirmMsg = `Mark ${selected.length} selected participant${selected.length === 1 ? '' : 's'} as present?`;
+      if (!confirm(confirmMsg)) return;
+
+      const attendanceRecords = selected.map(checkbox => ({
+        participantId: checkbox.dataset.participantId,
+        status: 'present',
+        notes: ''
+      }));
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(`Marked ${result.successCount} participants as present`, 'success');
+            loadSessionAttendance(sessionId, tabIndex);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .bulkMarkAttendance(sessionToken, sessionId, attendanceRecords);
     }
 
     function markAllAttendance(sessionId, status) {
@@ -3941,6 +4012,8 @@
 
     function renderAttendanceInterfaceInline(rolloutId, sessions, participants) {
       const container = document.getElementById('attendanceCardBody');
+      attendanceParticipantsCache = participants;
+      attendanceParticipantsRolloutId = rolloutId;
 
       if (sessions.length === 0) {
         container.innerHTML = `
@@ -3977,7 +4050,7 @@
 
         <div id="attendanceTabsContainer">
           ${sessions.map((session, idx) => `
-            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" id="sessionTab${idx}">
+            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" data-session-id="${session.sessionId}" id="sessionTab${idx}">
               <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -3985,6 +4058,10 @@
                     ${session.sessionDate ? '<br><small>' + formatDate(session.sessionDate) + '</small>' : ''}
                   </div>
                   <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm btn-primary" onclick="markSelectedAttendance('${session.sessionId}', ${idx})">
+                      <span class="material-icons">checklist</span>
+                      Mark Selected Present
+                    </button>
                     <button class="btn btn-sm btn-success" onclick="markAllAttendance('${session.sessionId}', 'present')">
                       <span class="material-icons">check_circle</span>
                       Mark All Present

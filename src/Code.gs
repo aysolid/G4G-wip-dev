@@ -154,6 +154,11 @@ function initializeDatabase() {
     'sessionId', 'rolloutId', 'sessionNumber', 'sessionDate', 'sessionName',
     'status', 'createdAt', 'createdBy'
   ]);
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  if (sessionsSheet) {
+    const sessionDateColumn = 4;
+    sessionsSheet.getRange(2, sessionDateColumn, sessionsSheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  }
 
   // Create SessionAttendance sheet
   createSheetIfNotExists(ss, 'SessionAttendance', [
@@ -1121,20 +1126,27 @@ function createSession(token, sessionData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
 
   const sessionId = generateUUID();
   const timestamp = new Date().toISOString();
+  const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
 
-  sessionsSheet.appendRow([
+  const nextRow = sessionsSheet.getLastRow() + 1;
+  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([[
     sessionId,
     sessionData.rolloutId,
     sessionData.sessionNumber,
-    sessionData.sessionDate,
+    sessionDateText,
     sessionData.sessionName || '',
     'scheduled',
     timestamp,
     currentUser.userId
-  ]);
+  ]]);
+  if (sessionDateCol > 0) {
+    setPlainTextCell(sessionsSheet, nextRow, sessionDateCol, sessionDateText);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'session', sessionId,
     'Created session #' + sessionData.sessionNumber + ' for rollout ' + sessionData.rolloutId);
@@ -1153,27 +1165,38 @@ function batchCreateSessions(token, rolloutId, sessionsData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
   const timestamp = new Date().toISOString();
   const createdSessions = [];
 
-  for (let sessionData of sessionsData) {
+  const startRow = sessionsSheet.getLastRow() + 1;
+  const rows = sessionsData.map(sessionData => {
     const sessionId = generateUUID();
-
-    sessionsSheet.appendRow([
-      sessionId,
-      rolloutId,
-      sessionData.sessionNumber,
-      sessionData.sessionDate,
-      sessionData.sessionName || '',
-      'scheduled',
-      timestamp,
-      currentUser.userId
-    ]);
-
+    const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
     createdSessions.push({
       sessionId: sessionId,
       sessionNumber: sessionData.sessionNumber
     });
+    return [
+      sessionId,
+      rolloutId,
+      sessionData.sessionNumber,
+      sessionDateText,
+      sessionData.sessionName || '',
+      'scheduled',
+      timestamp,
+      currentUser.userId
+    ];
+  });
+
+  if (rows.length > 0) {
+    sessionsSheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    if (sessionDateCol > 0) {
+      const dateRange = sessionsSheet.getRange(startRow, sessionDateCol, rows.length, 1);
+      dateRange.setNumberFormat('@');
+      dateRange.setValues(rows.map(row => [row[sessionDateCol - 1]]));
+    }
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'rollout', rolloutId,
@@ -1203,7 +1226,13 @@ function updateSession(token, sessionId, sessionData) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('sessionId')] === sessionId) {
       if (sessionData.sessionDate) {
-        sessionsSheet.getRange(i + 1, headers.indexOf('sessionDate') + 1).setValue(sessionData.sessionDate);
+        const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
+        setPlainTextCell(
+          sessionsSheet,
+          i + 1,
+          headers.indexOf('sessionDate') + 1,
+          sessionDateText
+        );
       }
       if (sessionData.sessionName !== undefined) {
         sessionsSheet.getRange(i + 1, headers.indexOf('sessionName') + 1).setValue(sessionData.sessionName);
@@ -1434,7 +1463,7 @@ function getAttendanceByParticipant(token, participantId) {
         if (sessionData[j][sessionHeaders.indexOf('sessionId')] === sessionId) {
           sessionInfo = {
             sessionNumber: sessionData[j][sessionHeaders.indexOf('sessionNumber')],
-            sessionDate: sessionData[j][sessionHeaders.indexOf('sessionDate')],
+            sessionDate: normalizeSessionDateValue(sessionData[j][sessionHeaders.indexOf('sessionDate')]),
             sessionName: sessionData[j][sessionHeaders.indexOf('sessionName')]
           };
           break;
@@ -1497,7 +1526,7 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       sessions.push({
         sessionId: sessionData[i][sessionHeaders.indexOf('sessionId')],
         sessionNumber: sessionData[i][sessionHeaders.indexOf('sessionNumber')],
-        sessionDate: sessionData[i][sessionHeaders.indexOf('sessionDate')],
+        sessionDate: normalizeSessionDateValue(sessionData[i][sessionHeaders.indexOf('sessionDate')]),
         sessionName: sessionData[i][sessionHeaders.indexOf('sessionName')]
       });
     }
@@ -3375,6 +3404,25 @@ function generateSessionToken() {
 function csvEscape(value) {
   const str = value === null || value === undefined ? '' : String(value);
   return '"' + str.replace(/"/g, '""') + '"';
+}
+
+/**
+ * Normalize session dates to plain text (YYYY-MM-DD)
+ */
+function normalizeSessionDateValue(value) {
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    if (isNaN(value.getTime())) return '';
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(value);
+}
+
+/**
+ * Set a cell value while enforcing plain text format
+ */
+function setPlainTextCell(sheet, row, column, value) {
+  sheet.getRange(row, column).setNumberFormat('@').setValue(value === undefined ? '' : value);
 }
 
 /**
