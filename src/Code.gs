@@ -3519,40 +3519,62 @@ function exportAttendanceCSV(token, filters) {
   sheet.getRange(rowCursor, 3).setValue('Exported: ' + exportDate.toLocaleString());
   rowCursor += 2;
 
+  const totalColumns = headerRow.length;
+  const titleRange = sheet.getRange(1, 1, 1, totalColumns);
+  titleRange.merge();
+  titleRange.setFontSize(16).setFontWeight('bold').setFontFamily('Arial');
+  titleRange.setBackground('#1f2937').setFontColor('#ffffff');
+
+  const metaRange = sheet.getRange(2, 1, 1, totalColumns);
+  metaRange.setFontSize(10).setFontFamily('Arial').setFontColor('#111827');
+
   const totalParticipants = rows.length;
   const averageAttendance = attendanceRates.length > 0
     ? Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)
     : 0;
 
   sheet.getRange(rowCursor, 1).setValue('Summary');
+  sheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
   rowCursor++;
-  sheet.getRange(rowCursor, 1, 5, 2).setValues([
+  const summaryRange = sheet.getRange(rowCursor, 1, 5, 2);
+  summaryRange.setValues([
     ['Total Participants', totalParticipants],
     ['Average Attendance %', averageAttendance + '%'],
     ['90–100%', bandCounts.high],
     ['70–89%', bandCounts.mid],
     ['<70%', bandCounts.low]
   ]);
+  summaryRange.setFontFamily('Arial').setFontSize(10);
+  summaryRange.getColumn(1).setFontWeight('bold').setBackground('#f3f4f6');
   rowCursor += 6;
 
   sheet.getRange(rowCursor, 1).setValue('Session Summary');
+  sheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
   rowCursor++;
-  sheet.getRange(rowCursor, 1, 1, 5).setValues([['Rollout', 'Session', 'Present', 'Absent', 'Attendance %']]);
+  const sessionHeaderRange = sheet.getRange(rowCursor, 1, 1, 5);
+  sessionHeaderRange.setValues([['Rollout', 'Session', 'Present', 'Absent', 'Attendance %']]);
+  sessionHeaderRange.setFontWeight('bold').setBackground('#f3f4f6').setFontFamily('Arial');
   rowCursor++;
   if (sessionSummaryRows.length > 0) {
-    sheet.getRange(rowCursor, 1, sessionSummaryRows.length, 5).setValues(sessionSummaryRows);
+    const sessionSummaryRange = sheet.getRange(rowCursor, 1, sessionSummaryRows.length, 5);
+    sessionSummaryRange.setValues(sessionSummaryRows);
+    sessionSummaryRange.setFontFamily('Arial').setFontSize(10);
     rowCursor += sessionSummaryRows.length + 1;
   } else {
     rowCursor++;
   }
 
   const tableHeaderRow = rowCursor;
-  sheet.getRange(tableHeaderRow, 1, 1, headerRow.length).setValues([headerRow]);
-  sheet.getRange(tableHeaderRow, 1, 1, headerRow.length).setFontWeight('bold').setBackground('#f3f4f6');
+  const headerRange = sheet.getRange(tableHeaderRow, 1, 1, headerRow.length);
+  headerRange.setValues([headerRow]);
+  headerRange.setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff');
+  headerRange.setFontFamily('Arial').setFontSize(10);
   rowCursor++;
 
   if (rows.length > 0) {
-    sheet.getRange(rowCursor, 1, rows.length, headerRow.length).setValues(rows);
+    const dataRange = sheet.getRange(rowCursor, 1, rows.length, headerRow.length);
+    dataRange.setValues(rows);
+    dataRange.setFontFamily('Arial').setFontSize(10);
   }
 
   sheet.setFrozenRows(tableHeaderRow);
@@ -3583,6 +3605,10 @@ function exportAttendanceCSV(token, filters) {
   }
 
   sheet.autoResizeColumns(1, headerRow.length);
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 150);
+  sheet.setColumnWidth(3, 90);
+  sheet.setColumnWidth(4, 220);
 
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
