@@ -3545,7 +3545,7 @@ function exportAttendanceCSV(token, filters) {
     ['<70%', bandCounts.low]
   ]);
   summaryRange.setFontFamily('Arial').setFontSize(10);
-  summaryRange.getColumn(1).setFontWeight('bold').setBackground('#f3f4f6');
+  sheet.getRange(rowCursor, 1, 5, 1).setFontWeight('bold').setBackground('#f3f4f6');
   rowCursor += 6;
 
   sheet.getRange(rowCursor, 1).setValue('Session Summary');
