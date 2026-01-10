@@ -57,7 +57,7 @@ function doGet(e) {
   const sessionToken = e.parameter.token || '';
 
   // Validate session for protected pages
-  const protectedPages = ['dashboard', 'users', 'rollouts', 'participants', 'participant-detail', 'reports'];
+  const protectedPages = ['users', 'rollouts', 'participants', 'participant-detail', 'reports'];
 
   if (protectedPages.includes(page)) {
     const session = validateSession(sessionToken);
@@ -154,6 +154,11 @@ function initializeDatabase() {
     'sessionId', 'rolloutId', 'sessionNumber', 'sessionDate', 'sessionName',
     'status', 'createdAt', 'createdBy'
   ]);
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  if (sessionsSheet) {
+    const sessionDateColumn = 4;
+    sessionsSheet.getRange(2, sessionDateColumn, sessionsSheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  }
 
   // Create SessionAttendance sheet
   createSheetIfNotExists(ss, 'SessionAttendance', [
@@ -312,9 +317,7 @@ function authenticateUser(username, password) {
       Logger.log('Input password hash: ' + hashPassword(password));
 
       if (verifyPassword(password, rowPasswordHash)) {
-        // Create session
         const userId = row[headers.indexOf('userId')];
-        const session = createSession(userId);
 
         // Update last login
         const lastLoginCol = headers.indexOf('lastLogin') + 1;
@@ -325,7 +328,7 @@ function authenticateUser(username, password) {
 
         return {
           success: true,
-          token: session.token,
+          token: rowUsername,
           user: {
             userId: userId,
             username: rowUsername,
@@ -348,12 +351,17 @@ function authenticateUser(username, password) {
  */
 function createSession(userId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
+  let sessionsSheet = ss.getSheetByName('Sessions');
+  if (!sessionsSheet) {
+    sessionsSheet = createSheetIfNotExists(ss, 'Sessions', [
+      'sessionId', 'userId', 'token', 'createdAt', 'expiresAt', 'isActive'
+    ]);
+  }
 
   const sessionId = generateUUID();
   const token = generateSessionToken();
   const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+  const expiresAt = new Date(createdAt.getTime() + 60 * 60 * 1000); // 1 hour
 
   sessionsSheet.appendRow([
     sessionId,
@@ -376,27 +384,27 @@ function validateSession(token) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('Sessions');
 
-  if (!sessionsSheet) return null;
+  if (sessionsSheet) {
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const tokenCol = headers.indexOf('token');
+    const expiresCol = headers.indexOf('expiresAt');
+    const isActiveCol = headers.indexOf('isActive');
+    const userIdCol = headers.indexOf('userId');
 
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const tokenCol = headers.indexOf('token');
-  const expiresCol = headers.indexOf('expiresAt');
-  const isActiveCol = headers.indexOf('isActive');
-  const userIdCol = headers.indexOf('userId');
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
-      const expiresAt = new Date(data[i][expiresCol]);
-      if (expiresAt > new Date()) {
-        // Session is valid, get user info
-        const userId = data[i][userIdCol];
-        return getUserById(userId);
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
+        const expiresAt = new Date(data[i][expiresCol]);
+        if (expiresAt > new Date()) {
+          // Session is valid, get user info
+          const userId = data[i][userIdCol];
+          return getUserById(userId);
+        }
       }
     }
   }
 
-  return null;
+  return getUserByUsername(token);
 }
 
 /**
@@ -482,6 +490,39 @@ function getUserById(userId) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === userId) {
+      return {
+        userId: data[i][headers.indexOf('userId')],
+        username: data[i][headers.indexOf('username')],
+        fullName: data[i][headers.indexOf('fullName')],
+        role: data[i][headers.indexOf('role')],
+        site: data[i][headers.indexOf('site')],
+        status: data[i][headers.indexOf('status')],
+        createdAt: data[i][headers.indexOf('createdAt')],
+        lastLogin: data[i][headers.indexOf('lastLogin')]
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get user by username
+ */
+function getUserByUsername(username) {
+  if (!username) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const usersSheet = ss.getSheetByName('Users');
+
+  if (!usersSheet) return null;
+
+  const data = usersSheet.getDataRange().getValues();
+  const headers = data[0];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('username')] === username &&
+        data[i][headers.indexOf('status')] === 'active') {
       return {
         userId: data[i][headers.indexOf('userId')],
         username: data[i][headers.indexOf('username')],
@@ -1048,41 +1089,47 @@ function deleteRollout(token, rolloutId) {
  * Get all sessions for a specific rollout
  */
 function getSessionsByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) {
-    return { success: false, message: 'Unauthorized' };
-  }
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('StudySessions');
-
-  if (!sessionsSheet) {
-    return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
-  }
-
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const sessions = [];
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
-      sessions.push({
-        sessionId: data[i][headers.indexOf('sessionId')],
-        rolloutId: data[i][headers.indexOf('rolloutId')],
-        sessionNumber: data[i][headers.indexOf('sessionNumber')],
-        sessionDate: data[i][headers.indexOf('sessionDate')],
-        sessionName: data[i][headers.indexOf('sessionName')],
-        status: data[i][headers.indexOf('status')],
-        createdAt: data[i][headers.indexOf('createdAt')],
-        createdBy: data[i][headers.indexOf('createdBy')]
-      });
+  try {
+    const currentUser = validateSession(token);
+    if (!currentUser) {
+      return { success: false, message: 'Unauthorized' };
     }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sessionsSheet = ss.getSheetByName('StudySessions');
+
+    if (!sessionsSheet) {
+      return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
+    }
+
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const sessions = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
+        sessions.push({
+          sessionId: data[i][headers.indexOf('sessionId')],
+          rolloutId: data[i][headers.indexOf('rolloutId')],
+          sessionNumber: data[i][headers.indexOf('sessionNumber')],
+          sessionDate: normalizeSessionDateValue(data[i][headers.indexOf('sessionDate')]),
+          sessionName: data[i][headers.indexOf('sessionName')],
+          status: data[i][headers.indexOf('status')],
+          createdAt: data[i][headers.indexOf('createdAt')],
+          createdBy: data[i][headers.indexOf('createdBy')]
+        });
+      }
+    }
+
+    // Sort by session number
+    sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+    return { success: true, sessions: sessions };
+  } catch (error) {
+    Logger.log('getSessionsByRollout ERROR: ' + error.toString());
+    Logger.log('Error stack: ' + error.stack);
+    return { success: false, message: 'Error loading sessions: ' + error.toString() };
   }
-
-  // Sort by session number
-  sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
-
-  return { success: true, sessions: sessions };
 }
 
 /**
@@ -1096,20 +1143,27 @@ function createSession(token, sessionData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
 
   const sessionId = generateUUID();
   const timestamp = new Date().toISOString();
+  const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
 
-  sessionsSheet.appendRow([
+  const nextRow = sessionsSheet.getLastRow() + 1;
+  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([[
     sessionId,
     sessionData.rolloutId,
     sessionData.sessionNumber,
-    sessionData.sessionDate,
+    sessionDateText,
     sessionData.sessionName || '',
     'scheduled',
     timestamp,
     currentUser.userId
-  ]);
+  ]]);
+  if (sessionDateCol > 0) {
+    setPlainTextCell(sessionsSheet, nextRow, sessionDateCol, sessionDateText);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'session', sessionId,
     'Created session #' + sessionData.sessionNumber + ' for rollout ' + sessionData.rolloutId);
@@ -1128,27 +1182,38 @@ function batchCreateSessions(token, rolloutId, sessionsData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
   const timestamp = new Date().toISOString();
   const createdSessions = [];
 
-  for (let sessionData of sessionsData) {
+  const startRow = sessionsSheet.getLastRow() + 1;
+  const rows = sessionsData.map(sessionData => {
     const sessionId = generateUUID();
-
-    sessionsSheet.appendRow([
-      sessionId,
-      rolloutId,
-      sessionData.sessionNumber,
-      sessionData.sessionDate,
-      sessionData.sessionName || '',
-      'scheduled',
-      timestamp,
-      currentUser.userId
-    ]);
-
+    const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
     createdSessions.push({
       sessionId: sessionId,
       sessionNumber: sessionData.sessionNumber
     });
+    return [
+      sessionId,
+      rolloutId,
+      sessionData.sessionNumber,
+      sessionDateText,
+      sessionData.sessionName || '',
+      'scheduled',
+      timestamp,
+      currentUser.userId
+    ];
+  });
+
+  if (rows.length > 0) {
+    sessionsSheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    if (sessionDateCol > 0) {
+      const dateRange = sessionsSheet.getRange(startRow, sessionDateCol, rows.length, 1);
+      dateRange.setNumberFormat('@');
+      dateRange.setValues(rows.map(row => [row[sessionDateCol - 1]]));
+    }
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'rollout', rolloutId,
@@ -1178,7 +1243,13 @@ function updateSession(token, sessionId, sessionData) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('sessionId')] === sessionId) {
       if (sessionData.sessionDate) {
-        sessionsSheet.getRange(i + 1, headers.indexOf('sessionDate') + 1).setValue(sessionData.sessionDate);
+        const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
+        setPlainTextCell(
+          sessionsSheet,
+          i + 1,
+          headers.indexOf('sessionDate') + 1,
+          sessionDateText
+        );
       }
       if (sessionData.sessionName !== undefined) {
         sessionsSheet.getRange(i + 1, headers.indexOf('sessionName') + 1).setValue(sessionData.sessionName);
@@ -1409,7 +1480,7 @@ function getAttendanceByParticipant(token, participantId) {
         if (sessionData[j][sessionHeaders.indexOf('sessionId')] === sessionId) {
           sessionInfo = {
             sessionNumber: sessionData[j][sessionHeaders.indexOf('sessionNumber')],
-            sessionDate: sessionData[j][sessionHeaders.indexOf('sessionDate')],
+            sessionDate: normalizeSessionDateValue(sessionData[j][sessionHeaders.indexOf('sessionDate')]),
             sessionName: sessionData[j][sessionHeaders.indexOf('sessionName')]
           };
           break;
@@ -1472,7 +1543,7 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       sessions.push({
         sessionId: sessionData[i][sessionHeaders.indexOf('sessionId')],
         sessionNumber: sessionData[i][sessionHeaders.indexOf('sessionNumber')],
-        sessionDate: sessionData[i][sessionHeaders.indexOf('sessionDate')],
+        sessionDate: normalizeSessionDateValue(sessionData[i][sessionHeaders.indexOf('sessionDate')]),
         sessionName: sessionData[i][sessionHeaders.indexOf('sessionName')]
       });
     }
@@ -1520,15 +1591,56 @@ function getAttendanceStatsByRollout(token, rolloutId) {
     let absent = 0;
     let excused = 0;
     let notMarked = 0;
+    const presentParticipants = [];
+    const absentParticipants = [];
+    const excusedParticipants = [];
+    const notMarkedParticipants = [];
+    const nonPresentParticipants = [];
 
     for (let participant of participants) {
       const key = session.sessionId + '_' + participant.participantId;
       const status = attendanceMap[key];
 
-      if (status === 'present') present++;
-      else if (status === 'absent') absent++;
-      else if (status === 'excused') excused++;
-      else notMarked++;
+      if (status === 'present') {
+        present++;
+        presentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+      } else if (status === 'absent') {
+        absent++;
+        absentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'absent'
+        });
+      } else if (status === 'excused') {
+        excused++;
+        excusedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'excused'
+        });
+      } else {
+        notMarked++;
+        notMarkedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'not_marked'
+        });
+      }
     }
 
     stats.sessionStats.push({
@@ -1540,7 +1652,12 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       absent: absent,
       excused: excused,
       notMarked: notMarked,
-      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0
+      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0,
+      presentParticipants: presentParticipants,
+      absentParticipants: absentParticipants,
+      excusedParticipants: excusedParticipants,
+      notMarkedParticipants: notMarkedParticipants,
+      nonPresentParticipants: nonPresentParticipants
     });
   }
 
@@ -3153,6 +3270,147 @@ function exportChecklistCSV(token, filters) {
 }
 
 /**
+ * Export attendance data to CSV format
+ */
+function exportAttendanceCSV(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  // Enforce facilitator site scope
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters = filters || {};
+    filters.site = currentUser.site;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!participantsSheet || !sessionsSheet || !attendanceSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const rolloutsData = rolloutsSheet.getDataRange().getValues();
+  const rolloutsHeaders = rolloutsData[0];
+  const rolloutEntries = [];
+
+  for (let i = 1; i < rolloutsData.length; i++) {
+    const rolloutId = rolloutsData[i][rolloutsHeaders.indexOf('rolloutId')];
+    const rolloutSite = rolloutsData[i][rolloutsHeaders.indexOf('site')];
+
+    if (filters && filters.site && filters.site !== 'All' && rolloutSite !== filters.site) continue;
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+
+    rolloutEntries.push({
+      rolloutId: rolloutId,
+      site: rolloutSite,
+      schoolName: rolloutsData[i][rolloutsHeaders.indexOf('schoolName')],
+      period: rolloutsData[i][rolloutsHeaders.indexOf('period')],
+      year: rolloutsData[i][rolloutsHeaders.indexOf('year')]
+    });
+  }
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantsHeaders = participantsData[0];
+  const participantsByRollout = {};
+
+  for (let i = 1; i < participantsData.length; i++) {
+    const rolloutId = participantsData[i][participantsHeaders.indexOf('rolloutId')];
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
+
+    const participant = {
+      participantId: participantsData[i][participantsHeaders.indexOf('participantId')],
+      fullName: participantsData[i][participantsHeaders.indexOf('fullName')],
+      rolloutId: rolloutId
+    };
+
+    if (!participantsByRollout[rolloutId]) {
+      participantsByRollout[rolloutId] = [];
+    }
+    participantsByRollout[rolloutId].push(participant);
+  }
+
+  const sessionsData = sessionsSheet.getDataRange().getValues();
+  const sessionsHeaders = sessionsData[0];
+  const sessionsByRollout = {};
+
+  for (let i = 1; i < sessionsData.length; i++) {
+    const rolloutId = sessionsData[i][sessionsHeaders.indexOf('rolloutId')];
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
+
+    const session = {
+      sessionId: sessionsData[i][sessionsHeaders.indexOf('sessionId')],
+      sessionNumber: sessionsData[i][sessionsHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(sessionsData[i][sessionsHeaders.indexOf('sessionDate')]),
+      sessionName: sessionsData[i][sessionsHeaders.indexOf('sessionName')]
+    };
+
+    if (!sessionsByRollout[rolloutId]) {
+      sessionsByRollout[rolloutId] = [];
+    }
+    sessionsByRollout[rolloutId].push(session);
+  }
+
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+  const attendanceMap = {};
+
+  for (let i = 1; i < attendanceData.length; i++) {
+    const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
+    const participantId = attendanceData[i][attendanceHeaders.indexOf('participantId')];
+    attendanceMap[sessionId + '_' + participantId] = attendanceData[i][attendanceHeaders.indexOf('status')] || 'not_marked';
+  }
+
+  let csv = '';
+
+  rolloutEntries.forEach((rollout, index) => {
+    const rolloutLabel = `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim();
+    const sessions = (sessionsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => a.sessionNumber - b.sessionNumber);
+    const participants = participantsByRollout[rollout.rolloutId] || [];
+
+    csv += `Rollout: ${rolloutLabel}\n`;
+    csv += ['Participant Name', 'Attendance Rate', 'Remarks'].join(',') + '\n';
+
+    participants.forEach(participant => {
+      let presentCount = 0;
+      const remarks = [];
+
+      sessions.forEach(session => {
+        const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+        if (status === 'present') {
+          presentCount++;
+          return;
+        }
+
+        const label = session.sessionName || `Session ${session.sessionNumber}`;
+        const statusLabel = status === 'not_marked' ? 'not marked' : status;
+        remarks.push(`${label} (${statusLabel})`);
+      });
+
+      const totalSessions = sessions.length;
+      const attendanceRate = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
+
+      const row = [
+        csvEscape(participant.fullName),
+        csvEscape(attendanceRate + '%'),
+        csvEscape(remarks.length > 0 ? remarks.join('; ') : 'All sessions present')
+      ];
+      csv += row.join(',') + '\n';
+    });
+
+    if (index < rolloutEntries.length - 1) {
+      csv += '\n';
+    }
+  });
+
+  return { success: true, csv: csv, filename: 'attendance_export_' + new Date().toISOString().split('T')[0] + '.csv' };
+}
+
+/**
  * Export summary report
  */
 function exportSummaryReport(token, filters) {
@@ -3350,6 +3608,25 @@ function generateSessionToken() {
 function csvEscape(value) {
   const str = value === null || value === undefined ? '' : String(value);
   return '"' + str.replace(/"/g, '""') + '"';
+}
+
+/**
+ * Normalize session dates to plain text (YYYY-MM-DD)
+ */
+function normalizeSessionDateValue(value) {
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    if (isNaN(value.getTime())) return '';
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(value);
+}
+
+/**
+ * Set a cell value while enforcing plain text format
+ */
+function setPlainTextCell(sheet, row, column, value) {
+  sheet.getRange(row, column).setNumberFormat('@').setValue(value === undefined ? '' : value);
 }
 
 /**
