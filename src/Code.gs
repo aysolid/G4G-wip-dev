@@ -3521,7 +3521,6 @@ function exportAttendanceCSV(token, filters) {
 
   const totalColumns = headerRow.length;
   const titleRange = sheet.getRange(1, 1, 1, totalColumns);
-  titleRange.merge();
   titleRange.setFontSize(16).setFontWeight('bold').setFontFamily('Arial');
   titleRange.setBackground('#1f2937').setFontColor('#ffffff');
 
