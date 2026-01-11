@@ -947,9 +947,9 @@
 
         <div class="nav-section" id="adminSection">
           <div class="nav-section-title">Administration</div>
-          <a class="nav-item" onclick="showSection('rollouts')">
+          <a class="nav-item" onclick="showSection('cohorts')">
             <span class="material-icons">event</span>
-            Study Rollouts
+            Study Cohorts
           </a>
           <a class="nav-item" onclick="showSection('users')">
             <span class="material-icons">manage_accounts</span>
@@ -1012,9 +1012,9 @@
             </select>
           </div>
           <div class="site-filter" id="rolloutFilterContainer">
-            <label for="rolloutFilter">Rollout:</label>
+            <label for="rolloutFilter">Cohort:</label>
             <select id="rolloutFilter" onchange="handleRolloutFilterChange()">
-              <option value="All">All Rollouts</option>
+              <option value="All">All Cohorts</option>
             </select>
           </div>
         </div>
@@ -1042,7 +1042,7 @@
         <!-- Attendance Reports Section -->
         <section id="attendanceReportsSection" class="hidden"></section>
 
-        <!-- Rollouts Section -->
+        <!-- Cohorts Section -->
         <section id="rolloutsSection" class="hidden"></section>
 
         <!-- Users Section -->
@@ -1145,7 +1145,7 @@
       // Apply role-based access
       applyRoleBasedAccess();
 
-      // Load rollouts for filter dropdown
+      // Load cohorts for filter dropdown
       loadRolloutsForFilter(currentSiteFilter);
 
       // Load initial data
@@ -1181,7 +1181,7 @@
     // ============================================
     function showSection(section) {
       // Hide all sections
-      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'rollouts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
       sections.forEach(s => {
         const el = document.getElementById(s + 'Section');
         if (el) el.classList.add('hidden');
@@ -1197,7 +1197,7 @@
         'enroll': 'enroll',
         'attendance': 'attendance',
         'attendanceReports': 'attendanceReports',
-        'rollouts': 'rollouts',
+        'cohorts': 'cohorts',
         'users': 'users',
         'reports': 'reports',
         'exports': 'exports',
@@ -1223,7 +1223,7 @@
         enroll: 'Enroll Participant',
         attendance: 'Mark Attendance',
         attendanceReports: 'Attendance Reports',
-        rollouts: 'Study Rollouts',
+        cohorts: 'Study Cohorts',
         users: 'User Management',
         reports: 'Analytics',
         exports: 'Export Data',
@@ -1248,7 +1248,7 @@
         case 'attendanceReports':
           loadAttendanceReports();
           break;
-        case 'rollouts':
+        case 'cohorts':
           loadRollouts();
           break;
         case 'users':
@@ -1289,7 +1289,7 @@
       document.getElementById('dashboardLoading').classList.remove('hidden');
       document.getElementById('dashboardContent').classList.add('hidden');
 
-      // Pass both site and rollout filters to the backend
+      // Pass both site and cohort filters to the backend
       const filters = {
         site: currentSiteFilter,
         rolloutId: currentRolloutFilter
@@ -1329,11 +1329,11 @@
             <div class="quick-action-label">Mark Attendance</div>
           </div>
           ${currentUser.role === 'admin' ? `
-          <div class="quick-action-card" onclick="showSection('rollouts')">
+          <div class="quick-action-card" onclick="showSection('cohorts')">
             <div class="quick-action-icon">
               <span class="material-icons">event</span>
             </div>
-            <div class="quick-action-label">New Rollout</div>
+            <div class="quick-action-label">New Cohort</div>
           </div>
           <div class="quick-action-card" onclick="showSection('users')">
             <div class="quick-action-icon">
@@ -1554,13 +1554,13 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>rolloutName</strong>. Rollout names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">Upload CSV</label>
           <input type="file" class="form-input" id="batchEnrollmentFile" accept=".csv" onchange="handleBatchEnrollmentFile(this)">
-          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Rollout names must match the template dropdown exactly. Participant IDs are generated automatically.</div>
+          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Cohort names must match the template dropdown exactly. Participant IDs are generated automatically.</div>
         </div>
         <div id="batchEnrollmentStatus" class="alert alert-neutral" style="display: flex; align-items: center; gap: 8px;">
           <span class="material-icons" style="font-size: 18px;">upload_file</span>
@@ -1819,7 +1819,7 @@
       const section = document.getElementById('participantDetailSection');
 
       // Hide all sections and show participant detail
-      ['dashboard', 'participants', 'enroll', 'rollouts', 'users', 'reports', 'exports', 'settings'].forEach(s => {
+      ['dashboard', 'participants', 'enroll', 'cohorts', 'users', 'reports', 'exports', 'settings'].forEach(s => {
         document.getElementById(s + 'Section').classList.add('hidden');
       });
       section.classList.remove('hidden');
@@ -2253,10 +2253,10 @@
             </select>
           </div>
           <div class="form-group" style="flex: 1;">
-            <label class="form-label">Rollout</label>
+            <label class="form-label">Cohort</label>
             <select class="form-select" id="batchRolloutSelect">
-              <option value="">-- Choose rollout --</option>
-              ${rolloutOptions || '<option value="" disabled>No active rollouts found</option>'}
+              <option value="">-- Choose cohort --</option>
+              ${rolloutOptions || '<option value="" disabled>No active cohorts found</option>'}
             </select>
           </div>
         </div>
@@ -2264,7 +2264,7 @@
           <div class="card-body" id="batchChecklistResults">
             <div class="empty-state">
               <span class="material-icons">fact_check</span>
-              <h3>Select a protocol item and rollout to load participants.</h3>
+              <h3>Select a protocol item and cohort to load participants.</h3>
               <p>Use this tool to mark a checklist item as completed, missing, or not started for multiple participants at once.</p>
             </div>
           </div>
@@ -2288,7 +2288,7 @@
       const results = document.getElementById('batchChecklistResults');
 
       if (!instrumentNumber || !rolloutId) {
-        showToast('Select a protocol item and rollout first', 'error');
+        showToast('Select a protocol item and cohort first', 'error');
         return;
       }
 
@@ -2339,7 +2339,7 @@
         results.innerHTML = `
           <div class="empty-state">
             <span class="material-icons">groups</span>
-            <h3>No participants found for this rollout</h3>
+            <h3>No participants found for this cohort</h3>
           </div>
         `;
         return;
@@ -2509,7 +2509,7 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label class="form-label">Study Rollout *</label>
+                  <label class="form-label">Study Cohort *</label>
                   <select class="form-select" id="enrollRollout" required disabled>
                     <option value="">Select site first...</option>
                   </select>
@@ -2559,21 +2559,21 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (!result.success) {
-            rolloutSelect.innerHTML = `<option value="">${result.message || 'Unable to load rollouts'}</option>`;
+            rolloutSelect.innerHTML = `<option value="">${result.message || 'Unable to load cohorts'}</option>`;
             rolloutSelect.disabled = true;
-            showToast(result.message || 'Unable to load rollouts', 'error');
+            showToast(result.message || 'Unable to load cohorts', 'error');
             return;
           }
 
-          if (result.rollouts.length > 0) {
-            let options = '<option value="">Select rollout...</option>';
-            result.rollouts.filter(r => r.status === 'active').forEach(r => {
+          if (result.cohorts.length > 0) {
+            let options = '<option value="">Select cohort...</option>';
+            result.cohorts.filter(r => r.status === 'active').forEach(r => {
               options += `<option value="${r.rolloutId}">${r.schoolName} (${r.period} ${r.year})</option>`;
             });
             rolloutSelect.innerHTML = options;
             rolloutSelect.disabled = false;
           } else {
-            rolloutSelect.innerHTML = '<option value="">No active rollouts for this site</option>';
+            rolloutSelect.innerHTML = '<option value="">No active cohorts for this site</option>';
             rolloutSelect.disabled = true;
           }
         })
@@ -2624,7 +2624,7 @@
               <div class="empty-state">
                 <span class="material-icons">lock</span>
                 <h3>Access Denied</h3>
-                <p>Only administrators can manage study rollouts.</p>
+                <p>Only administrators can manage study cohorts.</p>
               </div>
             </div>
           </div>
@@ -2638,11 +2638,11 @@
           <div class="card-header">
             <h3 class="card-title">
               <span class="material-icons">event</span>
-              Study Rollouts
+              Study Cohorts
             </h3>
             <button class="btn btn-primary" onclick="showAddRolloutModal()">
               <span class="material-icons">add</span>
-              Add Rollout
+              Add Cohort
             </button>
           </div>
           <div class="card-body" id="rolloutsList">
@@ -2664,20 +2664,20 @@
         document.getElementById('rolloutsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
-            <h3>Error loading rollouts</h3>
+            <h3>Error loading cohorts</h3>
           </div>
         `;
         return;
       }
 
-      const rollouts = result.rollouts;
+      const cohorts = result.cohorts;
 
-      if (rollouts.length === 0) {
+      if (cohorts.length === 0) {
         document.getElementById('rolloutsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">event</span>
-            <h3>No study rollouts</h3>
-            <p>Create your first study rollout to start enrolling participants.</p>
+            <h3>No study cohorts</h3>
+            <p>Create your first study cohort to start enrolling participants.</p>
           </div>
         `;
         return;
@@ -2698,7 +2698,7 @@
               </tr>
             </thead>
             <tbody>
-              ${rollouts.map(r => `
+              ${cohorts.map(r => `
                 <tr>
                   <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${r.site}</span></td>
                   <td><strong>${r.schoolName}</strong></td>
@@ -2710,13 +2710,10 @@
                     <button class="btn btn-sm btn-primary" onclick="showAttendanceInterface('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Manage Attendance">
                       <span class="material-icons">how_to_reg</span>
                     </button>
-                    <button class="btn btn-sm" style="background-color: var(--info-color); color: white;" onclick="showManageSessionsModal('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Manage Sessions">
-                      <span class="material-icons">event</span>
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Rollout">
+                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Cohort">
                       <span class="material-icons">edit</span>
                     </button>
-                    <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Rollout">
+                    <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Cohort">
                       <span class="material-icons">delete</span>
                     </button>
                   </td>
@@ -2731,7 +2728,7 @@
     }
 
     function showAddRolloutModal() {
-      document.getElementById('modalTitle').textContent = 'Add Study Rollout';
+      document.getElementById('modalTitle').textContent = 'Add Study Cohort';
       document.getElementById('modalBody').innerHTML = `
         <form id="rolloutForm">
           <div class="form-group">
@@ -2771,7 +2768,7 @@
           <div class="form-group">
             <label class="form-label">Number of Sessions *</label>
             <input type="number" class="form-input" id="numSessions" required min="1" max="20" value="8" onchange="generateSessionFields()">
-            <small style="color: var(--gray-500);">How many data collection days will this rollout have?</small>
+            <small style="color: var(--gray-500);">How many data collection days will this cohort have?</small>
           </div>
 
           <div id="sessionsContainer" style="max-height: 300px; overflow-y: auto;">
@@ -2783,7 +2780,7 @@
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="saveRollout()">
           <span class="material-icons">save</span>
-          Save Rollout
+          Save Cohort
         </button>
       `;
       openModal();
@@ -2839,7 +2836,7 @@
         });
       }
 
-      // Create the rollout first
+      // Create the cohort first
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
@@ -2848,21 +2845,21 @@
               google.script.run
                 .withSuccessHandler(function(sessionsResult) {
                   if (sessionsResult.success) {
-                    showToast('Rollout and sessions created successfully', 'success');
+                    showToast('Cohort and sessions created successfully', 'success');
                   } else {
-                    showToast('Rollout created, but sessions failed: ' + sessionsResult.message, 'warning');
+                    showToast('Cohort created, but sessions failed: ' + sessionsResult.message, 'warning');
                   }
                   closeModal();
                   loadRollouts();
                 })
                 .withFailureHandler(function(error) {
-                  showToast('Rollout created, but sessions failed: ' + error, 'warning');
+                  showToast('Cohort created, but sessions failed: ' + error, 'warning');
                   closeModal();
                   loadRollouts();
                 })
                 .batchCreateSessions(sessionToken, result.rolloutId, sessions);
             } else {
-              showToast('Rollout created successfully', 'success');
+              showToast('Cohort created successfully', 'success');
               closeModal();
               loadRollouts();
             }
@@ -2875,72 +2872,75 @@
     }
 
     function editRollout(rolloutId) {
-      // First fetch the rollout details
+      // First fetch the cohort details
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success && result.rollouts.length > 0) {
-            const rollout = result.rollouts.find(r => r.rolloutId === rolloutId);
-            if (rollout) {
-              showEditRolloutModal(rollout);
+          if (result.success && result.cohorts.length > 0) {
+            const cohort = result.cohorts.find(r => r.rolloutId === rolloutId);
+            if (cohort) {
+              showEditRolloutModal(cohort);
             } else {
-              showToast('Rollout not found', 'error');
+              showToast('Cohort not found', 'error');
             }
           } else {
-            showToast('Could not load rollout details', 'error');
+            showToast('Could not load cohort details', 'error');
           }
         })
         .withFailureHandler(handleError)
         .getAllRollouts(sessionToken, 'All');
     }
 
-    function showEditRolloutModal(rollout) {
-      document.getElementById('modalTitle').textContent = 'Edit Study Rollout';
+    function showEditRolloutModal(cohort) {
+      document.getElementById('modalTitle').textContent = 'Edit Study Cohort';
       document.getElementById('modalBody').innerHTML = `
         <div id="editRolloutForm">
           <div class="form-group">
             <label class="form-label">Site</label>
-            <input type="text" class="form-input" value="${rollout.site}" disabled>
+            <input type="text" class="form-input" value="${cohort.site}" disabled>
           </div>
           <div class="form-group">
             <label class="form-label">School/Location Name *</label>
-            <input type="text" class="form-input" id="editRolloutSchool" value="${rollout.schoolName}" placeholder="e.g., Double Helix School">
+            <input type="text" class="form-input" id="editRolloutSchool" value="${cohort.schoolName}" placeholder="e.g., Double Helix School">
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Period *</label>
               <select class="form-select" id="editRolloutPeriod">
-                <option value="Spring" ${rollout.period === 'Spring' ? 'selected' : ''}>Spring</option>
-                <option value="Summer" ${rollout.period === 'Summer' ? 'selected' : ''}>Summer</option>
-                <option value="Fall" ${rollout.period === 'Fall' ? 'selected' : ''}>Fall</option>
+                <option value="Spring" ${cohort.period === 'Spring' ? 'selected' : ''}>Spring</option>
+                <option value="Summer" ${cohort.period === 'Summer' ? 'selected' : ''}>Summer</option>
+                <option value="Fall" ${cohort.period === 'Fall' ? 'selected' : ''}>Fall</option>
               </select>
             </div>
             <div class="form-group">
               <label class="form-label">Year *</label>
-              <input type="number" class="form-input" id="editRolloutYear" value="${rollout.year}" min="2024" max="2030">
+              <input type="number" class="form-input" id="editRolloutYear" value="${cohort.year}" min="2024" max="2030">
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="editRolloutStatus">
-              <option value="active" ${rollout.status === 'active' ? 'selected' : ''}>Active</option>
-              <option value="completed" ${rollout.status === 'completed' ? 'selected' : ''}>Completed</option>
-              <option value="inactive" ${rollout.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+              <option value="active" ${cohort.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="completed" ${cohort.status === 'completed' ? 'selected' : ''}>Completed</option>
+              <option value="inactive" ${cohort.status === 'inactive' ? 'selected' : ''}>Inactive</option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Description (optional)</label>
-            <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${rollout.description || ''}</textarea>
+            <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${cohort.description || ''}</textarea>
           </div>
         </div>
       `;
       document.getElementById('modalFooter').innerHTML = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" onclick="updateRollout('${rollout.rolloutId}')">
+        <button class="btn btn-primary" type="button" onclick="updateRolloutWithSessions('${cohort.rolloutId}')">
           <span class="material-icons">save</span>
           Save Changes
         </button>
       `;
       openModal();
+
+      // Load sessions for this cohort
+      loadSessionsForEdit(cohort.rolloutId);
     }
 
     function loadSessionsForEdit(rolloutId) {
@@ -3086,7 +3086,7 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showToast('Rollout updated successfully', 'success');
+            showToast('Cohort updated successfully', 'success');
             closeModal();
             loadRollouts();
           } else {
@@ -3375,7 +3375,7 @@
         return;
       }
 
-      // First update the rollout basic info
+      // First update the cohort basic info
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
@@ -3446,7 +3446,7 @@
       const totalOperations = sessionsToDelete.length + sessionsToUpdate.length + (newSessions.length > 0 ? 1 : 0);
 
       if (totalOperations === 0) {
-        showToast('Rollout updated successfully', 'success');
+        showToast('Cohort updated successfully', 'success');
         closeModal();
         loadRollouts();
         return;
@@ -3455,7 +3455,7 @@
       const checkCompletion = () => {
         completedOperations++;
         if (completedOperations >= totalOperations) {
-          showToast('Rollout and sessions updated successfully', 'success');
+          showToast('Cohort and sessions updated successfully', 'success');
           closeModal();
           loadRollouts();
         }
@@ -3499,14 +3499,14 @@
 
     function confirmDeleteRollout(rolloutId, schoolName, period, year) {
       const rolloutName = `${schoolName} (${period} ${year})`;
-      const confirmMsg = `Are you sure you want to delete this rollout?\n\n${rolloutName}\n\nWARNING: This will permanently delete:\n- The rollout\n- All participants enrolled in this rollout\n- All checklist data for those participants\n- All sessions for this rollout\n- All attendance records\n\nThis action cannot be undone.`;
+      const confirmMsg = `Are you sure you want to delete this cohort?\n\n${rolloutName}\n\nWARNING: This will permanently delete:\n- The cohort\n- All participants enrolled in this cohort\n- All checklist data for those participants\n- All sessions for this cohort\n- All attendance records\n\nThis action cannot be undone.`;
 
       if (!confirm(confirmMsg)) {
         return;
       }
 
       // Show loading toast
-      showToast('Deleting rollout...', 'info');
+      showToast('Deleting cohort...', 'info');
 
       google.script.run
         .withSuccessHandler(function(result) {
@@ -3517,9 +3517,9 @@
               `${result.deletedSessions} sessions`,
               `${result.deletedAttendance} attendance records`
             ].join(', ');
-            showToast(`Rollout deleted successfully (${deletionSummary} removed)`, 'success');
+            showToast(`Cohort deleted successfully (${deletionSummary} removed)`, 'success');
             loadRollouts();
-            // Reload rollout filter
+            // Reload cohort filter
             loadRolloutsForFilter(currentSiteFilter);
           } else {
             showToast(result.message, 'error');
@@ -3586,7 +3586,7 @@
           <div class="empty-state">
             <span class="material-icons">event_busy</span>
             <h3>No sessions configured</h3>
-            <p>Please edit the rollout to add sessions before marking attendance.</p>
+            <p>Please edit the cohort to add sessions before marking attendance.</p>
           </div>
         `;
         return;
@@ -3597,7 +3597,7 @@
           <div class="empty-state">
             <span class="material-icons">person_off</span>
             <h3>No participants enrolled</h3>
-            <p>Enroll participants in this rollout before marking attendance.</p>
+            <p>Enroll participants in this cohort before marking attendance.</p>
           </div>
         `;
         return;
@@ -3917,7 +3917,7 @@
     function loadAttendance() {
       const section = document.getElementById('attendanceSection');
 
-      // Check if a specific rollout is selected
+      // Check if a specific cohort is selected
       if (currentRolloutFilter === 'All') {
         section.innerHTML = `
           <div class="card">
@@ -3930,8 +3930,8 @@
             <div class="card-body">
               <div class="empty-state">
                 <span class="material-icons">filter_alt</span>
-                <h3>Please select a specific rollout</h3>
-                <p>Use the rollout filter at the top right to select a specific study rollout, then you can mark attendance for its sessions.</p>
+                <h3>Please select a specific cohort</h3>
+                <p>Use the cohort filter at the top right to select a specific study cohort, then you can mark attendance for its sessions.</p>
               </div>
             </div>
           </div>
@@ -3939,7 +3939,7 @@
         return;
       }
 
-      // Load attendance for the selected rollout
+      // Load attendance for the selected cohort
       section.innerHTML = `
         <div class="card">
           <div class="card-header">
@@ -3957,7 +3957,7 @@
         </div>
       `;
 
-      // Load sessions and participants for the current rollout
+      // Load sessions and participants for the current cohort
       Promise.all([
         new Promise((resolve, reject) => {
           google.script.run
@@ -4024,7 +4024,7 @@
           <div class="empty-state">
             <span class="material-icons">event_busy</span>
             <h3>No sessions configured</h3>
-            <p>This rollout doesn't have any sessions set up yet. Sessions are created when you create the rollout.</p>
+            <p>This cohort doesn't have any sessions set up yet. Sessions are created when you create the cohort.</p>
           </div>
         `;
         return;
@@ -4035,7 +4035,7 @@
           <div class="empty-state">
             <span class="material-icons">person_off</span>
             <h3>No participants enrolled</h3>
-            <p>Enroll participants in this rollout before marking attendance.</p>
+            <p>Enroll participants in this cohort before marking attendance.</p>
           </div>
         `;
         return;
@@ -4094,7 +4094,7 @@
     function loadAttendanceReports() {
       const section = document.getElementById('attendanceReportsSection');
 
-      // Check if a specific rollout is selected
+      // Check if a specific cohort is selected
       if (currentRolloutFilter === 'All') {
         section.innerHTML = `
           <div class="card">
@@ -4107,8 +4107,8 @@
             <div class="card-body">
               <div class="empty-state">
                 <span class="material-icons">filter_alt</span>
-                <h3>Please select a specific rollout</h3>
-                <p>Use the rollout filter at the top right to select a specific study rollout, then you can view its attendance report.</p>
+                <h3>Please select a specific cohort</h3>
+                <p>Use the cohort filter at the top right to select a specific study cohort, then you can view its attendance report.</p>
               </div>
             </div>
           </div>
@@ -4116,7 +4116,7 @@
         return;
       }
 
-      // Load attendance report for the selected rollout
+      // Load attendance report for the selected cohort
       section.innerHTML = `
         <div class="card">
           <div class="card-header">
@@ -4726,7 +4726,7 @@
             <div class="card-header">
               <h3 class="card-title">
                 <span class="material-icons">auto_graph</span>
-                Rollout Performance
+                Cohort Performance
               </h3>
             </div>
             <div class="card-body" id="rolloutPerformance">
@@ -4811,7 +4811,7 @@
       }
 
       const overview = result.overview;
-      const rollouts = result.rollouts || [];
+      const cohorts = result.cohorts || [];
       const instrumentStats = result.instrumentStats || [];
       const totalParticipants = overview.totalParticipants || 0;
 
@@ -4835,7 +4835,7 @@
           <div class="stat-card info">
             <div class="stat-card-header">
               <div>
-                <div class="stat-label">Rollouts</div>
+                <div class="stat-label">Cohorts</div>
                 <div class="stat-value">${overview.rolloutCount}</div>
               </div>
               <div class="stat-card-icon"><span class="material-icons">flag</span></div>
@@ -4867,12 +4867,12 @@
         </div>
       `;
 
-      if (rollouts.length === 0) {
+      if (cohorts.length === 0) {
         rolloutContainer.innerHTML = `
           <div class="empty-state">
             <span class="material-icons">insights</span>
-            <h3>No rollouts to display</h3>
-            <p>Adjust your filters or add participants to a rollout.</p>
+            <h3>No cohorts to display</h3>
+            <p>Adjust your filters or add participants to a cohort.</p>
           </div>
         `;
       } else {
@@ -4881,7 +4881,7 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Rollout</th>
+                  <th>Cohort</th>
                   <th>Site</th>
                   <th>Status</th>
                   <th>Participants</th>
@@ -4892,10 +4892,10 @@
                 </tr>
               </thead>
               <tbody>
-                ${rollouts.map(r => `
+                ${cohorts.map(r => `
                   <tr>
                     <td>
-                      <div style="font-weight: 600;">${r.schoolName || 'No rollout assigned'}</div>
+                      <div style="font-weight: 600;">${r.schoolName || 'No cohort assigned'}</div>
                       <div class="stat-subtext">${[r.period, r.year].filter(Boolean).join(' ')}</div>
                     </td>
                     <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : r.site === 'Missouri' ? 'badge-warning' : 'badge-neutral'}">${r.site || 'All'}</span></td>
@@ -5115,7 +5115,7 @@
               <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
                 <div>
                   <div style="font-weight: 500;">Attendance Export</div>
-                  <div style="font-size: 0.8rem; color: var(--gray-500);">Participant attendance summary by rollout</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Participant attendance summary by cohort</div>
                 </div>
                 <button class="btn btn-primary" onclick="exportAttendance()">
                   <span class="material-icons">download</span>
@@ -5324,7 +5324,7 @@
         loadParticipants();
       }
 
-      if (isSectionVisible('rollouts')) {
+      if (isSectionVisible('cohorts')) {
         loadRollouts();
       }
 
@@ -5347,7 +5347,7 @@
 
     function handleSiteFilterChange() {
       currentSiteFilter = document.getElementById('siteFilter').value;
-      currentRolloutFilter = 'All'; // Reset rollout filter when site changes
+      currentRolloutFilter = 'All'; // Reset cohort filter when site changes
 
       const rolloutSelect = document.getElementById('rolloutFilter');
       if (rolloutSelect) {
@@ -5364,30 +5364,30 @@
     }
 
     function loadRolloutsForFilter(site) {
-      // Update the rollout dropdown based on selected site
+      // Update the cohort dropdown based on selected site
       google.script.run
         .withSuccessHandler(function(result) {
           const rolloutSelect = document.getElementById('rolloutFilter');
           if (!rolloutSelect) return;
 
           // Clear existing options
-          rolloutSelect.innerHTML = '<option value="All">All Rollouts</option>';
+          rolloutSelect.innerHTML = '<option value="All">All Cohorts</option>';
 
-          if (result.success && result.rollouts && result.rollouts.length > 0) {
-            availableRollouts = result.rollouts;
-            result.rollouts.forEach(function(rollout) {
-              if (rollout.status === 'active') {
+          if (result.success && result.cohorts && result.cohorts.length > 0) {
+            availableRollouts = result.cohorts;
+            result.cohorts.forEach(function(cohort) {
+              if (cohort.status === 'active') {
                 const option = document.createElement('option');
-                option.value = rollout.rolloutId;
-                option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+                option.value = cohort.rolloutId;
+                option.textContent = cohort.schoolName + ' (' + cohort.period + ' ' + cohort.year + ')';
                 if (site !== 'All') {
-                  option.textContent += ' - ' + rollout.site;
+                  option.textContent += ' - ' + cohort.site;
                 }
                 rolloutSelect.appendChild(option);
               }
             });
 
-            const matchingRollout = result.rollouts.find(r => r.rolloutId === currentRolloutFilter);
+            const matchingRollout = result.cohorts.find(r => r.rolloutId === currentRolloutFilter);
             if (matchingRollout) {
               rolloutSelect.value = currentRolloutFilter;
             } else {
@@ -5399,7 +5399,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Error loading rollouts for filter:', error);
+          console.error('Error loading cohorts for filter:', error);
         })
         .getAllRollouts(sessionToken, site);
     }
