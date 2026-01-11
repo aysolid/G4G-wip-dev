@@ -52,7 +52,7 @@ Stores study cohort/rollout configurations.
 | schoolName | String | Name of the school or location |
 | period | Enum | Academic period: `Spring`, `Summer`, `Fall` |
 | year | Number | Year (e.g., 2025) |
-| status | Enum | Rollout status: `active`, `completed`, `cancelled` |
+| status | Enum | Cohort status: `active`, `completed`, `cancelled` |
 | createdAt | ISO DateTime | When the rollout was created |
 | createdBy | String | userId of the admin who created this rollout |
 | description | String | Optional description of the cohort |
@@ -271,7 +271,7 @@ Stores audit trail of all actions in the system.
 - `RESET_PASSWORD` - User password reset
 - `PASSWORD_CHANGE` - User changed their own password
 - `CREATE_ROLLOUT` - New rollout created
-- `UPDATE_ROLLOUT` - Rollout updated
+- `UPDATE_ROLLOUT` - Cohort updated
 - `ENROLL_PARTICIPANT` - New participant enrolled
 - `UPDATE_PARTICIPANT` - Participant info updated
 - `UPDATE_CHECKLIST` - Checklist item status changed

@@ -115,11 +115,11 @@ Default admin credentials:
 3. Click "Add User"
 4. Fill in details and select "Admin" role
 
-### Set Up Study Rollouts
+### Set Up Study Cohorts
 
 Before enrolling participants:
-1. Go to Study Rollouts section
-2. Click "Add Rollout"
+1. Go to Study Cohorts section
+2. Click "Add Cohort"
 3. Configure:
    - Site (UGA or Missouri)
    - School/Location name
