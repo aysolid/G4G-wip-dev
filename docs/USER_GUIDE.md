@@ -57,7 +57,7 @@ The dashboard provides an at-a-glance view of the study's progress:
 - **Total Participants**: Number of enrolled participants
 - **Active Participants**: Currently active in the study
 - **Avg Completion**: Average checklist completion percentage
-- **Active Cohorts**: Number of ongoing study rollouts
+- **Active Cohorts**: Number of ongoing study cohorts
 
 ### Protocol Checklist Progress
 Shows completion rates for each of the 18 required instruments:
@@ -71,7 +71,7 @@ Compare participant counts and completion rates between UGA and Missouri.
 ### Quick Actions (Admin/Facilitator)
 - Enroll Participant
 - Update Checklist
-- New Rollout (Admin only)
+- New Cohort (Admin only)
 - Add User (Admin only)
 
 ---
@@ -90,7 +90,7 @@ Compare participant counts and completion rates between UGA and Missouri.
 2. Fill in the form:
    - **Full Name**: Participant's full name
    - **Site**: Select UGA or Missouri
-   - **Study Rollout**: Select the appropriate cohort
+   - **Study Cohort**: Select the appropriate cohort
    - **Notes**: Optional additional information
 3. Click **"Enroll Participant"**
 4. The system will generate a unique participant ID
@@ -115,26 +115,26 @@ Status indicators:
 
 ---
 
-## Study Rollouts (Admin Only)
+## Study Cohorts (Admin Only)
 
-Study rollouts represent cohorts or sessions of the study.
+Study cohorts represent cohorts or sessions of the study.
 
-### Creating a Rollout
+### Creating a Cohort
 
-1. Go to **"Study Rollouts"** in the sidebar
-2. Click **"Add Rollout"**
+1. Go to **"Study Cohorts"** in the sidebar
+2. Click **"Add Cohort"**
 3. Fill in the form:
    - **Site**: UGA or Missouri
    - **School/Location**: Name of the school or location
    - **Period**: Spring, Summer, or Fall
    - **Year**: The year (e.g., 2025)
    - **Description**: Optional description
-4. Click **"Save Rollout"**
+4. Click **"Save Cohort"**
 
-### Managing Rollouts
+### Managing Cohorts
 
-- View all rollouts in the table
-- Edit rollout details using the edit button
+- View all cohorts in the table
+- Edit cohort details using the edit button
 - Change status (active, completed, cancelled)
 
 ---
