@@ -3019,6 +3019,557 @@ function getPublicDashboardStats(siteFilter, rolloutFilter) {
 }
 
 /**
+ * Get public landing page snapshot metrics for the research dashboard.
+ */
+function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
+  const effectiveSite = siteFilter || 'All';
+  const effectiveCohort = rolloutFilter || 'All';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  const cohortsById = {};
+  const cohorts = [];
+
+  if (rolloutsSheet) {
+    const rData = rolloutsSheet.getDataRange().getValues();
+    const rHeaders = rData[0];
+    for (let i = 1; i < rData.length; i++) {
+      const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
+      const site = rData[i][rHeaders.indexOf('site')];
+      if (effectiveSite !== 'All' && site !== effectiveSite) continue;
+      const cohort = {
+        rolloutId: rolloutId,
+        site: site,
+        schoolName: rData[i][rHeaders.indexOf('schoolName')],
+        period: rData[i][rHeaders.indexOf('period')],
+        year: rData[i][rHeaders.indexOf('year')],
+        status: rData[i][rHeaders.indexOf('status')]
+      };
+      cohorts.push(cohort);
+      cohortsById[rolloutId] = cohort;
+    }
+  }
+
+  const currentCohort = effectiveCohort !== 'All' ? cohortsById[effectiveCohort] : null;
+  const contextLine = buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort);
+
+  const participants = [];
+  const participantsBySite = { UGA: [], Missouri: [] };
+  const participantsByCohort = {};
+  let totalEnrolled = 0;
+  let activeEnrollments = 0;
+
+  if (participantsSheet) {
+    const pData = participantsSheet.getDataRange().getValues();
+    const pHeaders = pData[0];
+    for (let i = 1; i < pData.length; i++) {
+      const participant = {
+        participantId: pData[i][pHeaders.indexOf('participantId')],
+        site: pData[i][pHeaders.indexOf('site')],
+        rolloutId: pData[i][pHeaders.indexOf('rolloutId')],
+        status: pData[i][pHeaders.indexOf('status')],
+        completionPercentage: Number(pData[i][pHeaders.indexOf('completionPercentage')]) || 0
+      };
+
+      participantsBySite[participant.site] = participantsBySite[participant.site] || [];
+      participantsBySite[participant.site].push(participant);
+
+      if (!participantsByCohort[participant.rolloutId]) {
+        participantsByCohort[participant.rolloutId] = [];
+      }
+      participantsByCohort[participant.rolloutId].push(participant);
+
+      if (effectiveSite !== 'All' && participant.site !== effectiveSite) continue;
+      if (effectiveCohort !== 'All' && participant.rolloutId !== effectiveCohort) continue;
+
+      participants.push(participant);
+      totalEnrolled++;
+      if (participant.status === 'active') {
+        activeEnrollments++;
+      }
+    }
+  }
+
+  const sessionLookup = {};
+  const sessionsByCohort = {};
+
+  if (sessionsSheet) {
+    const sData = sessionsSheet.getDataRange().getValues();
+    const sHeaders = sData[0];
+    for (let i = 1; i < sData.length; i++) {
+      const rolloutId = sData[i][sHeaders.indexOf('rolloutId')];
+      if (effectiveSite !== 'All') {
+        const cohort = cohortsById[rolloutId];
+        if (!cohort) continue;
+      }
+      if (effectiveCohort !== 'All' && rolloutId !== effectiveCohort) continue;
+
+      const session = {
+        sessionId: sData[i][sHeaders.indexOf('sessionId')],
+        rolloutId: rolloutId,
+        sessionNumber: sData[i][sHeaders.indexOf('sessionNumber')],
+        sessionDate: normalizeSessionDateValue(sData[i][sHeaders.indexOf('sessionDate')]),
+        sessionName: sData[i][sHeaders.indexOf('sessionName')],
+        status: sData[i][sHeaders.indexOf('status')]
+      };
+      sessionsByCohort[rolloutId] = sessionsByCohort[rolloutId] || [];
+      sessionsByCohort[rolloutId].push(session);
+      sessionLookup[session.sessionId] = session;
+    }
+  }
+
+  const attendanceMap = {};
+  if (attendanceSheet) {
+    const aData = attendanceSheet.getDataRange().getValues();
+    const aHeaders = aData[0];
+    for (let i = 1; i < aData.length; i++) {
+      const sessionId = aData[i][aHeaders.indexOf('sessionId')];
+      if (!sessionLookup[sessionId]) continue;
+      const participantId = aData[i][aHeaders.indexOf('participantId')];
+      if (!attendanceMap[sessionId]) {
+        attendanceMap[sessionId] = {};
+      }
+      attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
+    }
+  }
+
+  const attendanceSummary = buildAttendanceSummary(
+    participants,
+    sessionsByCohort,
+    attendanceMap,
+    effectiveCohort
+  );
+
+  const protocolSummary = buildProtocolSummary(
+    participants,
+    checklistSheet
+  );
+
+  const attentionItems = buildAttentionItems(
+    attendanceSummary,
+    protocolSummary,
+    participants,
+    effectiveCohort
+  );
+
+  const comparison = buildComparisonSummary(
+    effectiveSite,
+    effectiveCohort,
+    participantsBySite,
+    participantsByCohort,
+    sessionsByCohort,
+    attendanceMap,
+    checklistSheet,
+    cohorts
+  );
+
+  const aboutSummary = buildAboutSummary(
+    effectiveSite,
+    effectiveCohort,
+    totalEnrolled,
+    cohorts,
+    participantsBySite
+  );
+
+  return {
+    success: true,
+    snapshot: {
+      contextLine: contextLine,
+      meta: {
+        generatedAt: new Date().toISOString(),
+        exportReady: totalEnrolled > 0
+      },
+      kpis: {
+        totalEnrolled: totalEnrolled,
+        activeEnrollments: activeEnrollments,
+        averageAttendance: attendanceSummary.averageAttendance,
+        participationStatus: attendanceSummary.participationStatus,
+        atRiskParticipants: attendanceSummary.atRiskParticipants,
+        protocolCompletionRate: protocolSummary.completionRate,
+        sessionsCompleted: attendanceSummary.sessionsCompleted,
+        totalSessions: attendanceSummary.totalSessions
+      },
+      attendance: attendanceSummary,
+      protocol: protocolSummary,
+      attention: attentionItems,
+      comparison: comparison,
+      about: aboutSummary
+    }
+  };
+}
+
+function buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort) {
+  if (currentCohort) {
+    const label = formatCohortDisplayLabel(currentCohort);
+    return `Showing data for: ${label} • ${currentCohort.site}`;
+  }
+
+  const cohortLabel = effectiveCohort === 'All' ? 'All Study Cohorts' : 'Selected Study Cohort';
+  const siteLabel = effectiveSite === 'All' ? 'All Sites' : effectiveSite;
+  return `Showing data for: ${cohortLabel} • ${siteLabel}`;
+}
+
+function formatCohortDisplayLabel(cohort) {
+  const periodYear = [cohort.period, cohort.year].filter(Boolean).join(' ');
+  return `${cohort.schoolName || 'Study Cohort'} – ${periodYear} Cohort`;
+}
+
+function buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, effectiveCohort) {
+  const attendanceRates = [];
+  let atRisk70 = 0;
+  let atRisk60 = 0;
+  let missingAttendance = 0;
+  let participantsWithSessions = 0;
+
+  const distribution = { high: 0, mid: 0, low: 0 };
+  const totalSessions = Object.values(sessionsByCohort).reduce((sum, sessions) => sum + sessions.length, 0);
+  const sessionsCompleted = countCompletedSessions(sessionsByCohort);
+
+  participants.forEach(participant => {
+    const sessions = sessionsByCohort[participant.rolloutId] || [];
+    if (sessions.length === 0) return;
+
+    participantsWithSessions++;
+    let presentCount = 0;
+
+    sessions.forEach(session => {
+      const status = attendanceMap[session.sessionId]
+        ? attendanceMap[session.sessionId][participant.participantId]
+        : null;
+      if (status === 'present') {
+        presentCount++;
+      }
+      if (!status) {
+        missingAttendance++;
+      }
+    });
+
+    const attendanceRate = Math.round((presentCount / sessions.length) * 100);
+    attendanceRates.push(attendanceRate);
+
+    if (attendanceRate < 70) atRisk70++;
+    if (attendanceRate < 60) atRisk60++;
+
+    if (attendanceRate >= 90) distribution.high++;
+    else if (attendanceRate >= 70) distribution.mid++;
+    else distribution.low++;
+  });
+
+  const averageAttendance = attendanceRates.length > 0
+    ? Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)
+    : 0;
+
+  const participationStatus = resolveParticipationStatus(averageAttendance, participantsWithSessions, atRisk70);
+  const trend = buildAttendanceTrend(participants, sessionsByCohort, attendanceMap, effectiveCohort);
+  const totalDistribution = distribution.high + distribution.mid + distribution.low;
+
+  return {
+    averageAttendance: averageAttendance,
+    participationStatus: participationStatus,
+    atRiskParticipants: atRisk70,
+    atRiskParticipantsCritical: atRisk60,
+    distribution: {
+      high: distribution.high,
+      mid: distribution.mid,
+      low: distribution.low,
+      total: totalDistribution
+    },
+    totalSessions: totalSessions,
+    sessionsCompleted: sessionsCompleted,
+    trend: trend,
+    trendAvailable: effectiveCohort !== 'All' && trend.length > 0,
+    missingAttendanceRecords: missingAttendance,
+    participantsWithSessions: participantsWithSessions
+  };
+}
+
+function resolveParticipationStatus(averageAttendance, participantsWithSessions, atRisk70) {
+  if (participantsWithSessions === 0) {
+    return { label: 'No Data', tone: 'neutral', subtitle: 'Attendance data pending' };
+  }
+  const atRiskShare = participantsWithSessions > 0 ? (atRisk70 / participantsWithSessions) * 100 : 0;
+  if (averageAttendance >= 85 && atRiskShare < 10) {
+    return { label: 'Good', tone: 'success', subtitle: `Avg attendance: ${averageAttendance}%` };
+  }
+  if (averageAttendance >= 70 && averageAttendance < 85 || (atRiskShare >= 10 && atRiskShare <= 25)) {
+    return { label: 'Watch', tone: 'warning', subtitle: `Avg attendance: ${averageAttendance}%` };
+  }
+  return { label: 'At Risk', tone: 'danger', subtitle: `Avg attendance: ${averageAttendance}%` };
+}
+
+function buildAttendanceTrend(participants, sessionsByCohort, attendanceMap, effectiveCohort) {
+  if (effectiveCohort === 'All') return [];
+  const sessions = sessionsByCohort[effectiveCohort] || [];
+  const participantsForCohort = participants.filter(participant => participant.rolloutId === effectiveCohort);
+
+  sessions.sort((a, b) => (a.sessionNumber || 0) - (b.sessionNumber || 0));
+
+  return sessions.map(session => {
+    let present = 0;
+    let absent = 0;
+    let excused = 0;
+    let notMarked = 0;
+
+    participantsForCohort.forEach(participant => {
+      const status = attendanceMap[session.sessionId]
+        ? attendanceMap[session.sessionId][participant.participantId]
+        : null;
+      if (status === 'present') present++;
+      else if (status === 'absent') absent++;
+      else if (status === 'excused') excused++;
+      else notMarked++;
+    });
+
+    const total = present + absent + excused + notMarked;
+    const attendanceRate = total > 0 ? Math.round((present / total) * 100) : 0;
+    const label = session.sessionName || `Session ${session.sessionNumber || ''}`.trim();
+
+    return {
+      label: label,
+      present: present,
+      absent: absent,
+      excused: excused,
+      notMarked: notMarked,
+      attendanceRate: attendanceRate
+    };
+  });
+}
+
+function countCompletedSessions(sessionsByCohort) {
+  const today = new Date();
+  let completed = 0;
+
+  Object.values(sessionsByCohort).forEach(sessions => {
+    sessions.forEach(session => {
+      if (session.status === 'completed') {
+        completed++;
+        return;
+      }
+      const sessionDate = parseSessionDate(session.sessionDate);
+      if (sessionDate && sessionDate <= today) {
+        completed++;
+      }
+    });
+  });
+
+  return completed;
+}
+
+function parseSessionDate(dateValue) {
+  if (!dateValue) return null;
+  const normalized = normalizeSessionDateValue(dateValue);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildProtocolSummary(participants, checklistSheet) {
+  const participantIds = new Set(participants.map(p => p.participantId));
+  const instrumentCounts = {};
+  let totalCompleted = 0;
+  const requiredItems = CONFIG.INSTRUMENTS.length;
+
+  CONFIG.INSTRUMENTS.forEach(inst => {
+    instrumentCounts[inst.number] = { name: inst.name, total: 0, completed: 0 };
+  });
+
+  if (checklistSheet && participantIds.size > 0) {
+    const cData = checklistSheet.getDataRange().getValues();
+    const cHeaders = cData[0];
+    for (let i = 1; i < cData.length; i++) {
+      const participantId = cData[i][cHeaders.indexOf('participantId')];
+      if (!participantIds.has(participantId)) continue;
+      const instNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
+      const status = cData[i][cHeaders.indexOf('status')];
+      if (!instrumentCounts[instNumber]) continue;
+
+      instrumentCounts[instNumber].total++;
+      if (status === 'completed') {
+        instrumentCounts[instNumber].completed++;
+        totalCompleted++;
+      }
+    }
+  }
+
+  const totalRequired = participants.length * requiredItems;
+  const completionRate = totalRequired > 0 ? Math.round((totalCompleted / totalRequired) * 100) : 0;
+
+  const instrumentStats = CONFIG.INSTRUMENTS.map(inst => {
+    const counts = instrumentCounts[inst.number];
+    const percentage = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
+    return {
+      name: inst.name,
+      total: counts.total,
+      completed: counts.completed,
+      percentage: percentage
+    };
+  });
+
+  const lowestItems = instrumentStats
+    .filter(item => item.total > 0)
+    .sort((a, b) => a.percentage - b.percentage)
+    .slice(0, 3);
+
+  const needsReviewCount = instrumentStats.filter(item => item.total > 0 && item.percentage < 50).length;
+
+  return {
+    requiredItems: requiredItems,
+    totalRequired: totalRequired,
+    completedItems: totalCompleted,
+    completionRate: completionRate,
+    lowestItems: lowestItems,
+    needsReviewCount: needsReviewCount
+  };
+}
+
+function buildAttentionItems(attendanceSummary, protocolSummary, participants, effectiveCohort) {
+  const items = [];
+
+  if (participants.length === 0) {
+    return items;
+  }
+
+  if (attendanceSummary.atRiskParticipantsCritical > 0) {
+    items.push({
+      severity: 'critical',
+      message: `${attendanceSummary.atRiskParticipantsCritical} participants below 60% attendance (At Risk).`,
+      action: 'Review attendance'
+    });
+  }
+
+  if (attendanceSummary.atRiskParticipants > 0) {
+    items.push({
+      severity: 'warning',
+      message: `${attendanceSummary.atRiskParticipants} participants below 70% attendance.`,
+      action: 'View attendance report'
+    });
+  }
+
+  if (effectiveCohort !== 'All') {
+    const lowSessions = attendanceSummary.trend.filter(session => session.attendanceRate > 0 && session.attendanceRate < 60);
+    if (lowSessions.length > 0) {
+      const sessionNames = lowSessions.slice(0, 2).map(session => `${session.label} (${session.attendanceRate}%)`);
+      items.push({
+        severity: 'warning',
+        message: `Low attendance detected: ${sessionNames.join(', ')}.`,
+        action: 'Review session attendance'
+      });
+    }
+  }
+
+  if (attendanceSummary.missingAttendanceRecords > 0) {
+    items.push({
+      severity: 'info',
+      message: `${attendanceSummary.missingAttendanceRecords} attendance records are missing for selected sessions.`,
+      action: 'Complete attendance'
+    });
+  }
+
+  if (attendanceSummary.totalSessions === 0 && participants.length > 0) {
+    items.push({
+      severity: 'info',
+      message: 'No sessions scheduled for the selected cohort. Add sessions to enable attendance tracking.',
+      action: 'Schedule sessions'
+    });
+  }
+
+  if (protocolSummary.needsReviewCount > 0) {
+    items.push({
+      severity: 'warning',
+      message: `${protocolSummary.needsReviewCount} protocol items are below 50% completion.`,
+      action: 'Review protocol checklist'
+    });
+  }
+
+  return items.slice(0, 7);
+}
+
+function buildComparisonSummary(
+  effectiveSite,
+  effectiveCohort,
+  participantsBySite,
+  participantsByCohort,
+  sessionsByCohort,
+  attendanceMap,
+  checklistSheet,
+  cohorts
+) {
+  if (effectiveSite === 'All' && effectiveCohort === 'All') {
+    const siteEntries = ['UGA', 'Missouri'].map(site => {
+      const participants = participantsBySite[site] || [];
+      const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+      const protocol = buildProtocolSummary(participants, checklistSheet);
+      return {
+        label: site,
+        participants: participants.length,
+        averageAttendance: summary.averageAttendance,
+        protocolCompletion: protocol.completionRate
+      };
+    }).filter(entry => entry.participants > 0);
+
+    return {
+      title: 'Site Comparison',
+      entries: siteEntries,
+      emptyMessage: 'No participant data available for site comparison.'
+    };
+  }
+
+  if (effectiveSite !== 'All' && effectiveCohort !== 'All') {
+    return {
+      title: 'Cohort Comparison',
+      entries: [],
+      emptyMessage: 'Comparison is unavailable for a single cohort selection.'
+    };
+  }
+
+  if (effectiveSite !== 'All') {
+    const cohortEntries = cohorts.map(cohort => {
+      const participants = participantsByCohort[cohort.rolloutId] || [];
+      const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+      const protocol = buildProtocolSummary(participants, checklistSheet);
+      return {
+        label: formatCohortDisplayLabel(cohort),
+        participants: participants.length,
+        averageAttendance: summary.averageAttendance,
+        protocolCompletion: protocol.completionRate
+      };
+    }).filter(entry => entry.participants > 0);
+
+    return {
+      title: 'Cohort Comparison',
+      entries: cohortEntries,
+      emptyMessage: 'No cohorts with participant data found for this site.'
+    };
+  }
+
+  return {
+    title: 'Comparison',
+    entries: [],
+    emptyMessage: 'Comparison is unavailable for the selected cohort filter.'
+  };
+}
+
+function buildAboutSummary(effectiveSite, effectiveCohort, totalEnrolled, cohorts, participantsBySite) {
+  const siteCount = effectiveSite === 'All'
+    ? Object.keys(participantsBySite).filter(site => participantsBySite[site] && participantsBySite[site].length > 0).length
+    : 1;
+  const cohortCount = effectiveCohort === 'All' ? cohorts.length : 1;
+
+  return {
+    siteCount: siteCount,
+    cohortCount: cohortCount,
+    protocolItems: CONFIG.INSTRUMENTS.length,
+    platform: 'Nintendo Switch',
+    totalParticipants: totalEnrolled
+  };
+}
+
+/**
  * Get public cohorts list (no authentication required)
  */
 function getPublicRollouts(siteFilter) {
