@@ -621,7 +621,7 @@
             </select>
           </div>
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <label for="publicRolloutFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Rollout:</label>
+            <label for="publicRolloutFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Cohort:</label>
             <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
               <option value="All">All cohorts</option>
             </select>
@@ -719,7 +719,7 @@
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">groups</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Manage Cohorts/Rollouts</div>
+                  <div class="quick-link-title">Manage Cohorts</div>
                   <div class="quick-link-desc">Set up study cohorts and schedules</div>
                 </div>
               </a>
@@ -798,7 +798,7 @@
     // ============================================
     function handlePublicSiteFilterChange() {
       currentPublicSiteFilter = document.getElementById('publicSiteFilter').value;
-      currentPublicRolloutFilter = 'All'; // Reset rollout filter when site changes
+      currentPublicRolloutFilter = 'All'; // Reset cohort filter when site changes
       loadPublicRollouts(currentPublicSiteFilter);
       loadDashboardStats();
     }
@@ -817,20 +817,20 @@
           // Clear existing options
           rolloutSelect.innerHTML = '<option value="All">All cohorts</option>';
 
-          if (result.success && result.rollouts && result.rollouts.length > 0) {
-            result.rollouts.forEach(function(rollout) {
+          if (result.success && result.cohorts && result.cohorts.length > 0) {
+            result.cohorts.forEach(function(cohort) {
               const option = document.createElement('option');
-              option.value = rollout.rolloutId;
-              option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+              option.value = cohort.rolloutId;
+              option.textContent = cohort.schoolName + ' (' + cohort.period + ' ' + cohort.year + ')';
               if (siteFilter === 'All') {
-                option.textContent += ' - ' + rollout.site;
+                option.textContent += ' - ' + cohort.site;
               }
               rolloutSelect.appendChild(option);
             });
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Error loading rollouts:', error);
+          console.error('Error loading cohorts:', error);
         })
         .getPublicRollouts(siteFilter);
     }

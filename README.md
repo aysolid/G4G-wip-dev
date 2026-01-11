@@ -12,7 +12,7 @@ G4G is a grant-funded project that engages neurodiverse learners in video game d
 - **18-Item Protocol Checklist**: Monitor completion of all required research instruments
 - **Role-Based Access**: Admin, Facilitator, and Viewer roles with appropriate permissions
 - **Cross-Site Monitoring**: View and compare progress across UGA and Missouri sites
-- **Study Rollout Management**: Organize participants by cohorts/sessions
+- **Study Cohort Management**: Organize participants by cohorts/sessions
 - **Real-Time Dashboards**: Visualize completion rates and identify missing data
 - **Export Functionality**: Generate reports for analysis and compliance
 
