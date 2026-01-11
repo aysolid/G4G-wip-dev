@@ -947,9 +947,9 @@
 
         <div class="nav-section" id="adminSection">
           <div class="nav-section-title">Administration</div>
-          <a class="nav-item" onclick="showSection('rollouts')">
+          <a class="nav-item" onclick="showSection('cohorts')">
             <span class="material-icons">event</span>
-            Study Rollouts
+            Study Cohorts
           </a>
           <a class="nav-item" onclick="showSection('users')">
             <span class="material-icons">manage_accounts</span>
@@ -1012,9 +1012,9 @@
             </select>
           </div>
           <div class="site-filter" id="rolloutFilterContainer">
-            <label for="rolloutFilter">Rollout:</label>
+            <label for="rolloutFilter">Cohort:</label>
             <select id="rolloutFilter" onchange="handleRolloutFilterChange()">
-              <option value="All">All Rollouts</option>
+              <option value="All">All Cohorts</option>
             </select>
           </div>
         </div>
@@ -1042,8 +1042,8 @@
         <!-- Attendance Reports Section -->
         <section id="attendanceReportsSection" class="hidden"></section>
 
-        <!-- Rollouts Section -->
-        <section id="rolloutsSection" class="hidden"></section>
+        <!-- Cohorts Section -->
+        <section id="cohortsSection" class="hidden"></section>
 
         <!-- Users Section -->
         <section id="usersSection" class="hidden"></section>
@@ -1092,6 +1092,9 @@
     let batchEnrollmentUpload = null;
     let batchEnrollmentResult = null;
     let instrumentStatsLookup = {};
+    let attendanceParticipantsCache = [];
+    let attendanceParticipantsRolloutId = null;
+    let attendanceReportSessionLookup = {};
 
     // ============================================
     // INITIALIZATION
@@ -1142,7 +1145,7 @@
       // Apply role-based access
       applyRoleBasedAccess();
 
-      // Load rollouts for filter dropdown
+      // Load cohorts for filter dropdown
       loadRolloutsForFilter(currentSiteFilter);
 
       // Load initial data
@@ -1178,7 +1181,7 @@
     // ============================================
     function showSection(section) {
       // Hide all sections
-      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'rollouts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
       sections.forEach(s => {
         const el = document.getElementById(s + 'Section');
         if (el) el.classList.add('hidden');
@@ -1194,7 +1197,7 @@
         'enroll': 'enroll',
         'attendance': 'attendance',
         'attendanceReports': 'attendanceReports',
-        'rollouts': 'rollouts',
+        'cohorts': 'cohorts',
         'users': 'users',
         'reports': 'reports',
         'exports': 'exports',
@@ -1220,7 +1223,7 @@
         enroll: 'Enroll Participant',
         attendance: 'Mark Attendance',
         attendanceReports: 'Attendance Reports',
-        rollouts: 'Study Rollouts',
+        cohorts: 'Study Cohorts',
         users: 'User Management',
         reports: 'Analytics',
         exports: 'Export Data',
@@ -1245,7 +1248,7 @@
         case 'attendanceReports':
           loadAttendanceReports();
           break;
-        case 'rollouts':
+        case 'cohorts':
           loadRollouts();
           break;
         case 'users':
@@ -1286,7 +1289,7 @@
       document.getElementById('dashboardLoading').classList.remove('hidden');
       document.getElementById('dashboardContent').classList.add('hidden');
 
-      // Pass both site and rollout filters to the backend
+      // Pass both site and cohort filters to the backend
       const filters = {
         site: currentSiteFilter,
         rolloutId: currentRolloutFilter
@@ -1326,11 +1329,11 @@
             <div class="quick-action-label">Mark Attendance</div>
           </div>
           ${currentUser.role === 'admin' ? `
-          <div class="quick-action-card" onclick="showSection('rollouts')">
+          <div class="quick-action-card" onclick="showSection('cohorts')">
             <div class="quick-action-icon">
               <span class="material-icons">event</span>
             </div>
-            <div class="quick-action-label">New Rollout</div>
+            <div class="quick-action-label">New Cohort</div>
           </div>
           <div class="quick-action-card" onclick="showSection('users')">
             <div class="quick-action-icon">
@@ -1551,13 +1554,13 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>rolloutName</strong>. Rollout names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">Upload CSV</label>
           <input type="file" class="form-input" id="batchEnrollmentFile" accept=".csv" onchange="handleBatchEnrollmentFile(this)">
-          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Rollout names must match the template dropdown exactly. Participant IDs are generated automatically.</div>
+          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.25rem;">Cohort names must match the template dropdown exactly. Participant IDs are generated automatically.</div>
         </div>
         <div id="batchEnrollmentStatus" class="alert alert-neutral" style="display: flex; align-items: center; gap: 8px;">
           <span class="material-icons" style="font-size: 18px;">upload_file</span>
@@ -1816,7 +1819,7 @@
       const section = document.getElementById('participantDetailSection');
 
       // Hide all sections and show participant detail
-      ['dashboard', 'participants', 'enroll', 'rollouts', 'users', 'reports', 'exports', 'settings'].forEach(s => {
+      ['dashboard', 'participants', 'enroll', 'cohorts', 'users', 'reports', 'exports', 'settings'].forEach(s => {
         document.getElementById(s + 'Section').classList.add('hidden');
       });
       section.classList.remove('hidden');
@@ -2250,10 +2253,10 @@
             </select>
           </div>
           <div class="form-group" style="flex: 1;">
-            <label class="form-label">Rollout</label>
+            <label class="form-label">Cohort</label>
             <select class="form-select" id="batchRolloutSelect">
-              <option value="">-- Choose rollout --</option>
-              ${rolloutOptions || '<option value="" disabled>No active rollouts found</option>'}
+              <option value="">-- Choose cohort --</option>
+              ${rolloutOptions || '<option value="" disabled>No active cohorts found</option>'}
             </select>
           </div>
         </div>
@@ -2261,7 +2264,7 @@
           <div class="card-body" id="batchChecklistResults">
             <div class="empty-state">
               <span class="material-icons">fact_check</span>
-              <h3>Select a protocol item and rollout to load participants.</h3>
+              <h3>Select a protocol item and cohort to load participants.</h3>
               <p>Use this tool to mark a checklist item as completed, missing, or not started for multiple participants at once.</p>
             </div>
           </div>
@@ -2285,7 +2288,7 @@
       const results = document.getElementById('batchChecklistResults');
 
       if (!instrumentNumber || !rolloutId) {
-        showToast('Select a protocol item and rollout first', 'error');
+        showToast('Select a protocol item and cohort first', 'error');
         return;
       }
 
@@ -2336,7 +2339,7 @@
         results.innerHTML = `
           <div class="empty-state">
             <span class="material-icons">groups</span>
-            <h3>No participants found for this rollout</h3>
+            <h3>No participants found for this cohort</h3>
           </div>
         `;
         return;
@@ -2506,7 +2509,7 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label class="form-label">Study Rollout *</label>
+                  <label class="form-label">Study Cohort *</label>
                   <select class="form-select" id="enrollRollout" required disabled>
                     <option value="">Select site first...</option>
                   </select>
@@ -2556,21 +2559,21 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (!result.success) {
-            rolloutSelect.innerHTML = `<option value="">${result.message || 'Unable to load rollouts'}</option>`;
+            rolloutSelect.innerHTML = `<option value="">${result.message || 'Unable to load cohorts'}</option>`;
             rolloutSelect.disabled = true;
-            showToast(result.message || 'Unable to load rollouts', 'error');
+            showToast(result.message || 'Unable to load cohorts', 'error');
             return;
           }
 
-          if (result.rollouts.length > 0) {
-            let options = '<option value="">Select rollout...</option>';
-            result.rollouts.filter(r => r.status === 'active').forEach(r => {
+          if (result.cohorts.length > 0) {
+            let options = '<option value="">Select cohort...</option>';
+            result.cohorts.filter(r => r.status === 'active').forEach(r => {
               options += `<option value="${r.rolloutId}">${r.schoolName} (${r.period} ${r.year})</option>`;
             });
             rolloutSelect.innerHTML = options;
             rolloutSelect.disabled = false;
           } else {
-            rolloutSelect.innerHTML = '<option value="">No active rollouts for this site</option>';
+            rolloutSelect.innerHTML = '<option value="">No active cohorts for this site</option>';
             rolloutSelect.disabled = true;
           }
         })
@@ -2615,13 +2618,13 @@
     // ============================================
     function loadRollouts() {
       if (currentUser.role !== 'admin') {
-        document.getElementById('rolloutsSection').innerHTML = `
+        document.getElementById('cohortsSection').innerHTML = `
           <div class="card">
             <div class="card-body">
               <div class="empty-state">
                 <span class="material-icons">lock</span>
                 <h3>Access Denied</h3>
-                <p>Only administrators can manage study rollouts.</p>
+                <p>Only administrators can manage study cohorts.</p>
               </div>
             </div>
           </div>
@@ -2629,17 +2632,17 @@
         return;
       }
 
-      const section = document.getElementById('rolloutsSection');
+      const section = document.getElementById('cohortsSection');
       section.innerHTML = `
         <div class="card">
           <div class="card-header">
             <h3 class="card-title">
               <span class="material-icons">event</span>
-              Study Rollouts
+              Study Cohorts
             </h3>
             <button class="btn btn-primary" onclick="showAddRolloutModal()">
               <span class="material-icons">add</span>
-              Add Rollout
+              Add Cohort
             </button>
           </div>
           <div class="card-body" id="rolloutsList">
@@ -2661,20 +2664,20 @@
         document.getElementById('rolloutsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
-            <h3>Error loading rollouts</h3>
+            <h3>Error loading cohorts</h3>
           </div>
         `;
         return;
       }
 
-      const rollouts = result.rollouts;
+      const cohorts = result.cohorts;
 
-      if (rollouts.length === 0) {
+      if (cohorts.length === 0) {
         document.getElementById('rolloutsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">event</span>
-            <h3>No study rollouts</h3>
-            <p>Create your first study rollout to start enrolling participants.</p>
+            <h3>No study cohorts</h3>
+            <p>Create your first study cohort to start enrolling participants.</p>
           </div>
         `;
         return;
@@ -2695,7 +2698,7 @@
               </tr>
             </thead>
             <tbody>
-              ${rollouts.map(r => `
+              ${cohorts.map(r => `
                 <tr>
                   <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${r.site}</span></td>
                   <td><strong>${r.schoolName}</strong></td>
@@ -2707,10 +2710,10 @@
                     <button class="btn btn-sm btn-primary" onclick="showAttendanceInterface('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Manage Attendance">
                       <span class="material-icons">how_to_reg</span>
                     </button>
-                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Rollout">
+                    <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Cohort">
                       <span class="material-icons">edit</span>
                     </button>
-                    <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Rollout">
+                    <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Cohort">
                       <span class="material-icons">delete</span>
                     </button>
                   </td>
@@ -2725,7 +2728,7 @@
     }
 
     function showAddRolloutModal() {
-      document.getElementById('modalTitle').textContent = 'Add Study Rollout';
+      document.getElementById('modalTitle').textContent = 'Add Study Cohort';
       document.getElementById('modalBody').innerHTML = `
         <form id="rolloutForm">
           <div class="form-group">
@@ -2765,7 +2768,7 @@
           <div class="form-group">
             <label class="form-label">Number of Sessions *</label>
             <input type="number" class="form-input" id="numSessions" required min="1" max="20" value="8" onchange="generateSessionFields()">
-            <small style="color: var(--gray-500);">How many data collection days will this rollout have?</small>
+            <small style="color: var(--gray-500);">How many data collection days will this cohort have?</small>
           </div>
 
           <div id="sessionsContainer" style="max-height: 300px; overflow-y: auto;">
@@ -2777,7 +2780,7 @@
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="saveRollout()">
           <span class="material-icons">save</span>
-          Save Rollout
+          Save Cohort
         </button>
       `;
       openModal();
@@ -2833,7 +2836,7 @@
         });
       }
 
-      // Create the rollout first
+      // Create the cohort first
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
@@ -2842,21 +2845,21 @@
               google.script.run
                 .withSuccessHandler(function(sessionsResult) {
                   if (sessionsResult.success) {
-                    showToast('Rollout and sessions created successfully', 'success');
+                    showToast('Cohort and sessions created successfully', 'success');
                   } else {
-                    showToast('Rollout created, but sessions failed: ' + sessionsResult.message, 'warning');
+                    showToast('Cohort created, but sessions failed: ' + sessionsResult.message, 'warning');
                   }
                   closeModal();
                   loadRollouts();
                 })
                 .withFailureHandler(function(error) {
-                  showToast('Rollout created, but sessions failed: ' + error, 'warning');
+                  showToast('Cohort created, but sessions failed: ' + error, 'warning');
                   closeModal();
                   loadRollouts();
                 })
                 .batchCreateSessions(sessionToken, result.rolloutId, sessions);
             } else {
-              showToast('Rollout created successfully', 'success');
+              showToast('Cohort created successfully', 'success');
               closeModal();
               loadRollouts();
             }
@@ -2869,61 +2872,61 @@
     }
 
     function editRollout(rolloutId) {
-      // First fetch the rollout details
+      // First fetch the cohort details
       google.script.run
         .withSuccessHandler(function(result) {
-          if (result.success && result.rollouts.length > 0) {
-            const rollout = result.rollouts.find(r => r.rolloutId === rolloutId);
-            if (rollout) {
-              showEditRolloutModal(rollout);
+          if (result.success && result.cohorts.length > 0) {
+            const cohort = result.cohorts.find(r => r.rolloutId === rolloutId);
+            if (cohort) {
+              showEditRolloutModal(cohort);
             } else {
-              showToast('Rollout not found', 'error');
+              showToast('Cohort not found', 'error');
             }
           } else {
-            showToast('Could not load rollout details', 'error');
+            showToast('Could not load cohort details', 'error');
           }
         })
         .withFailureHandler(handleError)
         .getAllRollouts(sessionToken, 'All');
     }
 
-    function showEditRolloutModal(rollout) {
-      document.getElementById('modalTitle').textContent = 'Edit Study Rollout';
+    function showEditRolloutModal(cohort) {
+      document.getElementById('modalTitle').textContent = 'Edit Study Cohort';
       document.getElementById('modalBody').innerHTML = `
         <div id="editRolloutForm">
           <div class="form-group">
             <label class="form-label">Site</label>
-            <input type="text" class="form-input" value="${rollout.site}" disabled>
+            <input type="text" class="form-input" value="${cohort.site}" disabled>
           </div>
           <div class="form-group">
             <label class="form-label">School/Location Name *</label>
-            <input type="text" class="form-input" id="editRolloutSchool" value="${rollout.schoolName}" placeholder="e.g., Double Helix School">
+            <input type="text" class="form-input" id="editRolloutSchool" value="${cohort.schoolName}" placeholder="e.g., Double Helix School">
           </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Period *</label>
               <select class="form-select" id="editRolloutPeriod">
-                <option value="Spring" ${rollout.period === 'Spring' ? 'selected' : ''}>Spring</option>
-                <option value="Summer" ${rollout.period === 'Summer' ? 'selected' : ''}>Summer</option>
-                <option value="Fall" ${rollout.period === 'Fall' ? 'selected' : ''}>Fall</option>
+                <option value="Spring" ${cohort.period === 'Spring' ? 'selected' : ''}>Spring</option>
+                <option value="Summer" ${cohort.period === 'Summer' ? 'selected' : ''}>Summer</option>
+                <option value="Fall" ${cohort.period === 'Fall' ? 'selected' : ''}>Fall</option>
               </select>
             </div>
             <div class="form-group">
               <label class="form-label">Year *</label>
-              <input type="number" class="form-input" id="editRolloutYear" value="${rollout.year}" min="2024" max="2030">
+              <input type="number" class="form-input" id="editRolloutYear" value="${cohort.year}" min="2024" max="2030">
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">Status</label>
             <select class="form-select" id="editRolloutStatus">
-              <option value="active" ${rollout.status === 'active' ? 'selected' : ''}>Active</option>
-              <option value="completed" ${rollout.status === 'completed' ? 'selected' : ''}>Completed</option>
-              <option value="inactive" ${rollout.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+              <option value="active" ${cohort.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="completed" ${cohort.status === 'completed' ? 'selected' : ''}>Completed</option>
+              <option value="inactive" ${cohort.status === 'inactive' ? 'selected' : ''}>Inactive</option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Description (optional)</label>
-            <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${rollout.description || ''}</textarea>
+            <textarea class="form-textarea" id="editRolloutDescription" rows="2" placeholder="Brief description...">${cohort.description || ''}</textarea>
           </div>
 
           <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--gray-200);">
@@ -2939,15 +2942,15 @@
       `;
       document.getElementById('modalFooter').innerHTML = `
         <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" type="button" onclick="updateRolloutWithSessions('${rollout.rolloutId}')">
+        <button class="btn btn-primary" type="button" onclick="updateRolloutWithSessions('${cohort.rolloutId}')">
           <span class="material-icons">save</span>
           Save Changes
         </button>
       `;
       openModal();
 
-      // Load sessions for this rollout
-      loadSessionsForEdit(rollout.rolloutId);
+      // Load sessions for this cohort
+      loadSessionsForEdit(cohort.rolloutId);
     }
 
     function loadSessionsForEdit(rolloutId) {
@@ -3093,7 +3096,7 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            showToast('Rollout updated successfully', 'success');
+            showToast('Cohort updated successfully', 'success');
             closeModal();
             loadRollouts();
           } else {
@@ -3118,7 +3121,7 @@
         return;
       }
 
-      // First update the rollout basic info
+      // First update the cohort basic info
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
@@ -3189,7 +3192,7 @@
       const totalOperations = sessionsToDelete.length + sessionsToUpdate.length + (newSessions.length > 0 ? 1 : 0);
 
       if (totalOperations === 0) {
-        showToast('Rollout updated successfully', 'success');
+        showToast('Cohort updated successfully', 'success');
         closeModal();
         loadRollouts();
         return;
@@ -3198,7 +3201,7 @@
       const checkCompletion = () => {
         completedOperations++;
         if (completedOperations >= totalOperations) {
-          showToast('Rollout and sessions updated successfully', 'success');
+          showToast('Cohort and sessions updated successfully', 'success');
           closeModal();
           loadRollouts();
         }
@@ -3242,14 +3245,14 @@
 
     function confirmDeleteRollout(rolloutId, schoolName, period, year) {
       const rolloutName = `${schoolName} (${period} ${year})`;
-      const confirmMsg = `Are you sure you want to delete this rollout?\n\n${rolloutName}\n\nWARNING: This will permanently delete:\n- The rollout\n- All participants enrolled in this rollout\n- All checklist data for those participants\n- All sessions for this rollout\n- All attendance records\n\nThis action cannot be undone.`;
+      const confirmMsg = `Are you sure you want to delete this cohort?\n\n${rolloutName}\n\nWARNING: This will permanently delete:\n- The cohort\n- All participants enrolled in this cohort\n- All checklist data for those participants\n- All sessions for this cohort\n- All attendance records\n\nThis action cannot be undone.`;
 
       if (!confirm(confirmMsg)) {
         return;
       }
 
       // Show loading toast
-      showToast('Deleting rollout...', 'info');
+      showToast('Deleting cohort...', 'info');
 
       google.script.run
         .withSuccessHandler(function(result) {
@@ -3260,9 +3263,9 @@
               `${result.deletedSessions} sessions`,
               `${result.deletedAttendance} attendance records`
             ].join(', ');
-            showToast(`Rollout deleted successfully (${deletionSummary} removed)`, 'success');
+            showToast(`Cohort deleted successfully (${deletionSummary} removed)`, 'success');
             loadRollouts();
-            // Reload rollout filter
+            // Reload cohort filter
             loadRolloutsForFilter(currentSiteFilter);
           } else {
             showToast(result.message, 'error');
@@ -3321,13 +3324,15 @@
     function renderAttendanceInterface(rolloutId, sessions, participants) {
       document.getElementById('attendanceLoading').classList.add('hidden');
       document.getElementById('attendanceContent').classList.remove('hidden');
+      attendanceParticipantsCache = participants;
+      attendanceParticipantsRolloutId = rolloutId;
 
       if (sessions.length === 0) {
         document.getElementById('attendanceContent').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">event_busy</span>
             <h3>No sessions configured</h3>
-            <p>Please edit the rollout to add sessions before marking attendance.</p>
+            <p>Please edit the cohort to add sessions before marking attendance.</p>
           </div>
         `;
         return;
@@ -3338,7 +3343,7 @@
           <div class="empty-state">
             <span class="material-icons">person_off</span>
             <h3>No participants enrolled</h3>
-            <p>Enroll participants in this rollout before marking attendance.</p>
+            <p>Enroll participants in this cohort before marking attendance.</p>
           </div>
         `;
         return;
@@ -3358,7 +3363,7 @@
 
         <div id="attendanceTabsContainer">
           ${sessions.map((session, idx) => `
-            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" id="sessionTab${idx}">
+            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" data-session-id="${session.sessionId}" id="sessionTab${idx}">
               <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -3367,6 +3372,10 @@
                     ${session.sessionDate ? `<br><small>${formatDate(session.sessionDate)}</small>` : ''}
                   </div>
                   <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm btn-primary" onclick="markSelectedAttendance('${session.sessionId}', ${idx})">
+                      <span class="material-icons">checklist</span>
+                      Mark Selected Present
+                    </button>
                     <button class="btn btn-sm btn-success" onclick="markAllAttendance('${session.sessionId}', 'present')">
                       <span class="material-icons">check_circle</span>
                       Mark All Present
@@ -3388,42 +3397,7 @@
 
       document.getElementById('attendanceContent').innerHTML = html;
 
-      // Add CSS for tabs
-      if (!document.getElementById('tabStyles')) {
-        const style = document.createElement('style');
-        style.id = 'tabStyles';
-        style.textContent = `
-          .tabs {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-          }
-          .tab-button {
-            padding: 0.5rem 1rem;
-            background: transparent;
-            border: none;
-            border-bottom: 2px solid transparent;
-            cursor: pointer;
-            font-size: 0.875rem;
-            transition: all 0.2s;
-          }
-          .tab-button:hover {
-            background: var(--gray-50);
-          }
-          .tab-button.active {
-            border-bottom-color: var(--primary-color);
-            font-weight: 600;
-            color: var(--primary-color);
-          }
-          .tab-content {
-            display: none;
-          }
-          .tab-content.active {
-            display: block;
-          }
-        `;
-        document.head.appendChild(style);
-      }
+      ensureAttendanceTabStyles();
 
       // Load attendance for first session
       loadSessionAttendance(sessions[0].sessionId, 0, participants);
@@ -3434,12 +3408,58 @@
       document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
       document.querySelector(`.tab-button[data-tab="${tabIndex}"]`).classList.add('active');
-      document.querySelector(`.tab-content[data-tab="${tabIndex}"]`).classList.add('active');
+      const activeTab = document.querySelector(`.tab-content[data-tab="${tabIndex}"]`);
+      activeTab.classList.add('active');
+      const sessionId = activeTab.dataset.sessionId;
+      if (sessionId) {
+        loadSessionAttendance(sessionId, tabIndex, attendanceParticipantsCache);
+      }
     }
 
+    function ensureAttendanceTabStyles() {
+      if (document.getElementById('attendanceTabStyles')) return;
+
+      const style = document.createElement('style');
+      style.id = 'attendanceTabStyles';
+      style.textContent = `
+        .tabs {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+        }
+        .tab-button {
+          padding: 0.5rem 1rem;
+          background: transparent;
+          border: none;
+          border-bottom: 2px solid transparent;
+          cursor: pointer;
+          font-size: 0.875rem;
+          transition: all 0.2s;
+        }
+        .tab-button:hover {
+          background: var(--gray-50);
+        }
+        .tab-button.active {
+          border-bottom-color: var(--primary-color);
+          font-weight: 600;
+          color: var(--primary-color);
+        }
+        .tab-content {
+          display: none;
+        }
+        .tab-content.active {
+          display: block;
+        }
+      `;
+      document.head.appendChild(style);
+    }
     function loadSessionAttendance(sessionId, tabIndex, participantsList = null) {
       const container = document.getElementById('sessionAttendance' + tabIndex);
       container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+      const cachedParticipants = attendanceParticipantsRolloutId === currentRolloutFilter
+        ? attendanceParticipantsCache
+        : [];
 
       Promise.all([
         new Promise((resolve, reject) => {
@@ -3448,15 +3468,23 @@
             .withFailureHandler(reject)
             .getAttendanceBySession(sessionToken, sessionId);
         }),
-        participantsList ? Promise.resolve({ participants: participantsList }) : new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            .getAllParticipants(sessionToken, {});
-        })
+        participantsList
+          ? Promise.resolve({ participants: participantsList })
+          : cachedParticipants.length
+            ? Promise.resolve({ participants: cachedParticipants })
+            : new Promise((resolve, reject) => {
+              google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)
+                .getAllParticipants(sessionToken, { rolloutId: currentRolloutFilter });
+            })
       ]).then(([attendanceResult, participantsResult]) => {
         const attendance = attendanceResult.attendance || [];
         const participants = participantsResult.participants || participantsList || [];
+        if (participants.length && currentRolloutFilter !== 'All') {
+          attendanceParticipantsCache = participants;
+          attendanceParticipantsRolloutId = currentRolloutFilter;
+        }
 
         // Create attendance map
         const attendanceMap = {};
@@ -3469,6 +3497,9 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th style="width: 40px;">
+                    <input type="checkbox" id="selectAllAttendance${tabIndex}" onchange="toggleSessionAttendanceSelection(${tabIndex}, this.checked)">
+                  </th>
                   <th>Participant ID</th>
                   <th>Name</th>
                   <th>Attendance</th>
@@ -3482,6 +3513,9 @@
                   const status = att ? att.status : 'not_marked';
                   return `
                     <tr>
+                      <td>
+                        <input type="checkbox" class="attendance-select" data-participant-id="${p.participantId}">
+                      </td>
                       <td><code>${p.participantId}</code></td>
                       <td><strong>${p.fullName}</strong></td>
                       <td>
@@ -3543,6 +3577,46 @@
         });
     }
 
+    function toggleSessionAttendanceSelection(tabIndex, isChecked) {
+      const container = document.getElementById('sessionAttendance' + tabIndex);
+      if (!container) return;
+      container.querySelectorAll('.attendance-select').forEach(checkbox => {
+        checkbox.checked = isChecked;
+      });
+    }
+
+    function markSelectedAttendance(sessionId, tabIndex) {
+      const container = document.getElementById('sessionAttendance' + tabIndex);
+      if (!container) return;
+
+      const selected = Array.from(container.querySelectorAll('.attendance-select:checked'));
+      if (selected.length === 0) {
+        showToast('Select at least one participant to mark present', 'warning');
+        return;
+      }
+
+      const confirmMsg = `Mark ${selected.length} selected participant${selected.length === 1 ? '' : 's'} as present?`;
+      if (!confirm(confirmMsg)) return;
+
+      const attendanceRecords = selected.map(checkbox => ({
+        participantId: checkbox.dataset.participantId,
+        status: 'present',
+        notes: ''
+      }));
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(`Marked ${result.successCount} participants as present`, 'success');
+            loadSessionAttendance(sessionId, tabIndex);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .bulkMarkAttendance(sessionToken, sessionId, attendanceRecords);
+    }
+
     function markAllAttendance(sessionId, status) {
       const tabIndex = Array.from(document.querySelectorAll('.tab-content')).findIndex(el => el.classList.contains('active'));
 
@@ -3589,7 +3663,7 @@
     function loadAttendance() {
       const section = document.getElementById('attendanceSection');
 
-      // Check if a specific rollout is selected
+      // Check if a specific cohort is selected
       if (currentRolloutFilter === 'All') {
         section.innerHTML = `
           <div class="card">
@@ -3602,8 +3676,8 @@
             <div class="card-body">
               <div class="empty-state">
                 <span class="material-icons">filter_alt</span>
-                <h3>Please select a specific rollout</h3>
-                <p>Use the rollout filter at the top right to select a specific study rollout, then you can mark attendance for its sessions.</p>
+                <h3>Please select a specific cohort</h3>
+                <p>Use the cohort filter at the top right to select a specific study cohort, then you can mark attendance for its sessions.</p>
               </div>
             </div>
           </div>
@@ -3611,7 +3685,7 @@
         return;
       }
 
-      // Load attendance for the selected rollout
+      // Load attendance for the selected cohort
       section.innerHTML = `
         <div class="card">
           <div class="card-header">
@@ -3629,7 +3703,7 @@
         </div>
       `;
 
-      // Load sessions and participants for the current rollout
+      // Load sessions and participants for the current cohort
       Promise.all([
         new Promise((resolve, reject) => {
           google.script.run
@@ -3674,13 +3748,16 @@
 
     function renderAttendanceInterfaceInline(rolloutId, sessions, participants) {
       const container = document.getElementById('attendanceCardBody');
+      attendanceParticipantsCache = participants;
+      attendanceParticipantsRolloutId = rolloutId;
+      ensureAttendanceTabStyles();
 
       if (sessions.length === 0) {
         container.innerHTML = `
           <div class="empty-state">
             <span class="material-icons">event_busy</span>
             <h3>No sessions configured</h3>
-            <p>This rollout doesn't have any sessions set up yet. Sessions are created when you create the rollout.</p>
+            <p>This cohort doesn't have any sessions set up yet. Sessions are created when you create the cohort.</p>
           </div>
         `;
         return;
@@ -3691,7 +3768,7 @@
           <div class="empty-state">
             <span class="material-icons">person_off</span>
             <h3>No participants enrolled</h3>
-            <p>Enroll participants in this rollout before marking attendance.</p>
+            <p>Enroll participants in this cohort before marking attendance.</p>
           </div>
         `;
         return;
@@ -3710,7 +3787,7 @@
 
         <div id="attendanceTabsContainer">
           ${sessions.map((session, idx) => `
-            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" id="sessionTab${idx}">
+            <div class="tab-content ${idx === 0 ? 'active' : ''}" data-tab="${idx}" data-session-id="${session.sessionId}" id="sessionTab${idx}">
               <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--gray-50); border-radius: var(--border-radius);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                   <div>
@@ -3718,6 +3795,10 @@
                     ${session.sessionDate ? '<br><small>' + formatDate(session.sessionDate) + '</small>' : ''}
                   </div>
                   <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-sm btn-primary" onclick="markSelectedAttendance('${session.sessionId}', ${idx})">
+                      <span class="material-icons">checklist</span>
+                      Mark Selected Present
+                    </button>
                     <button class="btn btn-sm btn-success" onclick="markAllAttendance('${session.sessionId}', 'present')">
                       <span class="material-icons">check_circle</span>
                       Mark All Present
@@ -3746,7 +3827,7 @@
     function loadAttendanceReports() {
       const section = document.getElementById('attendanceReportsSection');
 
-      // Check if a specific rollout is selected
+      // Check if a specific cohort is selected
       if (currentRolloutFilter === 'All') {
         section.innerHTML = `
           <div class="card">
@@ -3759,8 +3840,8 @@
             <div class="card-body">
               <div class="empty-state">
                 <span class="material-icons">filter_alt</span>
-                <h3>Please select a specific rollout</h3>
-                <p>Use the rollout filter at the top right to select a specific study rollout, then you can view its attendance report.</p>
+                <h3>Please select a specific cohort</h3>
+                <p>Use the cohort filter at the top right to select a specific study cohort, then you can view its attendance report.</p>
               </div>
             </div>
           </div>
@@ -3768,7 +3849,7 @@
         return;
       }
 
-      // Load attendance report for the selected rollout
+      // Load attendance report for the selected cohort
       section.innerHTML = `
         <div class="card">
           <div class="card-header">
@@ -3803,86 +3884,7 @@
           }
 
           if (result.success) {
-            const stats = result.stats;
-            let html = `
-              <div style="margin-bottom: 1.5rem;">
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Overview</h4>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
-                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
-                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Sessions</div>
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalSessions}</div>
-                  </div>
-                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
-                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Participants</div>
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalParticipants}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style="margin-bottom: 1.5rem;">
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Session Attendance</h4>
-                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Session</th>
-                        <th>Date</th>
-                        <th>Present</th>
-                        <th>Absent</th>
-                        <th>Excused</th>
-                        <th>Not Marked</th>
-                        <th>Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${stats.sessionStats.map(s => `
-                        <tr>
-                          <td><strong>${s.sessionName || 'Session ' + s.sessionNumber}</strong></td>
-                          <td>${formatDate(s.sessionDate)}</td>
-                          <td><span class="badge badge-success">${s.present}</span></td>
-                          <td><span class="badge badge-danger">${s.absent}</span></td>
-                          <td><span class="badge badge-warning">${s.excused}</span></td>
-                          <td><span class="badge badge-neutral">${s.notMarked}</span></td>
-                          <td><strong>${s.attendanceRate}%</strong></td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div>
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Participant Attendance</h4>
-                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Participant</th>
-                        <th>Present</th>
-                        <th>Absent</th>
-                        <th>Excused</th>
-                        <th>Not Marked</th>
-                        <th>Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${stats.participantStats.map(p => `
-                        <tr>
-                          <td><strong>${p.fullName}</strong><br><small><code>${p.participantId}</code></small></td>
-                          <td><span class="badge badge-success">${p.present}</span></td>
-                          <td><span class="badge badge-danger">${p.absent}</span></td>
-                          <td><span class="badge badge-warning">${p.excused}</span></td>
-                          <td><span class="badge badge-neutral">${p.notMarked}</span></td>
-                          <td><strong>${p.attendanceRate}%</strong></td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            `;
-
-            document.getElementById('attendanceReportBody').innerHTML = html;
+            document.getElementById('attendanceReportBody').innerHTML = buildAttendanceReportHtml(result.stats);
           } else {
             document.getElementById('attendanceReportBody').innerHTML = `
               <div class="empty-state">
@@ -3905,6 +3907,111 @@
         .getAttendanceStatsByRollout(sessionToken, currentRolloutFilter);
     }
 
+    function buildAttendanceReportHtml(stats) {
+      attendanceReportSessionLookup = {};
+
+      const sessionRows = stats.sessionStats.map(session => {
+        attendanceReportSessionLookup[session.sessionId] = session;
+
+        const rateClass = session.attendanceRate >= 80 ? 'success' : session.attendanceRate >= 50 ? 'warning' : 'primary';
+        const sessionTitle = session.sessionName || 'Session ' + session.sessionNumber;
+
+        return `
+          <div style="padding: 1rem; border: 1px solid var(--gray-100); border-radius: var(--border-radius); background: #fff; margin-bottom: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+              <div>
+                <div style="font-weight: 600; font-size: 0.95rem;">${escapeHtml(sessionTitle)}</div>
+                <div style="font-size: 0.8rem; color: var(--gray-500);">${formatDate(session.sessionDate)}</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="badge badge-success">${session.present} present</span>
+                <span class="badge badge-danger">${session.absent} absent</span>
+                <span class="badge badge-warning">${session.excused} excused</span>
+                <span class="badge badge-neutral">${session.notMarked} not marked</span>
+                <span class="badge badge-${rateClass}">${session.attendanceRate}%</span>
+                <button class="icon-button" onclick="showSessionAbsentees('${session.sessionId}')" title="View attendance details">
+                  <span class="material-icons" style="font-size: 18px;">list</span>
+                </button>
+              </div>
+            </div>
+            <div class="progress-bar" style="margin-top: 0.75rem;">
+              <div class="progress-fill ${rateClass}" style="width: ${session.attendanceRate}%;"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="margin-bottom: 1.5rem;">
+          <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Overview</h4>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+            <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
+              <div style="font-size: 0.75rem; color: var(--gray-600);">Total Sessions</div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalSessions}</div>
+            </div>
+            <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
+              <div style="font-size: 0.75rem; color: var(--gray-600);">Total Participants</div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalParticipants}</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Session Attendance</h4>
+          ${sessionRows || '<p class="stat-label">No session attendance data available.</p>'}
+        </div>
+      `;
+    }
+
+    function showSessionAbsentees(sessionId) {
+      const session = attendanceReportSessionLookup[sessionId];
+      if (!session) {
+        showToast('Session details are not available right now.', 'error');
+        return;
+      }
+
+      const nonPresentList = session.nonPresentParticipants || [];
+      if (nonPresentList.length === 0) {
+        showToast('All participants were marked present for this session.', 'success');
+        return;
+      }
+
+      const statusBadge = status => {
+        if (status === 'absent') return { label: 'Absent', className: 'badge-danger' };
+        if (status === 'excused') return { label: 'Excused', className: 'badge-warning' };
+        return { label: 'Not marked', className: 'badge-neutral' };
+      };
+
+      const participantRows = nonPresentList.map(person => {
+        const badge = statusBadge(person.status);
+        return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0; border-bottom: 1px solid var(--gray-100);">
+          <div style="font-weight: 600; color: var(--gray-800);">${escapeHtml(person.fullName || 'Unknown Participant')}</div>
+          <span class="badge ${badge.className}">${badge.label}</span>
+        </div>
+      `;
+      }).join('');
+
+      const sessionTitle = session.sessionName || 'Session ' + session.sessionNumber;
+      document.getElementById('modalTitle').textContent = `${sessionTitle} - Attendance Details`;
+      document.getElementById('modalBody').innerHTML = `
+        <p class="stat-label" style="margin-bottom: 0.5rem;">
+          ${session.present} present • ${session.absent} absent • ${session.excused} excused • ${session.notMarked} not marked
+        </p>
+        <p class="stat-label" style="margin-bottom: 0.75rem;">${nonPresentList.length} participant${nonPresentList.length === 1 ? '' : 's'} need attention.</p>
+        <div style="max-height: 320px; overflow-y: auto;">
+          ${participantRows}
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">
+          <span class="material-icons">close</span>
+          Close
+        </button>
+      `;
+      openModal();
+    }
+
     function showAttendanceReport(rolloutId, schoolName, period, year) {
       const rolloutName = `${schoolName} (${period} ${year})`;
       document.getElementById('modalTitle').textContent = 'Attendance Report - ' + rolloutName;
@@ -3922,86 +4029,7 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            const stats = result.stats;
-            let html = `
-              <div style="margin-bottom: 1.5rem;">
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Overview</h4>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
-                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
-                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Sessions</div>
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalSessions}</div>
-                  </div>
-                  <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius);">
-                    <div style="font-size: 0.75rem; color: var(--gray-600);">Total Participants</div>
-                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${stats.totalParticipants}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div style="margin-bottom: 1.5rem;">
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Session Attendance</h4>
-                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Session</th>
-                        <th>Date</th>
-                        <th>Present</th>
-                        <th>Absent</th>
-                        <th>Excused</th>
-                        <th>Not Marked</th>
-                        <th>Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${stats.sessionStats.map(s => `
-                        <tr>
-                          <td><strong>Session ${s.sessionNumber}</strong>${s.sessionName ? '<br><small>' + s.sessionName + '</small>' : ''}</td>
-                          <td>${formatDate(s.sessionDate)}</td>
-                          <td><span class="badge badge-success">${s.present}</span></td>
-                          <td><span class="badge badge-danger">${s.absent}</span></td>
-                          <td><span class="badge badge-warning">${s.excused}</span></td>
-                          <td><span class="badge badge-neutral">${s.notMarked}</span></td>
-                          <td><strong>${s.attendanceRate}%</strong></td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div>
-                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 1rem;">Participant Attendance</h4>
-                <div class="table-container" style="max-height: 300px; overflow-y: auto;">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>Participant</th>
-                        <th>Present</th>
-                        <th>Absent</th>
-                        <th>Excused</th>
-                        <th>Not Marked</th>
-                        <th>Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${stats.participantStats.map(p => `
-                        <tr>
-                          <td><strong>${p.fullName}</strong><br><small><code>${p.participantId}</code></small></td>
-                          <td><span class="badge badge-success">${p.present}</span></td>
-                          <td><span class="badge badge-danger">${p.absent}</span></td>
-                          <td><span class="badge badge-warning">${p.excused}</span></td>
-                          <td><span class="badge badge-neutral">${p.notMarked}</span></td>
-                          <td><strong>${p.attendanceRate}%</strong></td>
-                        </tr>
-                      `).join('')}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            `;
-
-            document.getElementById('modalBody').innerHTML = html;
+            document.getElementById('modalBody').innerHTML = buildAttendanceReportHtml(result.stats);
           } else {
             document.getElementById('modalBody').innerHTML = `
               <div class="empty-state">
@@ -4431,7 +4459,7 @@
             <div class="card-header">
               <h3 class="card-title">
                 <span class="material-icons">auto_graph</span>
-                Rollout Performance
+                Cohort Performance
               </h3>
             </div>
             <div class="card-body" id="rolloutPerformance">
@@ -4516,7 +4544,7 @@
       }
 
       const overview = result.overview;
-      const rollouts = result.rollouts || [];
+      const cohorts = result.cohorts || [];
       const instrumentStats = result.instrumentStats || [];
       const totalParticipants = overview.totalParticipants || 0;
 
@@ -4540,7 +4568,7 @@
           <div class="stat-card info">
             <div class="stat-card-header">
               <div>
-                <div class="stat-label">Rollouts</div>
+                <div class="stat-label">Cohorts</div>
                 <div class="stat-value">${overview.rolloutCount}</div>
               </div>
               <div class="stat-card-icon"><span class="material-icons">flag</span></div>
@@ -4572,12 +4600,12 @@
         </div>
       `;
 
-      if (rollouts.length === 0) {
+      if (cohorts.length === 0) {
         rolloutContainer.innerHTML = `
           <div class="empty-state">
             <span class="material-icons">insights</span>
-            <h3>No rollouts to display</h3>
-            <p>Adjust your filters or add participants to a rollout.</p>
+            <h3>No cohorts to display</h3>
+            <p>Adjust your filters or add participants to a cohort.</p>
           </div>
         `;
       } else {
@@ -4586,7 +4614,7 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Rollout</th>
+                  <th>Cohort</th>
                   <th>Site</th>
                   <th>Status</th>
                   <th>Participants</th>
@@ -4597,10 +4625,10 @@
                 </tr>
               </thead>
               <tbody>
-                ${rollouts.map(r => `
+                ${cohorts.map(r => `
                   <tr>
                     <td>
-                      <div style="font-weight: 600;">${r.schoolName || 'No rollout assigned'}</div>
+                      <div style="font-weight: 600;">${r.schoolName || 'No cohort assigned'}</div>
                       <div class="stat-subtext">${[r.period, r.year].filter(Boolean).join(' ')}</div>
                     </td>
                     <td><span class="badge ${r.site === 'UGA' ? 'badge-danger' : r.site === 'Missouri' ? 'badge-warning' : 'badge-neutral'}">${r.site || 'All'}</span></td>
@@ -4819,6 +4847,17 @@
 
               <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
                 <div>
+                  <div style="font-weight: 500;">Attendance Export</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Participant attendance summary by cohort</div>
+                </div>
+                <button class="btn btn-primary" onclick="exportAttendance()">
+                  <span class="material-icons">download</span>
+                  Export
+                </button>
+              </div>
+
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
+                <div>
                   <div style="font-weight: 500;">Summary Report</div>
                   <div style="font-size: 0.8rem; color: var(--gray-500);">Cross-site summary as text</div>
                 </div>
@@ -4848,6 +4887,16 @@
         .withSuccessHandler(downloadCSV)
         .withFailureHandler(handleError)
         .exportChecklistCSV(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
+    }
+
+    function exportAttendance() {
+      google.script.run
+        .withSuccessHandler(downloadFileFromResult)
+        .withFailureHandler(handleError)
+        .exportAttendanceCSV(sessionToken, {
           site: currentSiteFilter,
           rolloutId: currentRolloutFilter
         });
@@ -5008,7 +5057,7 @@
         loadParticipants();
       }
 
-      if (isSectionVisible('rollouts')) {
+      if (isSectionVisible('cohorts')) {
         loadRollouts();
       }
 
@@ -5031,7 +5080,7 @@
 
     function handleSiteFilterChange() {
       currentSiteFilter = document.getElementById('siteFilter').value;
-      currentRolloutFilter = 'All'; // Reset rollout filter when site changes
+      currentRolloutFilter = 'All'; // Reset cohort filter when site changes
 
       const rolloutSelect = document.getElementById('rolloutFilter');
       if (rolloutSelect) {
@@ -5048,30 +5097,30 @@
     }
 
     function loadRolloutsForFilter(site) {
-      // Update the rollout dropdown based on selected site
+      // Update the cohort dropdown based on selected site
       google.script.run
         .withSuccessHandler(function(result) {
           const rolloutSelect = document.getElementById('rolloutFilter');
           if (!rolloutSelect) return;
 
           // Clear existing options
-          rolloutSelect.innerHTML = '<option value="All">All Rollouts</option>';
+          rolloutSelect.innerHTML = '<option value="All">All Cohorts</option>';
 
-          if (result.success && result.rollouts && result.rollouts.length > 0) {
-            availableRollouts = result.rollouts;
-            result.rollouts.forEach(function(rollout) {
-              if (rollout.status === 'active') {
+          if (result.success && result.cohorts && result.cohorts.length > 0) {
+            availableRollouts = result.cohorts;
+            result.cohorts.forEach(function(cohort) {
+              if (cohort.status === 'active') {
                 const option = document.createElement('option');
-                option.value = rollout.rolloutId;
-                option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+                option.value = cohort.rolloutId;
+                option.textContent = cohort.schoolName + ' (' + cohort.period + ' ' + cohort.year + ')';
                 if (site !== 'All') {
-                  option.textContent += ' - ' + rollout.site;
+                  option.textContent += ' - ' + cohort.site;
                 }
                 rolloutSelect.appendChild(option);
               }
             });
 
-            const matchingRollout = result.rollouts.find(r => r.rolloutId === currentRolloutFilter);
+            const matchingRollout = result.cohorts.find(r => r.rolloutId === currentRolloutFilter);
             if (matchingRollout) {
               rolloutSelect.value = currentRolloutFilter;
             } else {
@@ -5083,7 +5132,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Error loading rollouts for filter:', error);
+          console.error('Error loading cohorts for filter:', error);
         })
         .getAllRollouts(sessionToken, site);
     }

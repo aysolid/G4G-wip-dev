@@ -57,7 +57,7 @@ function doGet(e) {
   const sessionToken = e.parameter.token || '';
 
   // Validate session for protected pages
-  const protectedPages = ['dashboard', 'users', 'rollouts', 'participants', 'participant-detail', 'reports'];
+  const protectedPages = ['users', 'cohorts', 'participants', 'participant-detail', 'reports'];
 
   if (protectedPages.includes(page)) {
     const session = validateSession(sessionToken);
@@ -154,6 +154,11 @@ function initializeDatabase() {
     'sessionId', 'rolloutId', 'sessionNumber', 'sessionDate', 'sessionName',
     'status', 'createdAt', 'createdBy'
   ]);
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  if (sessionsSheet) {
+    const sessionDateColumn = 4;
+    sessionsSheet.getRange(2, sessionDateColumn, sessionsSheet.getMaxRows() - 1, 1).setNumberFormat('@');
+  }
 
   // Create SessionAttendance sheet
   createSheetIfNotExists(ss, 'SessionAttendance', [
@@ -312,9 +317,7 @@ function authenticateUser(username, password) {
       Logger.log('Input password hash: ' + hashPassword(password));
 
       if (verifyPassword(password, rowPasswordHash)) {
-        // Create session
         const userId = row[headers.indexOf('userId')];
-        const session = createSession(userId);
 
         // Update last login
         const lastLoginCol = headers.indexOf('lastLogin') + 1;
@@ -325,7 +328,7 @@ function authenticateUser(username, password) {
 
         return {
           success: true,
-          token: session.token,
+          token: rowUsername,
           user: {
             userId: userId,
             username: rowUsername,
@@ -348,12 +351,17 @@ function authenticateUser(username, password) {
  */
 function createSession(userId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
+  let sessionsSheet = ss.getSheetByName('Sessions');
+  if (!sessionsSheet) {
+    sessionsSheet = createSheetIfNotExists(ss, 'Sessions', [
+      'sessionId', 'userId', 'token', 'createdAt', 'expiresAt', 'isActive'
+    ]);
+  }
 
   const sessionId = generateUUID();
   const token = generateSessionToken();
   const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+  const expiresAt = new Date(createdAt.getTime() + 60 * 60 * 1000); // 1 hour
 
   sessionsSheet.appendRow([
     sessionId,
@@ -376,27 +384,27 @@ function validateSession(token) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('Sessions');
 
-  if (!sessionsSheet) return null;
+  if (sessionsSheet) {
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const tokenCol = headers.indexOf('token');
+    const expiresCol = headers.indexOf('expiresAt');
+    const isActiveCol = headers.indexOf('isActive');
+    const userIdCol = headers.indexOf('userId');
 
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const tokenCol = headers.indexOf('token');
-  const expiresCol = headers.indexOf('expiresAt');
-  const isActiveCol = headers.indexOf('isActive');
-  const userIdCol = headers.indexOf('userId');
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
-      const expiresAt = new Date(data[i][expiresCol]);
-      if (expiresAt > new Date()) {
-        // Session is valid, get user info
-        const userId = data[i][userIdCol];
-        return getUserById(userId);
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
+        const expiresAt = new Date(data[i][expiresCol]);
+        if (expiresAt > new Date()) {
+          // Session is valid, get user info
+          const userId = data[i][userIdCol];
+          return getUserById(userId);
+        }
       }
     }
   }
 
-  return null;
+  return getUserByUsername(token);
 }
 
 /**
@@ -482,6 +490,39 @@ function getUserById(userId) {
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('userId')] === userId) {
+      return {
+        userId: data[i][headers.indexOf('userId')],
+        username: data[i][headers.indexOf('username')],
+        fullName: data[i][headers.indexOf('fullName')],
+        role: data[i][headers.indexOf('role')],
+        site: data[i][headers.indexOf('site')],
+        status: data[i][headers.indexOf('status')],
+        createdAt: data[i][headers.indexOf('createdAt')],
+        lastLogin: data[i][headers.indexOf('lastLogin')]
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get user by username
+ */
+function getUserByUsername(username) {
+  if (!username) return null;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const usersSheet = ss.getSheetByName('Users');
+
+  if (!usersSheet) return null;
+
+  const data = usersSheet.getDataRange().getValues();
+  const headers = data[0];
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][headers.indexOf('username')] === username &&
+        data[i][headers.indexOf('status')] === 'active') {
       return {
         userId: data[i][headers.indexOf('userId')],
         username: data[i][headers.indexOf('username')],
@@ -758,7 +799,7 @@ function deleteUser(token, userId) {
 // ============================================
 
 /**
- * Get all study rollouts
+ * Get all study cohorts
  */
 function getAllRollouts(token, siteFilter) {
   const currentUser = validateSession(token);
@@ -769,14 +810,14 @@ function getAllRollouts(token, siteFilter) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rolloutsSheet = ss.getSheetByName('StudyRollouts');
 
-  if (!rolloutsSheet) return { success: false, message: 'StudyRollouts sheet not found' };
+  if (!rolloutsSheet) return { success: false, message: 'Study cohorts sheet not found' };
 
   const data = rolloutsSheet.getDataRange().getValues();
   const headers = data[0];
-  const rollouts = [];
+  const cohorts = [];
 
   for (let i = 1; i < data.length; i++) {
-    const rollout = {
+    const cohort = {
       rolloutId: data[i][headers.indexOf('rolloutId')],
       site: data[i][headers.indexOf('site')],
       schoolName: data[i][headers.indexOf('schoolName')],
@@ -788,16 +829,16 @@ function getAllRollouts(token, siteFilter) {
     };
 
     // Apply site filter if specified
-    if (!siteFilter || siteFilter === 'All' || rollout.site === siteFilter) {
-      rollouts.push(rollout);
+    if (!siteFilter || siteFilter === 'All' || cohort.site === siteFilter) {
+      cohorts.push(cohort);
     }
   }
 
-  return { success: true, rollouts: rollouts };
+  return { success: true, cohorts: cohorts };
 }
 
 /**
- * Get rollouts by site
+ * Get cohorts by site
  */
 function getRolloutsBySite(token, site) {
   const currentUser = validateSession(token);
@@ -813,7 +854,7 @@ function getRolloutsBySite(token, site) {
 }
 
 /**
- * Create a new study rollout (Admin only)
+ * Create a new study cohort (Admin only)
  */
 function createRollout(token, rolloutData) {
   const currentUser = validateSession(token);
@@ -839,14 +880,14 @@ function createRollout(token, rolloutData) {
     rolloutData.description || ''
   ]);
 
-  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_ROLLOUT', 'rollout', rolloutId,
-    'Created rollout: ' + rolloutData.schoolName + ' (' + rolloutData.period + ' ' + rolloutData.year + ')');
+  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_ROLLOUT', 'cohort', rolloutId,
+    'Created cohort: ' + rolloutData.schoolName + ' (' + rolloutData.period + ' ' + rolloutData.year + ')');
 
-  return { success: true, message: 'Rollout created successfully', rolloutId: rolloutId };
+  return { success: true, message: 'Cohort created successfully', rolloutId: rolloutId };
 }
 
 /**
- * Update study rollout (Admin only)
+ * Update study cohort (Admin only)
  */
 function updateRollout(token, rolloutId, rolloutData) {
   const currentUser = validateSession(token);
@@ -877,18 +918,18 @@ function updateRollout(token, rolloutId, rolloutData) {
         rolloutsSheet.getRange(i + 1, headers.indexOf('description') + 1).setValue(rolloutData.description);
       }
 
-      logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_ROLLOUT', 'rollout', rolloutId,
-        'Updated rollout');
+      logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_ROLLOUT', 'cohort', rolloutId,
+        'Updated cohort');
 
-      return { success: true, message: 'Rollout updated successfully' };
+      return { success: true, message: 'Cohort updated successfully' };
     }
   }
 
-  return { success: false, message: 'Rollout not found' };
+  return { success: false, message: 'Cohort not found' };
 }
 
 /**
- * Get rollout by ID
+ * Get cohort by ID
  */
 function getRolloutById(rolloutId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -917,11 +958,11 @@ function getRolloutById(rolloutId) {
 }
 
 /**
- * Delete a rollout and all related data (Admin only)
+ * Delete a cohort and all related data (Admin only)
  * This will cascade delete:
- * - All participants in the rollout
+ * - All participants in the cohort
  * - All checklist items for those participants
- * - All sessions for the rollout
+ * - All sessions for the cohort
  * - All attendance records for those sessions
  */
 function deleteRollout(token, rolloutId) {
@@ -942,7 +983,7 @@ function deleteRollout(token, rolloutId) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  // Get all participants in this rollout
+  // Get all participants in this cohort
   const participantData = participantsSheet.getDataRange().getValues();
   const participantHeaders = participantData[0];
   const participantIds = [];
@@ -953,7 +994,7 @@ function deleteRollout(token, rolloutId) {
     }
   }
 
-  // Get all sessions in this rollout
+  // Get all sessions in this cohort
   const sessionData = sessionsSheet.getDataRange().getValues();
   const sessionHeaders = sessionData[0];
   const sessionIds = [];
@@ -981,14 +1022,14 @@ function deleteRollout(token, rolloutId) {
     }
   }
 
-  // 2. Delete all sessions for this rollout
+  // 2. Delete all sessions for this cohort
   for (let i = sessionData.length - 1; i >= 1; i--) {
     if (sessionData[i][sessionHeaders.indexOf('rolloutId')] === rolloutId) {
       sessionsSheet.deleteRow(i + 1);
     }
   }
 
-  // 3. Delete all checklist items for participants in this rollout
+  // 3. Delete all checklist items for participants in this cohort
   // IMPORTANT: Must get fresh data after any deletions
   const checklistData = checklistSheet.getDataRange().getValues();
   const checklistHeaders = checklistData[0];
@@ -1007,14 +1048,14 @@ function deleteRollout(token, rolloutId) {
 
   Logger.log('Deleted ' + deletedChecklistCount + ' checklist items');
 
-  // 4. Delete all participants in this rollout
+  // 4. Delete all participants in this cohort
   for (let i = participantData.length - 1; i >= 1; i--) {
     if (participantData[i][participantHeaders.indexOf('rolloutId')] === rolloutId) {
       participantsSheet.deleteRow(i + 1);
     }
   }
 
-  // 5. Delete the rollout itself
+  // 5. Delete the cohort itself
   const rolloutData = rolloutsSheet.getDataRange().getValues();
   const rolloutHeaders = rolloutData[0];
 
@@ -1025,14 +1066,14 @@ function deleteRollout(token, rolloutId) {
     }
   }
 
-  logActivity(currentUser.userId, currentUser.fullName, 'DELETE_ROLLOUT', 'rollout', rolloutId,
-    'Deleted rollout and all related data (' + participantIds.length + ' participants, ' +
+  logActivity(currentUser.userId, currentUser.fullName, 'DELETE_ROLLOUT', 'cohort', rolloutId,
+    'Deleted cohort and all related data (' + participantIds.length + ' participants, ' +
     deletedChecklistCount + ' checklist items, ' + sessionIds.length + ' sessions, ' +
     deletedAttendanceCount + ' attendance records)');
 
   return {
     success: true,
-    message: 'Rollout deleted successfully',
+    message: 'Cohort deleted successfully',
     deletedParticipants: participantIds.length,
     deletedChecklistItems: deletedChecklistCount,
     deletedSessions: sessionIds.length,
@@ -1045,44 +1086,50 @@ function deleteRollout(token, rolloutId) {
 // ============================================
 
 /**
- * Get all sessions for a specific rollout
+ * Get all sessions for a specific cohort
  */
 function getSessionsByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) {
-    return { success: false, message: 'Unauthorized' };
-  }
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('StudySessions');
-
-  if (!sessionsSheet) {
-    return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
-  }
-
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const sessions = [];
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
-      sessions.push({
-        sessionId: data[i][headers.indexOf('sessionId')],
-        rolloutId: data[i][headers.indexOf('rolloutId')],
-        sessionNumber: data[i][headers.indexOf('sessionNumber')],
-        sessionDate: data[i][headers.indexOf('sessionDate')],
-        sessionName: data[i][headers.indexOf('sessionName')],
-        status: data[i][headers.indexOf('status')],
-        createdAt: data[i][headers.indexOf('createdAt')],
-        createdBy: data[i][headers.indexOf('createdBy')]
-      });
+  try {
+    const currentUser = validateSession(token);
+    if (!currentUser) {
+      return { success: false, message: 'Unauthorized' };
     }
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sessionsSheet = ss.getSheetByName('StudySessions');
+
+    if (!sessionsSheet) {
+      return { success: false, message: 'StudySessions sheet not found. Please run initializeDatabase() from the Apps Script editor to create required sheets.' };
+    }
+
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const sessions = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
+        sessions.push({
+          sessionId: data[i][headers.indexOf('sessionId')],
+          rolloutId: data[i][headers.indexOf('rolloutId')],
+          sessionNumber: data[i][headers.indexOf('sessionNumber')],
+          sessionDate: normalizeSessionDateValue(data[i][headers.indexOf('sessionDate')]),
+          sessionName: data[i][headers.indexOf('sessionName')],
+          status: data[i][headers.indexOf('status')],
+          createdAt: data[i][headers.indexOf('createdAt')],
+          createdBy: data[i][headers.indexOf('createdBy')]
+        });
+      }
+    }
+
+    // Sort by session number
+    sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
+
+    return { success: true, sessions: sessions };
+  } catch (error) {
+    Logger.log('getSessionsByRollout ERROR: ' + error.toString());
+    Logger.log('Error stack: ' + error.stack);
+    return { success: false, message: 'Error loading sessions: ' + error.toString() };
   }
-
-  // Sort by session number
-  sessions.sort((a, b) => a.sessionNumber - b.sessionNumber);
-
-  return { success: true, sessions: sessions };
 }
 
 /**
@@ -1096,29 +1143,36 @@ function createSession(token, sessionData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
 
   const sessionId = generateUUID();
   const timestamp = new Date().toISOString();
+  const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
 
-  sessionsSheet.appendRow([
+  const nextRow = sessionsSheet.getLastRow() + 1;
+  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([[
     sessionId,
     sessionData.rolloutId,
     sessionData.sessionNumber,
-    sessionData.sessionDate,
+    sessionDateText,
     sessionData.sessionName || '',
     'scheduled',
     timestamp,
     currentUser.userId
-  ]);
+  ]]);
+  if (sessionDateCol > 0) {
+    setPlainTextCell(sessionsSheet, nextRow, sessionDateCol, sessionDateText);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'session', sessionId,
-    'Created session #' + sessionData.sessionNumber + ' for rollout ' + sessionData.rolloutId);
+    'Created session #' + sessionData.sessionNumber + ' for cohort ' + sessionData.rolloutId);
 
   return { success: true, message: 'Session created successfully', sessionId: sessionId };
 }
 
 /**
- * Batch create multiple sessions for a rollout
+ * Batch create multiple sessions for a cohort
  */
 function batchCreateSessions(token, rolloutId, sessionsData) {
   const currentUser = validateSession(token);
@@ -1128,31 +1182,42 @@ function batchCreateSessions(token, rolloutId, sessionsData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sessionsSheet = ss.getSheetByName('StudySessions');
+  const headers = sessionsSheet.getRange(1, 1, 1, sessionsSheet.getLastColumn()).getValues()[0];
+  const sessionDateCol = headers.indexOf('sessionDate') + 1;
   const timestamp = new Date().toISOString();
   const createdSessions = [];
 
-  for (let sessionData of sessionsData) {
+  const startRow = sessionsSheet.getLastRow() + 1;
+  const rows = sessionsData.map(sessionData => {
     const sessionId = generateUUID();
-
-    sessionsSheet.appendRow([
-      sessionId,
-      rolloutId,
-      sessionData.sessionNumber,
-      sessionData.sessionDate,
-      sessionData.sessionName || '',
-      'scheduled',
-      timestamp,
-      currentUser.userId
-    ]);
-
+    const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
     createdSessions.push({
       sessionId: sessionId,
       sessionNumber: sessionData.sessionNumber
     });
+    return [
+      sessionId,
+      rolloutId,
+      sessionData.sessionNumber,
+      sessionDateText,
+      sessionData.sessionName || '',
+      'scheduled',
+      timestamp,
+      currentUser.userId
+    ];
+  });
+
+  if (rows.length > 0) {
+    sessionsSheet.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+    if (sessionDateCol > 0) {
+      const dateRange = sessionsSheet.getRange(startRow, sessionDateCol, rows.length, 1);
+      dateRange.setNumberFormat('@');
+      dateRange.setValues(rows.map(row => [row[sessionDateCol - 1]]));
+    }
   }
 
-  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'rollout', rolloutId,
-    'Created ' + sessionsData.length + ' sessions for rollout');
+  logActivity(currentUser.userId, currentUser.fullName, 'CREATE_SESSION', 'cohort', rolloutId,
+    'Created ' + sessionsData.length + ' sessions for cohort');
 
   return {
     success: true,
@@ -1178,7 +1243,13 @@ function updateSession(token, sessionId, sessionData) {
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('sessionId')] === sessionId) {
       if (sessionData.sessionDate) {
-        sessionsSheet.getRange(i + 1, headers.indexOf('sessionDate') + 1).setValue(sessionData.sessionDate);
+        const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
+        setPlainTextCell(
+          sessionsSheet,
+          i + 1,
+          headers.indexOf('sessionDate') + 1,
+          sessionDateText
+        );
       }
       if (sessionData.sessionName !== undefined) {
         sessionsSheet.getRange(i + 1, headers.indexOf('sessionName') + 1).setValue(sessionData.sessionName);
@@ -1409,7 +1480,7 @@ function getAttendanceByParticipant(token, participantId) {
         if (sessionData[j][sessionHeaders.indexOf('sessionId')] === sessionId) {
           sessionInfo = {
             sessionNumber: sessionData[j][sessionHeaders.indexOf('sessionNumber')],
-            sessionDate: sessionData[j][sessionHeaders.indexOf('sessionDate')],
+            sessionDate: normalizeSessionDateValue(sessionData[j][sessionHeaders.indexOf('sessionDate')]),
             sessionName: sessionData[j][sessionHeaders.indexOf('sessionName')]
           };
           break;
@@ -1441,7 +1512,7 @@ function getAttendanceByParticipant(token, participantId) {
 }
 
 /**
- * Get attendance statistics for a rollout
+ * Get attendance statistics for a cohort
  */
 function getAttendanceStatsByRollout(token, rolloutId) {
   const currentUser = validateSession(token);
@@ -1462,7 +1533,7 @@ function getAttendanceStatsByRollout(token, rolloutId) {
     };
   }
 
-  // Get all sessions for this rollout
+  // Get all sessions for this cohort
   const sessionData = sessionsSheet.getDataRange().getValues();
   const sessionHeaders = sessionData[0];
   const sessions = [];
@@ -1472,13 +1543,13 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       sessions.push({
         sessionId: sessionData[i][sessionHeaders.indexOf('sessionId')],
         sessionNumber: sessionData[i][sessionHeaders.indexOf('sessionNumber')],
-        sessionDate: sessionData[i][sessionHeaders.indexOf('sessionDate')],
+        sessionDate: normalizeSessionDateValue(sessionData[i][sessionHeaders.indexOf('sessionDate')]),
         sessionName: sessionData[i][sessionHeaders.indexOf('sessionName')]
       });
     }
   }
 
-  // Get all participants for this rollout
+  // Get all participants for this cohort
   const participantData = participantsSheet.getDataRange().getValues();
   const participantHeaders = participantData[0];
   const participants = [];
@@ -1520,15 +1591,56 @@ function getAttendanceStatsByRollout(token, rolloutId) {
     let absent = 0;
     let excused = 0;
     let notMarked = 0;
+    const presentParticipants = [];
+    const absentParticipants = [];
+    const excusedParticipants = [];
+    const notMarkedParticipants = [];
+    const nonPresentParticipants = [];
 
     for (let participant of participants) {
       const key = session.sessionId + '_' + participant.participantId;
       const status = attendanceMap[key];
 
-      if (status === 'present') present++;
-      else if (status === 'absent') absent++;
-      else if (status === 'excused') excused++;
-      else notMarked++;
+      if (status === 'present') {
+        present++;
+        presentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+      } else if (status === 'absent') {
+        absent++;
+        absentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'absent'
+        });
+      } else if (status === 'excused') {
+        excused++;
+        excusedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'excused'
+        });
+      } else {
+        notMarked++;
+        notMarkedParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName
+        });
+        nonPresentParticipants.push({
+          participantId: participant.participantId,
+          fullName: participant.fullName,
+          status: 'not_marked'
+        });
+      }
     }
 
     stats.sessionStats.push({
@@ -1540,7 +1652,12 @@ function getAttendanceStatsByRollout(token, rolloutId) {
       absent: absent,
       excused: excused,
       notMarked: notMarked,
-      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0
+      attendanceRate: participants.length > 0 ? Math.round((present / participants.length) * 100) : 0,
+      presentParticipants: presentParticipants,
+      absentParticipants: absentParticipants,
+      excusedParticipants: excusedParticipants,
+      notMarkedParticipants: notMarkedParticipants,
+      nonPresentParticipants: nonPresentParticipants
     });
   }
 
@@ -1739,10 +1856,10 @@ function enrollParticipant(token, participantData) {
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
 
-  // Get rollout info
-  const rollout = getRolloutById(participantData.rolloutId);
-  if (!rollout) {
-    return { success: false, message: 'Invalid rollout selected' };
+  // Get cohort info
+  const cohort = getRolloutById(participantData.rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Invalid cohort selected' };
   }
 
   if (currentUser.role === 'facilitator') {
@@ -1750,24 +1867,24 @@ function enrollParticipant(token, participantData) {
       return { success: false, message: 'Facilitators must be assigned to a single site before enrolling participants' };
     }
 
-    if (rollout.site !== currentUser.site) {
+    if (cohort.site !== currentUser.site) {
       return { success: false, message: 'Unauthorized to enroll participants for this site' };
     }
   }
 
   // Generate participant ID
-  const participantId = generateParticipantId(rollout.site);
+  const participantId = generateParticipantId(cohort.site);
   const timestamp = new Date().toISOString();
 
   // Add participant
   participantsSheet.appendRow([
     participantId,
     participantData.fullName,
-    rollout.site,
+    cohort.site,
     participantData.rolloutId,
-    rollout.schoolName,
-    rollout.period,
-    rollout.year,
+    cohort.schoolName,
+    cohort.period,
+    cohort.year,
     timestamp,
     currentUser.userId,
     'active',
@@ -1931,18 +2048,18 @@ function generateEnrollmentTemplate(token) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rolloutsSheet = ss.getSheetByName('StudyRollouts');
   if (!rolloutsSheet) {
-    return { success: false, message: 'Study rollouts sheet not found' };
+    return { success: false, message: 'Study cohorts sheet not found' };
   }
 
   const data = rolloutsSheet.getDataRange().getValues();
   const headers = data[0];
-  const rollouts = [];
+  const cohorts = [];
   const isFacilitator = currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All';
 
   for (let i = 1; i < data.length; i++) {
     const site = data[i][headers.indexOf('site')];
     if (isFacilitator && site !== currentUser.site) continue;
-    rollouts.push({
+    cohorts.push({
       rolloutId: data[i][headers.indexOf('rolloutId')],
       site: site,
       schoolName: data[i][headers.indexOf('schoolName')],
@@ -1959,21 +2076,21 @@ function generateEnrollmentTemplate(token) {
 
   // Headers
   templateSheet.getRange('A1').setValue('fullName');
-  templateSheet.getRange('B1').setValue('rolloutName');
+  templateSheet.getRange('B1').setValue('cohortName');
   templateSheet.getRange('A1:B1')
     .setFontWeight('bold')
     .setBackground('#f1f5f9');
 
-  // Helper sheet with rollout list
-  const helperSheet = tempSs.insertSheet('Rollouts');
-  helperSheet.getRange(1, 1, rollouts.length, 1).setValues(
-    rollouts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+  // Helper sheet with cohort list
+  const helperSheet = tempSs.insertSheet('Cohorts');
+  helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
+    cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
   );
   helperSheet.hideSheet();
 
-  // Data validation for rollout dropdown (apply to reasonable range)
-  const lastRow = Math.max(2, rollouts.length + 5);
-  const validationRange = helperSheet.getRange(1, 1, rollouts.length, 1);
+  // Data validation for cohort dropdown (apply to reasonable range)
+  const lastRow = Math.max(2, cohorts.length + 5);
+  const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
   const rule = SpreadsheetApp.newDataValidation()
     .requireValueInRange(validationRange, true)
     .setAllowInvalid(false)
@@ -2007,7 +2124,7 @@ function generateEnrollmentTemplate(token) {
     file: Utilities.base64Encode(blob.getBytes()),
     mimeType: blob.getContentType(),
     filename: blob.getName(),
-    rolloutCount: rollouts.length
+    rolloutCount: cohorts.length
   };
 }
 
@@ -2036,13 +2153,21 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const headers = rows[0].map(h => h.trim());
-  const required = ['fullName', 'rolloutName'];
-  const missing = required.filter(col => headers.indexOf(col) === -1);
+  const hasCohortName = headers.indexOf('cohortName') !== -1;
+  const hasRolloutName = headers.indexOf('rolloutName') !== -1;
+  const missing = [];
+  if (headers.indexOf('fullName') === -1) {
+    missing.push('fullName');
+  }
+  if (!hasCohortName && !hasRolloutName) {
+    missing.push('cohortName');
+  }
   if (missing.length > 0) {
     return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
   }
 
   const idx = name => headers.indexOf(name);
+  const cohortColumn = hasCohortName ? 'cohortName' : 'rolloutName';
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
@@ -2052,7 +2177,7 @@ function importParticipantsCSV(token, fileData) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  // Build rollout map for quick lookups
+  // Build cohort map for quick lookups
   const rolloutData = rolloutsSheet.getDataRange().getValues();
   const rolloutHeaders = rolloutData[0];
   const rolloutMap = {};
@@ -2076,7 +2201,7 @@ function importParticipantsCSV(token, fileData) {
   }
 
   if (Object.keys(rolloutMap).length === 0) {
-    return { success: false, message: 'No accessible rollouts found for this user' };
+    return { success: false, message: 'No accessible cohorts found for this user' };
   }
 
   // Participant map for upserts
@@ -2104,7 +2229,7 @@ function importParticipantsCSV(token, fileData) {
     const rowNumber = r + 1; // 1-based CSV row
 
     const fullName = (row[idx('fullName')] || '').trim();
-    const rolloutName = (row[idx('rolloutName')] || '').trim();
+    const rolloutName = (row[idx(cohortColumn)] || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -2119,35 +2244,35 @@ function importParticipantsCSV(token, fileData) {
       continue;
     }
     if (!rolloutName) {
-      summary.errors.push({ row: rowNumber, message: 'rolloutName is required' });
+      summary.errors.push({ row: rowNumber, message: 'cohortName is required' });
       summary.skipped++;
       continue;
     }
-    const rollout = rolloutMap[rolloutName.toLowerCase()];
-    if (!rollout) {
-      summary.errors.push({ row: rowNumber, message: 'Rollout not found or not accessible: ' + rolloutName });
+    const cohort = rolloutMap[rolloutName.toLowerCase()];
+    if (!cohort) {
+      summary.errors.push({ row: rowNumber, message: 'Cohort not found or not accessible: ' + rolloutName });
       summary.skipped++;
       continue;
     }
 
     // Create new participant (participantId auto-generated)
-    if (isFacilitator && rollout.site !== currentUser.site) {
-      summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + rollout.site });
+    if (isFacilitator && cohort.site !== currentUser.site) {
+      summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + cohort.site });
       summary.skipped++;
       continue;
     }
 
-    const newParticipantId = generateParticipantId(rollout.site);
+    const newParticipantId = generateParticipantId(cohort.site);
     const timestamp = new Date().toISOString();
 
     participantsSheet.appendRow([
       newParticipantId,
       fullName,
-      rollout.site,
-      rollout.rolloutId,
-      rollout.schoolName,
-      rollout.period,
-      rollout.year,
+      cohort.site,
+      cohort.rolloutId,
+      cohort.schoolName,
+      cohort.period,
+      cohort.year,
       timestamp,
       currentUser.userId,
       'active',
@@ -2171,7 +2296,7 @@ function importParticipantsCSV(token, fileData) {
     });
 
     logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
-      'Bulk enrolled: ' + fullName + ' into ' + rollout.schoolName);
+      'Bulk enrolled: ' + fullName + ' into ' + cohort.schoolName);
 
     summary.created++;
   }
@@ -2300,7 +2425,7 @@ function bulkUpdateChecklist(token, participantId, updates) {
 }
 
 /**
- * Get checklist statuses for a specific instrument within a rollout
+ * Get checklist statuses for a specific instrument within a cohort
  */
 function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
   const currentUser = validateSession(token);
@@ -2308,12 +2433,12 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  const rollout = getRolloutById(rolloutId);
-  if (!rollout) {
-    return { success: false, message: 'Rollout not found' };
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Cohort not found' };
   }
 
-  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && rollout.site !== currentUser.site) {
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
@@ -2375,14 +2500,14 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
   return {
     success: true,
     instrumentName: instrument.name,
-    rolloutName: rollout.schoolName,
-    site: rollout.site,
+    rolloutName: cohort.schoolName,
+    site: cohort.site,
     participants: participants
   };
 }
 
 /**
- * Bulk update an instrument across participants in a rollout
+ * Bulk update an instrument across participants in a cohort
  */
 function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates) {
   const currentUser = validateSession(token);
@@ -2390,12 +2515,12 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Unauthorized' };
   }
 
-  const rollout = getRolloutById(rolloutId);
-  if (!rollout) {
-    return { success: false, message: 'Rollout not found' };
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Cohort not found' };
   }
 
-  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && rollout.site !== currentUser.site) {
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
@@ -2469,7 +2594,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
-    'Updated ' + successCount + ' ' + instrument.name + ' records for rollout ' + rollout.schoolName);
+    'Updated ' + successCount + ' ' + instrument.name + ' records for cohort ' + cohort.schoolName);
 
   return {
     success: errorCount === 0,
@@ -2568,7 +2693,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       continue;
     }
 
-    // Apply rollout filter
+    // Apply cohort filter
     if (rolloutFilter && rolloutFilter !== 'All' && rolloutId !== rolloutFilter) {
       continue;
     }
@@ -2589,7 +2714,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     ? Math.round(totalCompletion / stats.totalParticipants)
     : 0;
 
-  // Get rollouts data
+  // Get cohorts data
   if (rolloutsSheet) {
     const rData = rolloutsSheet.getDataRange().getValues();
     const rHeaders = rData[0];
@@ -2599,7 +2724,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       const rStatus = rData[i][rHeaders.indexOf('status')];
       const rId = rData[i][rHeaders.indexOf('rolloutId')];
 
-      // If a specific rollout is selected, get its details
+      // If a specific cohort is selected, get its details
       if (rolloutFilter && rolloutFilter !== 'All' && rId === rolloutFilter) {
         stats.currentRollout = {
           rolloutId: rId,
@@ -2664,7 +2789,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 }
 
 /**
- * Get analytics overview across rollouts and instruments
+ * Get analytics overview across cohorts and instruments
  */
 function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const currentUser = validateSession(token);
@@ -2698,7 +2823,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
         siteFilter: effectiveSite,
         rolloutFilter: effectiveRollout
       },
-      rollouts: [],
+      cohorts: [],
       instrumentStats: []
     };
   }
@@ -2775,7 +2900,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       rolloutEntries[key] = {
         rolloutId: rolloutId || 'Unassigned',
         site: site,
-        schoolName: rolloutId ? pData[i][pHeaders.indexOf('schoolName')] : 'No rollout assigned',
+        schoolName: rolloutId ? pData[i][pHeaders.indexOf('schoolName')] : 'No cohort assigned',
         period: pData[i][pHeaders.indexOf('period')],
         year: pData[i][pHeaders.indexOf('year')],
         status: rolloutId ? 'active' : 'unassigned',
@@ -2869,19 +2994,19 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     overview.instrumentsTotal = instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
   }
 
-  const rollouts = Object.values(rolloutEntries).sort((a, b) => {
+  const cohorts = Object.values(rolloutEntries).sort((a, b) => {
     if (a.site === b.site) {
       return (b.year || '').toString().localeCompare((a.year || '').toString());
     }
     return a.site.localeCompare(b.site);
   });
 
-  overview.rolloutCount = rollouts.length;
+  overview.rolloutCount = cohorts.length;
 
   return {
     success: true,
     overview: overview,
-    rollouts: rollouts,
+    cohorts: cohorts,
     instrumentStats: instrumentStats
   };
 }
@@ -2894,17 +3019,570 @@ function getPublicDashboardStats(siteFilter, rolloutFilter) {
 }
 
 /**
- * Get public rollouts list (no authentication required)
+ * Get public landing page snapshot metrics for the research dashboard.
+ */
+function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
+  const effectiveSite = siteFilter || 'All';
+  const effectiveCohort = rolloutFilter || 'All';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  const cohortsById = {};
+  const cohorts = [];
+
+  if (rolloutsSheet) {
+    const rData = rolloutsSheet.getDataRange().getValues();
+    const rHeaders = rData[0];
+    for (let i = 1; i < rData.length; i++) {
+      const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
+      const site = rData[i][rHeaders.indexOf('site')];
+      if (effectiveSite !== 'All' && site !== effectiveSite) continue;
+      const cohort = {
+        rolloutId: rolloutId,
+        site: site,
+        schoolName: rData[i][rHeaders.indexOf('schoolName')],
+        period: rData[i][rHeaders.indexOf('period')],
+        year: rData[i][rHeaders.indexOf('year')],
+        status: rData[i][rHeaders.indexOf('status')]
+      };
+      cohorts.push(cohort);
+      cohortsById[rolloutId] = cohort;
+    }
+  }
+
+  const currentCohort = effectiveCohort !== 'All' ? cohortsById[effectiveCohort] : null;
+  const contextLine = buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort);
+
+  const participants = [];
+  const participantsBySite = { UGA: [], Missouri: [] };
+  const participantsByCohort = {};
+  let totalEnrolled = 0;
+  let activeEnrollments = 0;
+
+  if (participantsSheet) {
+    const pData = participantsSheet.getDataRange().getValues();
+    const pHeaders = pData[0];
+    for (let i = 1; i < pData.length; i++) {
+      const participant = {
+        participantId: pData[i][pHeaders.indexOf('participantId')],
+        site: pData[i][pHeaders.indexOf('site')],
+        rolloutId: pData[i][pHeaders.indexOf('rolloutId')],
+        status: pData[i][pHeaders.indexOf('status')],
+        completionPercentage: Number(pData[i][pHeaders.indexOf('completionPercentage')]) || 0
+      };
+
+      participantsBySite[participant.site] = participantsBySite[participant.site] || [];
+      participantsBySite[participant.site].push(participant);
+
+      if (!participantsByCohort[participant.rolloutId]) {
+        participantsByCohort[participant.rolloutId] = [];
+      }
+      participantsByCohort[participant.rolloutId].push(participant);
+
+      if (effectiveSite !== 'All' && participant.site !== effectiveSite) continue;
+      if (effectiveCohort !== 'All' && participant.rolloutId !== effectiveCohort) continue;
+
+      participants.push(participant);
+      totalEnrolled++;
+      if (participant.status === 'active') {
+        activeEnrollments++;
+      }
+    }
+  }
+
+  const sessionLookup = {};
+  const sessionsByCohort = {};
+
+  if (sessionsSheet) {
+    const sData = sessionsSheet.getDataRange().getValues();
+    const sHeaders = sData[0];
+    for (let i = 1; i < sData.length; i++) {
+      const rolloutId = sData[i][sHeaders.indexOf('rolloutId')];
+      if (effectiveSite !== 'All') {
+        const cohort = cohortsById[rolloutId];
+        if (!cohort) continue;
+      }
+      if (effectiveCohort !== 'All' && rolloutId !== effectiveCohort) continue;
+
+      const session = {
+        sessionId: sData[i][sHeaders.indexOf('sessionId')],
+        rolloutId: rolloutId,
+        sessionNumber: sData[i][sHeaders.indexOf('sessionNumber')],
+        sessionDate: normalizeSessionDateValue(sData[i][sHeaders.indexOf('sessionDate')]),
+        sessionName: sData[i][sHeaders.indexOf('sessionName')],
+        status: sData[i][sHeaders.indexOf('status')]
+      };
+      sessionsByCohort[rolloutId] = sessionsByCohort[rolloutId] || [];
+      sessionsByCohort[rolloutId].push(session);
+      sessionLookup[session.sessionId] = session;
+    }
+  }
+
+  const attendanceMap = {};
+  if (attendanceSheet) {
+    const aData = attendanceSheet.getDataRange().getValues();
+    const aHeaders = aData[0];
+    for (let i = 1; i < aData.length; i++) {
+      const sessionId = aData[i][aHeaders.indexOf('sessionId')];
+      if (!sessionLookup[sessionId]) continue;
+      const participantId = aData[i][aHeaders.indexOf('participantId')];
+      if (!attendanceMap[sessionId]) {
+        attendanceMap[sessionId] = {};
+      }
+      attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
+    }
+  }
+
+  const attendanceSummary = buildAttendanceSummary(
+    participants,
+    sessionsByCohort,
+    attendanceMap,
+    effectiveCohort
+  );
+
+  const protocolSummary = buildProtocolSummary(
+    participants,
+    checklistSheet
+  );
+
+  const attentionItems = buildAttentionItems(
+    attendanceSummary,
+    protocolSummary,
+    participants,
+    effectiveCohort
+  );
+
+  const comparison = buildComparisonSummary(
+    effectiveSite,
+    effectiveCohort,
+    participantsBySite,
+    participantsByCohort,
+    sessionsByCohort,
+    attendanceMap,
+    checklistSheet,
+    cohorts
+  );
+
+  const aboutSummary = buildAboutSummary(
+    effectiveSite,
+    effectiveCohort,
+    totalEnrolled,
+    cohorts,
+    participantsBySite
+  );
+
+  return {
+    success: true,
+    snapshot: {
+      contextLine: contextLine,
+      meta: {
+        generatedAt: new Date().toISOString(),
+        exportReady: totalEnrolled > 0
+      },
+      kpis: {
+        totalEnrolled: totalEnrolled,
+        activeEnrollments: activeEnrollments,
+        averageAttendance: attendanceSummary.averageAttendance,
+        participationStatus: attendanceSummary.participationStatus,
+        atRiskParticipants: attendanceSummary.atRiskParticipants,
+        protocolCompletionRate: protocolSummary.completionRate,
+        sessionsCompleted: attendanceSummary.sessionsCompleted,
+        totalSessions: attendanceSummary.totalSessions
+      },
+      attendance: attendanceSummary,
+      protocol: protocolSummary,
+      attention: attentionItems,
+      comparison: comparison,
+      about: aboutSummary
+    }
+  };
+}
+
+function buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort) {
+  if (currentCohort) {
+    const label = formatCohortDisplayLabel(currentCohort);
+    return `Showing data for: ${label} • ${currentCohort.site}`;
+  }
+
+  const cohortLabel = effectiveCohort === 'All' ? 'All Study Cohorts' : 'Selected Study Cohort';
+  const siteLabel = effectiveSite === 'All' ? 'All Sites' : effectiveSite;
+  return `Showing data for: ${cohortLabel} • ${siteLabel}`;
+}
+
+function formatCohortDisplayLabel(cohort) {
+  const periodYear = [cohort.period, cohort.year].filter(Boolean).join(' ');
+  return `${cohort.schoolName || 'Study Cohort'} – ${periodYear} Cohort`;
+}
+
+function buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, effectiveCohort) {
+  const attendanceRates = [];
+  let atRisk70 = 0;
+  let atRisk60 = 0;
+  let missingAttendance = 0;
+  let participantsWithSessions = 0;
+
+  const distribution = { high: 0, mid: 0, low: 0 };
+  const totalSessions = Object.values(sessionsByCohort).reduce((sum, sessions) => sum + sessions.length, 0);
+  const sessionsCompleted = countCompletedSessions(sessionsByCohort);
+
+  participants.forEach(participant => {
+    const sessions = sessionsByCohort[participant.rolloutId] || [];
+    if (sessions.length === 0) return;
+
+    participantsWithSessions++;
+    let presentCount = 0;
+
+    sessions.forEach(session => {
+      const status = attendanceMap[session.sessionId]
+        ? attendanceMap[session.sessionId][participant.participantId]
+        : null;
+      if (status === 'present') {
+        presentCount++;
+      }
+      if (!status) {
+        missingAttendance++;
+      }
+    });
+
+    const attendanceRate = Math.round((presentCount / sessions.length) * 100);
+    attendanceRates.push(attendanceRate);
+
+    if (attendanceRate < 70) atRisk70++;
+    if (attendanceRate < 60) atRisk60++;
+
+    if (attendanceRate >= 90) distribution.high++;
+    else if (attendanceRate >= 70) distribution.mid++;
+    else distribution.low++;
+  });
+
+  const averageAttendance = attendanceRates.length > 0
+    ? Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)
+    : 0;
+
+  const participationStatus = resolveParticipationStatus(averageAttendance, participantsWithSessions, atRisk70);
+  const trend = buildAttendanceTrend(participants, sessionsByCohort, attendanceMap, effectiveCohort);
+  const totalDistribution = distribution.high + distribution.mid + distribution.low;
+
+  return {
+    averageAttendance: averageAttendance,
+    participationStatus: participationStatus,
+    atRiskParticipants: atRisk70,
+    atRiskParticipantsCritical: atRisk60,
+    distribution: {
+      high: distribution.high,
+      mid: distribution.mid,
+      low: distribution.low,
+      total: totalDistribution
+    },
+    totalSessions: totalSessions,
+    sessionsCompleted: sessionsCompleted,
+    trend: trend,
+    trendAvailable: effectiveCohort !== 'All' && trend.length > 0,
+    missingAttendanceRecords: missingAttendance,
+    participantsWithSessions: participantsWithSessions
+  };
+}
+
+function resolveParticipationStatus(averageAttendance, participantsWithSessions, atRisk70) {
+  if (participantsWithSessions === 0) {
+    return { label: 'No Data', tone: 'neutral', subtitle: 'Attendance data pending' };
+  }
+  const atRiskShare = participantsWithSessions > 0 ? (atRisk70 / participantsWithSessions) * 100 : 0;
+  if (averageAttendance >= 85 && atRiskShare < 10) {
+    return { label: 'Good', tone: 'success', subtitle: `Avg attendance: ${averageAttendance}%` };
+  }
+  if (averageAttendance >= 70 && averageAttendance < 85 || (atRiskShare >= 10 && atRiskShare <= 25)) {
+    return { label: 'Watch', tone: 'warning', subtitle: `Avg attendance: ${averageAttendance}%` };
+  }
+  return { label: 'At Risk', tone: 'danger', subtitle: `Avg attendance: ${averageAttendance}%` };
+}
+
+function buildAttendanceTrend(participants, sessionsByCohort, attendanceMap, effectiveCohort) {
+  if (effectiveCohort === 'All') return [];
+  const sessions = sessionsByCohort[effectiveCohort] || [];
+  const participantsForCohort = participants.filter(participant => participant.rolloutId === effectiveCohort);
+
+  sessions.sort((a, b) => (a.sessionNumber || 0) - (b.sessionNumber || 0));
+
+  return sessions.map(session => {
+    let present = 0;
+    let absent = 0;
+    let excused = 0;
+    let notMarked = 0;
+
+    participantsForCohort.forEach(participant => {
+      const status = attendanceMap[session.sessionId]
+        ? attendanceMap[session.sessionId][participant.participantId]
+        : null;
+      if (status === 'present') present++;
+      else if (status === 'absent') absent++;
+      else if (status === 'excused') excused++;
+      else notMarked++;
+    });
+
+    const total = present + absent + excused + notMarked;
+    const attendanceRate = total > 0 ? Math.round((present / total) * 100) : 0;
+    const label = session.sessionName || `Session ${session.sessionNumber || ''}`.trim();
+
+    return {
+      label: label,
+      present: present,
+      absent: absent,
+      excused: excused,
+      notMarked: notMarked,
+      attendanceRate: attendanceRate
+    };
+  });
+}
+
+function countCompletedSessions(sessionsByCohort) {
+  const today = new Date();
+  let completed = 0;
+
+  Object.values(sessionsByCohort).forEach(sessions => {
+    sessions.forEach(session => {
+      if (session.status === 'completed') {
+        completed++;
+        return;
+      }
+      const sessionDate = parseSessionDate(session.sessionDate);
+      if (sessionDate && sessionDate <= today) {
+        completed++;
+      }
+    });
+  });
+
+  return completed;
+}
+
+function parseSessionDate(dateValue) {
+  if (!dateValue) return null;
+  const normalized = normalizeSessionDateValue(dateValue);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildProtocolSummary(participants, checklistSheet) {
+  const participantIds = new Set(participants.map(p => p.participantId));
+  const instrumentCounts = {};
+  let totalCompleted = 0;
+  const requiredItems = CONFIG.INSTRUMENTS.length;
+
+  CONFIG.INSTRUMENTS.forEach(inst => {
+    instrumentCounts[inst.number] = { name: inst.name, total: 0, completed: 0 };
+  });
+
+  if (checklistSheet && participantIds.size > 0) {
+    const cData = checklistSheet.getDataRange().getValues();
+    const cHeaders = cData[0];
+    for (let i = 1; i < cData.length; i++) {
+      const participantId = cData[i][cHeaders.indexOf('participantId')];
+      if (!participantIds.has(participantId)) continue;
+      const instNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
+      const status = cData[i][cHeaders.indexOf('status')];
+      if (!instrumentCounts[instNumber]) continue;
+
+      instrumentCounts[instNumber].total++;
+      if (status === 'completed') {
+        instrumentCounts[instNumber].completed++;
+        totalCompleted++;
+      }
+    }
+  }
+
+  const totalRequired = participants.length * requiredItems;
+  const completionRate = totalRequired > 0 ? Math.round((totalCompleted / totalRequired) * 100) : 0;
+
+  const instrumentStats = CONFIG.INSTRUMENTS.map(inst => {
+    const counts = instrumentCounts[inst.number];
+    const percentage = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
+    return {
+      number: inst.number,
+      name: inst.name,
+      total: counts.total,
+      completed: counts.completed,
+      percentage: percentage
+    };
+  });
+
+  const lowestItems = instrumentStats
+    .filter(item => item.total > 0)
+    .sort((a, b) => a.percentage - b.percentage)
+    .slice(0, 3);
+
+  const needsReviewCount = instrumentStats.filter(item => item.total > 0 && item.percentage < 50).length;
+
+  return {
+    requiredItems: requiredItems,
+    totalRequired: totalRequired,
+    completedItems: totalCompleted,
+    completionRate: completionRate,
+    instrumentStats: instrumentStats,
+    lowestItems: lowestItems,
+    needsReviewCount: needsReviewCount
+  };
+}
+
+function buildAttentionItems(attendanceSummary, protocolSummary, participants, effectiveCohort) {
+  const items = [];
+
+  if (participants.length === 0) {
+    return items;
+  }
+
+  if (attendanceSummary.atRiskParticipantsCritical > 0) {
+    items.push({
+      severity: 'critical',
+      message: `${attendanceSummary.atRiskParticipantsCritical} participants below 60% attendance (At Risk).`,
+      action: 'Review attendance'
+    });
+  }
+
+  if (attendanceSummary.atRiskParticipants > 0) {
+    items.push({
+      severity: 'warning',
+      message: `${attendanceSummary.atRiskParticipants} participants below 70% attendance.`,
+      action: 'View attendance report'
+    });
+  }
+
+  if (effectiveCohort !== 'All') {
+    const lowSessions = attendanceSummary.trend.filter(session => session.attendanceRate > 0 && session.attendanceRate < 60);
+    if (lowSessions.length > 0) {
+      const sessionNames = lowSessions.slice(0, 2).map(session => `${session.label} (${session.attendanceRate}%)`);
+      items.push({
+        severity: 'warning',
+        message: `Low attendance detected: ${sessionNames.join(', ')}.`,
+        action: 'Review session attendance'
+      });
+    }
+  }
+
+  if (attendanceSummary.missingAttendanceRecords > 0) {
+    items.push({
+      severity: 'info',
+      message: `${attendanceSummary.missingAttendanceRecords} attendance records are missing for selected sessions.`,
+      action: 'Complete attendance'
+    });
+  }
+
+  if (attendanceSummary.totalSessions === 0 && participants.length > 0) {
+    items.push({
+      severity: 'info',
+      message: 'No sessions scheduled for the selected cohort. Add sessions to enable attendance tracking.',
+      action: 'Schedule sessions'
+    });
+  }
+
+  if (protocolSummary.needsReviewCount > 0) {
+    items.push({
+      severity: 'warning',
+      message: `${protocolSummary.needsReviewCount} protocol items are below 50% completion.`,
+      action: 'Review protocol checklist'
+    });
+  }
+
+  return items.slice(0, 7);
+}
+
+function buildComparisonSummary(
+  effectiveSite,
+  effectiveCohort,
+  participantsBySite,
+  participantsByCohort,
+  sessionsByCohort,
+  attendanceMap,
+  checklistSheet,
+  cohorts
+) {
+  if (effectiveSite === 'All' && effectiveCohort === 'All') {
+    const siteEntries = ['UGA', 'Missouri'].map(site => {
+      const participants = participantsBySite[site] || [];
+      const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+      const protocol = buildProtocolSummary(participants, checklistSheet);
+      return {
+        label: site,
+        participants: participants.length,
+        averageAttendance: summary.averageAttendance,
+        protocolCompletion: protocol.completionRate
+      };
+    }).filter(entry => entry.participants > 0);
+
+    return {
+      title: 'Site Comparison',
+      entries: siteEntries,
+      emptyMessage: 'No participant data available for site comparison.'
+    };
+  }
+
+  if (effectiveSite !== 'All' && effectiveCohort !== 'All') {
+    return {
+      title: 'Cohort Comparison',
+      entries: [],
+      emptyMessage: 'Comparison is unavailable for a single cohort selection.'
+    };
+  }
+
+  if (effectiveSite !== 'All') {
+    const cohortEntries = cohorts.map(cohort => {
+      const participants = participantsByCohort[cohort.rolloutId] || [];
+      const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+      const protocol = buildProtocolSummary(participants, checklistSheet);
+      return {
+        label: formatCohortDisplayLabel(cohort),
+        participants: participants.length,
+        averageAttendance: summary.averageAttendance,
+        protocolCompletion: protocol.completionRate
+      };
+    }).filter(entry => entry.participants > 0);
+
+    return {
+      title: 'Cohort Comparison',
+      entries: cohortEntries,
+      emptyMessage: 'No cohorts with participant data found for this site.'
+    };
+  }
+
+  return {
+    title: 'Comparison',
+    entries: [],
+    emptyMessage: 'Comparison is unavailable for the selected cohort filter.'
+  };
+}
+
+function buildAboutSummary(effectiveSite, effectiveCohort, totalEnrolled, cohorts, participantsBySite) {
+  const siteCount = effectiveSite === 'All'
+    ? Object.keys(participantsBySite).filter(site => participantsBySite[site] && participantsBySite[site].length > 0).length
+    : 1;
+  const cohortCount = effectiveCohort === 'All' ? cohorts.length : 1;
+
+  return {
+    siteCount: siteCount,
+    cohortCount: cohortCount,
+    protocolItems: CONFIG.INSTRUMENTS.length,
+    platform: 'Nintendo Switch',
+    totalParticipants: totalEnrolled
+  };
+}
+
+/**
+ * Get public cohorts list (no authentication required)
  */
 function getPublicRollouts(siteFilter) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rolloutsSheet = ss.getSheetByName('StudyRollouts');
 
-  if (!rolloutsSheet) return { success: true, rollouts: [] };
+  if (!rolloutsSheet) return { success: true, cohorts: [] };
 
   const data = rolloutsSheet.getDataRange().getValues();
   const headers = data[0];
-  const rollouts = [];
+  const cohorts = [];
 
   for (let i = 1; i < data.length; i++) {
     const site = data[i][headers.indexOf('site')];
@@ -2915,9 +3593,9 @@ function getPublicRollouts(siteFilter) {
       continue;
     }
 
-    // Only return active rollouts for public view
+    // Only return active cohorts for public view
     if (status === 'active') {
-      rollouts.push({
+      cohorts.push({
         rolloutId: data[i][headers.indexOf('rolloutId')],
         site: site,
         schoolName: data[i][headers.indexOf('schoolName')],
@@ -2928,7 +3606,7 @@ function getPublicRollouts(siteFilter) {
     }
   }
 
-  return { success: true, rollouts: rollouts };
+  return { success: true, cohorts: cohorts };
 }
 
 /**
@@ -3153,6 +3831,431 @@ function exportChecklistCSV(token, filters) {
 }
 
 /**
+ * Export attendance data to CSV format
+ */
+function exportAttendanceCSV(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  // Enforce facilitator site scope
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters = filters || {};
+    filters.site = currentUser.site;
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  const attendanceSheet = ss.getSheetByName('SessionAttendance');
+  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
+
+  if (!participantsSheet || !sessionsSheet || !attendanceSheet || !rolloutsSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const rolloutsData = rolloutsSheet.getDataRange().getValues();
+  const rolloutsHeaders = rolloutsData[0];
+  const rolloutEntries = [];
+
+  for (let i = 1; i < rolloutsData.length; i++) {
+    const rolloutId = rolloutsData[i][rolloutsHeaders.indexOf('rolloutId')];
+    const rolloutSite = rolloutsData[i][rolloutsHeaders.indexOf('site')];
+
+    if (filters && filters.site && filters.site !== 'All' && rolloutSite !== filters.site) continue;
+    if (filters && filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+
+    rolloutEntries.push({
+      rolloutId: rolloutId,
+      site: rolloutSite,
+      schoolName: rolloutsData[i][rolloutsHeaders.indexOf('schoolName')],
+      period: rolloutsData[i][rolloutsHeaders.indexOf('period')],
+      year: rolloutsData[i][rolloutsHeaders.indexOf('year')]
+    });
+  }
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantsHeaders = participantsData[0];
+  const participantsByRollout = {};
+
+  for (let i = 1; i < participantsData.length; i++) {
+    const rolloutId = participantsData[i][participantsHeaders.indexOf('rolloutId')];
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
+
+    const participant = {
+      participantId: participantsData[i][participantsHeaders.indexOf('participantId')],
+      fullName: participantsData[i][participantsHeaders.indexOf('fullName')],
+      site: participantsData[i][participantsHeaders.indexOf('site')],
+      rolloutId: rolloutId
+    };
+
+    if (!participantsByRollout[rolloutId]) {
+      participantsByRollout[rolloutId] = [];
+    }
+    participantsByRollout[rolloutId].push(participant);
+  }
+
+  const sessionsData = sessionsSheet.getDataRange().getValues();
+  const sessionsHeaders = sessionsData[0];
+  const sessionsByRollout = {};
+
+  for (let i = 1; i < sessionsData.length; i++) {
+    const rolloutId = sessionsData[i][sessionsHeaders.indexOf('rolloutId')];
+    if (!rolloutEntries.find(entry => entry.rolloutId === rolloutId)) continue;
+
+    const session = {
+      sessionId: sessionsData[i][sessionsHeaders.indexOf('sessionId')],
+      sessionNumber: sessionsData[i][sessionsHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(sessionsData[i][sessionsHeaders.indexOf('sessionDate')]),
+      sessionName: sessionsData[i][sessionsHeaders.indexOf('sessionName')]
+    };
+
+    if (!sessionsByRollout[rolloutId]) {
+      sessionsByRollout[rolloutId] = [];
+    }
+    sessionsByRollout[rolloutId].push(session);
+  }
+
+  const attendanceData = attendanceSheet.getDataRange().getValues();
+  const attendanceHeaders = attendanceData[0];
+  const attendanceMap = {};
+
+  for (let i = 1; i < attendanceData.length; i++) {
+    const sessionId = attendanceData[i][attendanceHeaders.indexOf('sessionId')];
+    const participantId = attendanceData[i][attendanceHeaders.indexOf('participantId')];
+    attendanceMap[sessionId + '_' + participantId] = attendanceData[i][attendanceHeaders.indexOf('status')] || 'not_marked';
+  }
+
+  const rolloutLookup = {};
+  rolloutEntries.forEach(entry => {
+    rolloutLookup[entry.rolloutId] = entry;
+  });
+
+  const maxSessionCount = rolloutEntries.reduce((max, cohort) => {
+    const sessions = sessionsByRollout[cohort.rolloutId] || [];
+    const maxSessionNumber = sessions.reduce((count, session) => {
+      return Math.max(count, session.sessionNumber || 0);
+    }, 0);
+    return Math.max(max, maxSessionNumber);
+  }, 0);
+
+  const headerRow = [
+    'Participant Name',
+    'Participant ID',
+    'Site',
+    'Cohort'
+  ];
+
+  for (let i = 1; i <= maxSessionCount; i++) {
+    headerRow.push(`Session ${i}`);
+  }
+
+  headerRow.push(
+    'Total Sessions',
+    'Sessions Attended',
+    'Sessions Missed',
+    'Attendance %',
+    'Missed Sessions'
+  );
+
+  const rows = [];
+  const attendanceRates = [];
+  const bandCounts = {
+    high: 0,
+    mid: 0,
+    low: 0
+  };
+
+  const sessionSummaryRows = [];
+  const rowsByRollout = {};
+  rolloutEntries.forEach(cohort => {
+    const sessions = (sessionsByRollout[cohort.rolloutId] || []).slice().sort((a, b) => a.sessionNumber - b.sessionNumber);
+    const participants = (participantsByRollout[cohort.rolloutId] || []).slice().sort((a, b) => {
+      return (a.fullName || '').localeCompare(b.fullName || '');
+    });
+    const sessionMap = {};
+    sessions.forEach(session => {
+      sessionMap[session.sessionNumber] = session.sessionId;
+    });
+    const sessionCount = sessions.reduce((count, session) => Math.max(count, session.sessionNumber || 0), 0);
+    rowsByRollout[cohort.rolloutId] = [];
+
+    // Assumption: if a participant has no attendance record for a session, count as Absent.
+    sessions.forEach(session => {
+      let presentCount = 0;
+      participants.forEach(participant => {
+        const status = attendanceMap[session.sessionId + '_' + participant.participantId] || 'not_marked';
+        if (status === 'present') presentCount++;
+      });
+      const total = participants.length;
+      const absentCount = total - presentCount;
+      const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+      sessionSummaryRows.push([
+        `${cohort.schoolName || 'Cohort'} (${cohort.period || ''} ${cohort.year || ''})`.replace(/\s+/g, ' ').trim(),
+        'Session ' + session.sessionNumber,
+        presentCount,
+        absentCount,
+        rate + '%'
+      ]);
+    });
+
+    participants.forEach(participant => {
+      let presentCount = 0;
+      let missedCount = 0;
+      const missedLabels = [];
+      const sessionValues = [];
+
+      for (let i = 1; i <= sessionCount; i++) {
+        if (!sessionMap[i]) {
+          sessionValues.push('');
+          continue;
+        }
+
+        const status = attendanceMap[sessionMap[i] + '_' + participant.participantId] || 'not_marked';
+        // Assumption: missing attendance is treated as absent, excused counts as non-present.
+        if (status === 'present') {
+          presentCount++;
+          sessionValues.push('P');
+        } else if (status === 'excused') {
+          missedCount++;
+          sessionValues.push('E');
+          missedLabels.push('S' + i);
+        } else {
+          missedCount++;
+          sessionValues.push('A');
+          missedLabels.push('S' + i);
+        }
+      }
+
+      const totalSessions = sessions.length;
+      const attendanceRate = totalSessions > 0 ? Math.round((presentCount / totalSessions) * 100) : 0;
+      attendanceRates.push(attendanceRate);
+
+      if (attendanceRate >= 90) bandCounts.high++;
+      else if (attendanceRate >= 70) bandCounts.mid++;
+      else bandCounts.low++;
+
+      const row = [
+        participant.fullName || '',
+        participant.participantId || '',
+        participant.site || cohort.site || '',
+        `${cohort.schoolName || 'Cohort'} (${cohort.period || ''} ${cohort.year || ''})`.replace(/\s+/g, ' ').trim(),
+        ...sessionValues,
+        totalSessions,
+        presentCount,
+        missedCount,
+        attendanceRate + '%',
+        missedLabels.length > 0 ? missedLabels.join(', ') : ''
+      ];
+
+      rows.push(row);
+      rowsByRollout[cohort.rolloutId].push(row);
+    });
+  });
+
+  rows.sort((a, b) => {
+    const rolloutCompare = a[3].localeCompare(b[3]);
+    if (rolloutCompare !== 0) return rolloutCompare;
+    return a[0].localeCompare(b[0]);
+  });
+
+  const exportDate = new Date();
+  const siteLabel = (filters && filters.site) ? filters.site : 'All';
+  let rolloutLabel = 'All Cohorts';
+  if (filters && filters.rolloutId && filters.rolloutId !== 'All') {
+    const rolloutMatch = rolloutLookup[filters.rolloutId];
+    if (rolloutMatch) {
+      rolloutLabel = `${rolloutMatch.schoolName || 'Cohort'} (${rolloutMatch.period || ''} ${rolloutMatch.year || ''})`
+        .replace(/\s+/g, ' ')
+        .trim();
+    } else {
+      rolloutLabel = filters.rolloutId;
+    }
+  }
+
+  const spreadsheet = SpreadsheetApp.create('Attendance Export ' + exportDate.toISOString());
+  let sheet = spreadsheet.getSheets()[0];
+  sheet.setName('Attendance Export');
+
+  const buildSheetName = cohort => {
+    const label = `${cohort.schoolName || 'Cohort'} ${cohort.period || ''} ${cohort.year || ''}`.replace(/\s+/g, ' ').trim();
+    return label.substring(0, 90) || 'Cohort';
+  };
+
+  const buildHeaderRow = sessionCount => {
+    const base = ['Participant Name', 'Participant ID', 'Site', 'Cohort'];
+    for (let i = 1; i <= sessionCount; i++) {
+      base.push(`Session ${i}`);
+    }
+    base.push('Total Sessions', 'Sessions Attended', 'Sessions Missed', 'Attendance %', 'Missed Sessions');
+    return base;
+  };
+
+  const renderAttendanceSheet = (targetSheet, sheetRows, sessionSummary, sessionCount, sheetRolloutLabel) => {
+    const sheetHeaderRow = buildHeaderRow(sessionCount);
+    const totalColumns = sheetHeaderRow.length;
+    let rowCursor = 1;
+
+    targetSheet.getRange(rowCursor, 1).setValue('Attendance Export');
+    rowCursor++;
+    targetSheet.getRange(rowCursor, 1).setValue('Site: ' + (siteLabel === 'All' ? 'All Sites' : siteLabel));
+    targetSheet.getRange(rowCursor, 2).setValue('Cohort: ' + sheetRolloutLabel);
+    targetSheet.getRange(rowCursor, 3).setValue('Exported: ' + exportDate.toLocaleString());
+    rowCursor += 2;
+
+    const titleRange = targetSheet.getRange(1, 1, 1, totalColumns);
+    titleRange.setFontSize(16).setFontWeight('bold').setFontFamily('Arial');
+    titleRange.setBackground('#1f2937').setFontColor('#ffffff');
+
+    const metaRange = targetSheet.getRange(2, 1, 1, totalColumns);
+    metaRange.setFontSize(10).setFontFamily('Arial').setFontColor('#111827');
+
+    const totalParticipants = sheetRows.length;
+    const sheetAttendanceRates = sheetRows.map(row => {
+      const rateValue = String(row[sheetHeaderRow.length - 2]).replace('%', '');
+      return Number(rateValue) || 0;
+    });
+    const averageAttendance = sheetAttendanceRates.length > 0
+      ? Math.round(sheetAttendanceRates.reduce((sum, rate) => sum + rate, 0) / sheetAttendanceRates.length)
+      : 0;
+
+    const bandCounts = {
+      high: sheetAttendanceRates.filter(rate => rate >= 90).length,
+      mid: sheetAttendanceRates.filter(rate => rate >= 70 && rate < 90).length,
+      low: sheetAttendanceRates.filter(rate => rate < 70).length
+    };
+
+    targetSheet.getRange(rowCursor, 1).setValue('Summary');
+    targetSheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
+    rowCursor++;
+    const summaryRange = targetSheet.getRange(rowCursor, 1, 5, 2);
+    summaryRange.setValues([
+      ['Total Participants', totalParticipants],
+      ['Average Attendance %', averageAttendance + '%'],
+      ['90–100%', bandCounts.high],
+      ['70–89%', bandCounts.mid],
+      ['<70%', bandCounts.low]
+    ]);
+    summaryRange.setFontFamily('Arial').setFontSize(10);
+    targetSheet.getRange(rowCursor, 1, 5, 1).setFontWeight('bold').setBackground('#f3f4f6');
+    rowCursor += 6;
+
+    targetSheet.getRange(rowCursor, 1).setValue('Session Summary');
+    targetSheet.getRange(rowCursor, 1).setFontWeight('bold').setFontFamily('Arial');
+    rowCursor++;
+    const sessionHeaderRange = targetSheet.getRange(rowCursor, 1, 1, 5);
+    sessionHeaderRange.setValues([['Cohort', 'Session', 'Present', 'Absent', 'Attendance %']]);
+    sessionHeaderRange.setFontWeight('bold').setBackground('#f3f4f6').setFontFamily('Arial');
+    rowCursor++;
+    if (sessionSummary.length > 0) {
+      const sessionSummaryRange = targetSheet.getRange(rowCursor, 1, sessionSummary.length, 5);
+      sessionSummaryRange.setValues(sessionSummary);
+      sessionSummaryRange.setFontFamily('Arial').setFontSize(10);
+      rowCursor += sessionSummary.length + 1;
+    } else {
+      rowCursor++;
+    }
+
+    const tableHeaderRow = rowCursor;
+    const headerRange = targetSheet.getRange(tableHeaderRow, 1, 1, sheetHeaderRow.length);
+    headerRange.setValues([sheetHeaderRow]);
+    headerRange.setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff');
+    headerRange.setFontFamily('Arial').setFontSize(10);
+    rowCursor++;
+
+    if (sheetRows.length > 0) {
+      const dataRange = targetSheet.getRange(rowCursor, 1, sheetRows.length, sheetHeaderRow.length);
+      dataRange.setValues(sheetRows.map(row => row.slice(0, sheetHeaderRow.length)));
+      dataRange.setFontFamily('Arial').setFontSize(10);
+    }
+
+    targetSheet.setFrozenRows(tableHeaderRow);
+    targetSheet.setFrozenColumns(4);
+
+    if (sheetRows.length > 0 && sessionCount > 0) {
+      const sessionStartCol = 5;
+      const sessionRange = targetSheet.getRange(rowCursor, sessionStartCol, sheetRows.length, sessionCount);
+      const rules = [
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('P')
+          .setBackground('#dcfce7')
+          .setRanges([sessionRange])
+          .build(),
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('A')
+          .setBackground('#fee2e2')
+          .setRanges([sessionRange])
+          .build(),
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo('E')
+          .setBackground('#fef3c7')
+          .setRanges([sessionRange])
+          .build()
+      ];
+      targetSheet.setConditionalFormatRules(rules);
+    }
+
+    targetSheet.autoResizeColumns(1, Math.min(sheetHeaderRow.length, targetSheet.getMaxColumns()));
+    targetSheet.setColumnWidth(1, 180);
+    targetSheet.setColumnWidth(2, 150);
+    targetSheet.setColumnWidth(3, 90);
+    targetSheet.setColumnWidth(4, 220);
+  };
+
+  if (rolloutEntries.length > 1) {
+    rolloutEntries.forEach((cohort, index) => {
+      const sheetName = buildSheetName(cohort);
+      const targetSheet = index === 0 ? sheet : spreadsheet.insertSheet(sheetName);
+      if (index !== 0) {
+        targetSheet.setName(sheetName);
+      } else {
+        sheet.setName(sheetName);
+      }
+
+      const sheetRows = rowsByRollout[cohort.rolloutId] || [];
+      const sheetSessionSummary = sessionSummaryRows.filter(row => row[0] === `${cohort.schoolName || 'Cohort'} (${cohort.period || ''} ${cohort.year || ''})`.replace(/\s+/g, ' ').trim());
+      const sessionCount = (sessionsByRollout[cohort.rolloutId] || []).reduce((count, session) => {
+        return Math.max(count, session.sessionNumber || 0);
+      }, 0);
+
+      renderAttendanceSheet(targetSheet, sheetRows, sheetSessionSummary, sessionCount, `${cohort.schoolName || 'Cohort'} (${cohort.period || ''} ${cohort.year || ''})`.replace(/\s+/g, ' ').trim());
+    });
+  } else {
+    const cohort = rolloutEntries[0];
+    const sheetRows = cohort ? (rowsByRollout[cohort.rolloutId] || rows) : rows;
+    const sessionCount = cohort ? (sessionsByRollout[cohort.rolloutId] || []).reduce((count, session) => {
+      return Math.max(count, session.sessionNumber || 0);
+    }, 0) : maxSessionCount;
+    renderAttendanceSheet(sheet, sheetRows, sessionSummaryRows, sessionCount, rolloutLabel);
+  }
+
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to export attendance report: ' + response.getContentText() };
+  }
+
+  const blob = response.getBlob().setName('attendance_export_' + exportDate.toISOString().split('T')[0] + '.xlsx');
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+
+  return {
+    success: true,
+    file: base64,
+    mimeType: MimeType.MICROSOFT_EXCEL,
+    filename: 'attendance_export_' + exportDate.toISOString().split('T')[0] + '.xlsx',
+    downloadMessage: 'Attendance export downloaded'
+  };
+}
+
+/**
  * Export summary report
  */
 function exportSummaryReport(token, filters) {
@@ -3242,12 +4345,12 @@ function exportSummaryReport(token, filters) {
   defaultSheet.getRange(2, 1).setValue('Generated: ' + new Date().toLocaleString());
   defaultSheet.autoResizeColumns(1, 2);
 
-  rolloutEntries.forEach((rollout, index) => {
-    const sheetName = (rollout.schoolName || 'Rollout') + ' ' + (rollout.period || '') + ' ' + (rollout.year || '');
-    const safeName = sheetName.substring(0, 90) || 'Rollout ' + (index + 1);
+  rolloutEntries.forEach((cohort, index) => {
+    const sheetName = (cohort.schoolName || 'Cohort') + ' ' + (cohort.period || '') + ' ' + (cohort.year || '');
+    const safeName = sheetName.substring(0, 90) || 'Cohort ' + (index + 1);
     const sheet = spreadsheet.insertSheet(safeName);
 
-    const instrumentStats = getInstrumentStatsForRollout(rollout.rolloutId);
+    const instrumentStats = getInstrumentStatsForRollout(cohort.rolloutId);
 
     sheet.getRange('A1').setValue('Instrument');
     sheet.getRange('B1').setValue('Complete %');
@@ -3350,6 +4453,25 @@ function generateSessionToken() {
 function csvEscape(value) {
   const str = value === null || value === undefined ? '' : String(value);
   return '"' + str.replace(/"/g, '""') + '"';
+}
+
+/**
+ * Normalize session dates to plain text (YYYY-MM-DD)
+ */
+function normalizeSessionDateValue(value) {
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    if (isNaN(value.getTime())) return '';
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(value);
+}
+
+/**
+ * Set a cell value while enforcing plain text format
+ */
+function setPlainTextCell(sheet, row, column, value) {
+  sheet.getRange(row, column).setNumberFormat('@').setValue(value === undefined ? '' : value);
 }
 
 /**

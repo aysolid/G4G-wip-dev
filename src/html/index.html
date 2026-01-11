@@ -160,32 +160,85 @@
       padding: 2rem;
     }
 
-    /* Hero Section */
-    .hero {
+    /* Snapshot */
+    .snapshot {
       background: white;
       border-radius: var(--border-radius-lg);
-      padding: 2.5rem;
+      padding: 2rem;
       margin-bottom: 2rem;
       box-shadow: var(--shadow);
-      border-left: 4px solid var(--primary-color);
+      border: 1px solid var(--gray-200);
     }
 
-    .hero h2 {
+    .snapshot-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .snapshot-title h2 {
       font-size: 1.75rem;
       color: var(--gray-900);
+    }
+
+    .snapshot-title p {
+      color: var(--gray-600);
+      font-size: 0.95rem;
+      max-width: 720px;
+    }
+
+    .snapshot-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem;
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+      border: 1px solid var(--gray-200);
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .filter-group label {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--gray-600);
+    }
+
+    .filter-group select {
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--gray-300);
+      border-radius: var(--border-radius);
+      font-size: 0.875rem;
+      background: white;
+    }
+
+    .snapshot-context {
+      font-weight: 600;
+      color: var(--gray-800);
       margin-bottom: 0.5rem;
     }
 
-    .hero p {
-      color: var(--gray-600);
-      font-size: 1rem;
-      max-width: 800px;
+    .snapshot-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      font-size: 0.75rem;
+      color: var(--gray-500);
     }
 
-    /* Stats Grid */
-    .stats-grid {
+    /* KPI Grid */
+    .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1.5rem;
       margin-bottom: 2rem;
     }
@@ -269,17 +322,62 @@
     .stat-trend.up { color: var(--success-color); }
     .stat-trend.down { color: var(--danger-color); }
 
-    /* Two Column Layout */
-    .content-grid {
+    /* Section Layout */
+    .section {
+      margin-bottom: 2rem;
+    }
+
+    .section-grid {
       display: grid;
       grid-template-columns: 2fr 1fr;
       gap: 2rem;
     }
 
+    .section-grid.equal {
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    }
+
     @media (max-width: 1024px) {
-      .content-grid {
+      .section-grid {
         grid-template-columns: 1fr;
       }
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .section-header h3 {
+      font-size: 1.25rem;
+      color: var(--gray-900);
+    }
+
+    .section-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--gray-300);
+      color: var(--gray-700);
+      padding: 6px 12px;
+      border-radius: var(--border-radius);
+      font-size: 0.8rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-outline:hover {
+      border-color: var(--primary-color);
+      color: var(--primary-color);
     }
 
     /* Card Component */
@@ -314,6 +412,12 @@
 
     .card-body {
       padding: 1.5rem;
+    }
+
+    .card-subtitle {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      margin-top: 0.25rem;
     }
 
     /* Progress Bars */
@@ -364,95 +468,252 @@
     .progress-fill.warning { background: var(--warning-color); }
     .progress-fill.info { background: var(--info-color); }
 
-    /* Site Comparison */
-    .site-comparison {
+    /* Attendance Insights */
+    .insights-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 2fr 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .insights-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .trend-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .trend-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 80px;
       gap: 1rem;
+      align-items: center;
     }
 
-    .site-card {
-      padding: 1.25rem;
-      border-radius: var(--border-radius);
-      text-align: center;
+    .trend-label {
+      font-size: 0.85rem;
+      color: var(--gray-700);
+      font-weight: 500;
     }
 
-    .site-card.uga {
-      background: rgba(186, 12, 47, 0.05);
-      border: 1px solid rgba(186, 12, 47, 0.2);
+    .trend-bar {
+      height: 10px;
+      background: var(--gray-200);
+      border-radius: 999px;
+      overflow: hidden;
+      display: flex;
     }
 
-    .site-card.missouri {
-      background: rgba(241, 184, 45, 0.05);
-      border: 1px solid rgba(241, 184, 45, 0.2);
+    .trend-bar span {
+      display: block;
+      height: 100%;
     }
 
-    .site-name {
-      font-size: 0.875rem;
+    .trend-present {
+      background: var(--success-color);
+    }
+
+    .trend-absent {
+      background: var(--warning-color);
+    }
+
+    .trend-rate {
+      font-size: 0.8rem;
       font-weight: 600;
       color: var(--gray-700);
-      margin-bottom: 0.5rem;
+      text-align: right;
     }
 
-    .site-value {
-      font-size: 2rem;
-      font-weight: 700;
+    .band-list {
+      display: grid;
+      gap: 0.75rem;
     }
 
-    .site-card.uga .site-value { color: var(--uga-color); }
-    .site-card.missouri .site-value { color: #b8860b; }
-
-    .site-detail {
-      font-size: 0.75rem;
-      color: var(--gray-500);
-      margin-top: 0.25rem;
-    }
-
-    /* Instrument Checklist Preview */
-    .instrument-preview {
-      max-height: 400px;
-      overflow-y: auto;
-    }
-
-    .instrument-item {
-      display: flex;
+    .band-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 60px;
+      gap: 0.75rem;
       align-items: center;
-      padding: 0.75rem 0;
-      border-bottom: 1px solid var(--gray-100);
+    }
+
+    .band-bar {
+      height: 8px;
+      background: var(--gray-200);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .band-fill {
+      height: 100%;
+      border-radius: 999px;
+    }
+
+    .band-fill.high { background: var(--success-color); }
+    .band-fill.mid { background: var(--warning-color); }
+    .band-fill.low { background: var(--danger-color); }
+
+    /* Protocol Overview */
+    .protocol-summary {
+      display: grid;
       gap: 1rem;
     }
 
-    .instrument-item:last-child {
-      border-bottom: none;
+    .protocol-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
     }
 
-    .instrument-number {
+    .metric-tile {
+      padding: 1rem;
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+      border: 1px solid var(--gray-200);
+    }
+
+    .metric-tile h4 {
+      font-size: 1.1rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .metric-tile span {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+    }
+
+    .protocol-progress {
+      margin-top: 1.25rem;
+      border-top: 1px solid var(--gray-200);
+      padding-top: 1rem;
+    }
+
+    .protocol-progress h4 {
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+      color: var(--gray-800);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .protocol-list {
+      max-height: 280px;
+      overflow-y: auto;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .protocol-item {
+      display: grid;
+      grid-template-columns: 32px 1fr auto auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.65rem;
+      border-radius: var(--border-radius);
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+    }
+
+    .protocol-item .badge {
       width: 28px;
       height: 28px;
-      background: var(--gray-100);
-      border-radius: 50%;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid var(--gray-200);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 0.75rem;
       font-weight: 600;
       color: var(--gray-600);
-      flex-shrink: 0;
     }
 
-    .instrument-name {
-      flex: 1;
-      font-size: 0.875rem;
+    .protocol-item .name {
+      font-size: 0.85rem;
+      font-weight: 500;
       color: var(--gray-700);
     }
 
-    .instrument-stat {
-      font-size: 0.75rem;
+    .protocol-item .stat {
+      font-size: 0.7rem;
       color: var(--gray-500);
-      padding: 4px 8px;
-      background: var(--gray-100);
-      border-radius: 4px;
+      background: white;
+      border: 1px solid var(--gray-200);
+      padding: 3px 8px;
+      border-radius: 999px;
+      text-align: center;
+      min-width: 58px;
     }
+
+    /* Needs Attention */
+    .attention-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .attention-item {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+      padding: 0.75rem;
+      background: var(--gray-50);
+      border-radius: var(--border-radius);
+      border: 1px solid var(--gray-200);
+    }
+
+    .attention-badge {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 999px;
+      text-transform: uppercase;
+    }
+
+    .attention-badge.critical { background: rgba(239, 68, 68, 0.15); color: var(--danger-color); }
+    .attention-badge.warning { background: rgba(245, 158, 11, 0.15); color: var(--warning-color); }
+    .attention-badge.info { background: rgba(6, 182, 212, 0.15); color: var(--info-color); }
+    .attention-badge.neutral { background: var(--gray-200); color: var(--gray-600); }
+
+    /* Comparison Table */
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      text-align: left;
+      padding: 0.75rem 0.5rem;
+      border-bottom: 1px solid var(--gray-200);
+    }
+
+    .comparison-table th {
+      color: var(--gray-500);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+    }
+
+    /* Status Pill */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .status-pill.success { background: rgba(16, 185, 129, 0.15); color: var(--success-color); }
+    .status-pill.warning { background: rgba(245, 158, 11, 0.15); color: var(--warning-color); }
+    .status-pill.danger { background: rgba(239, 68, 68, 0.15); color: var(--danger-color); }
+    .status-pill.neutral { background: var(--gray-200); color: var(--gray-600); }
 
     /* Quick Links */
     .quick-links {
@@ -538,15 +799,15 @@
         padding: 1rem;
       }
 
-      .hero {
+      .snapshot {
         padding: 1.5rem;
       }
 
-      .hero h2 {
-        font-size: 1.25rem;
+      .snapshot-title h2 {
+        font-size: 1.4rem;
       }
 
-      .stats-grid {
+      .kpi-grid {
         grid-template-columns: 1fr 1fr;
       }
 
@@ -554,13 +815,13 @@
         font-size: 1.75rem;
       }
 
-      .site-comparison {
+      .trend-row {
         grid-template-columns: 1fr;
       }
     }
 
     @media (max-width: 480px) {
-      .stats-grid {
+      .kpi-grid {
         grid-template-columns: 1fr;
       }
 
@@ -604,88 +865,148 @@
 
   <!-- Main Content -->
   <main class="main-content">
-    <!-- Hero Section -->
-    <section class="hero">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
-        <div>
-          <h2>Cross-Site Research Operations</h2>
-          <p>Monitor and standardize participant progress across the University of Georgia (UGA) and University of Missouri (Mizzou) research sites.</p>
-        </div>
-        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <label for="publicSiteFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Site:</label>
-            <select id="publicSiteFilter" onchange="handlePublicSiteFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
-              <option value="All">All Sites</option>
-              <option value="UGA">UGA</option>
-              <option value="Missouri">Missouri</option>
-            </select>
-          </div>
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <label for="publicRolloutFilter" style="font-size: 0.875rem; font-weight: 500; color: var(--gray-600);">Rollout:</label>
-            <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()" style="padding: 0.5rem 1rem; border: 1px solid var(--gray-300); border-radius: var(--border-radius); font-size: 0.875rem; background: white; cursor: pointer;">
-              <option value="All">All cohorts</option>
-            </select>
-          </div>
+    <!-- Study Snapshot -->
+    <section class="snapshot" id="studySnapshot">
+      <div class="snapshot-header">
+        <div class="snapshot-title">
+          <h2>Study Snapshot</h2>
+          <p>Research-grade view of study health, enrollment, and protocol completion across active sites.</p>
         </div>
       </div>
+      <div class="snapshot-filters">
+        <div class="filter-group">
+          <label for="publicSiteFilter">Site</label>
+          <select id="publicSiteFilter" onchange="handlePublicSiteFilterChange()">
+            <option value="All">All Sites</option>
+            <option value="UGA">UGA</option>
+            <option value="Missouri">Missouri</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="publicRolloutFilter">Study Cohort</label>
+          <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()">
+            <option value="All">All Study Cohorts</option>
+          </select>
+        </div>
+      </div>
+      <div class="snapshot-context" id="snapshotContext">Loading snapshot context...</div>
+      <div class="snapshot-meta" id="snapshotMeta"></div>
     </section>
 
-    <!-- Stats Grid -->
-    <section class="stats-grid" id="statsGrid">
+    <!-- Key Health Metrics -->
+    <section class="kpi-grid" id="kpiGrid">
       <div class="loading">
         <div class="spinner"></div>
       </div>
     </section>
 
-    <!-- Main Content Grid -->
-    <div class="content-grid">
-      <!-- Left Column -->
-      <div>
-        <!-- Instrument Completion -->
-        <div class="card" style="margin-bottom: 2rem;">
-          <div class="card-header">
-            <h3 class="card-title">
-              <span class="material-icons">checklist</span>
-              Protocol Checklist Progress
-            </h3>
-          </div>
-          <div class="card-body">
-            <div class="instrument-preview" id="instrumentProgress">
-              <div class="loading">
-                <div class="spinner"></div>
-              </div>
-            </div>
-          </div>
+    <!-- Attendance Insights -->
+    <section class="section">
+      <div class="section-header">
+        <h3>Attendance Insights</h3>
+        <div class="section-actions">
+          <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
+            <span class="material-icons" style="font-size: 16px;">event_available</span>
+            View Attendance Reports
+          </a>
         </div>
-
-        <!-- Site Comparison -->
+      </div>
+      <div class="insights-grid">
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">
-              <span class="material-icons">compare_arrows</span>
-              Site Comparison
-            </h3>
-          </div>
-          <div class="card-body">
-            <div class="site-comparison" id="siteComparison">
-              <div class="site-card uga">
-                <div class="site-name">UGA</div>
-                <div class="site-value" id="ugaCount">-</div>
-                <div class="site-detail">Participants</div>
+            <div>
+              <div class="card-title">
+                <span class="material-icons">timeline</span>
+                Session Attendance Trend
               </div>
-              <div class="site-card missouri">
-                <div class="site-name">Missouri</div>
-                <div class="site-value" id="missouriCount">-</div>
-                <div class="site-detail">Participants</div>
-              </div>
+              <div class="card-subtitle">Attendance by session (present vs absent/unmarked)</div>
             </div>
+          </div>
+          <div class="card-body" id="attendanceTrend">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">
+                <span class="material-icons">stacked_bar_chart</span>
+                Attendance Distribution
+              </div>
+              <div class="card-subtitle">Participant attendance bands</div>
+            </div>
+          </div>
+          <div class="card-body" id="attendanceDistribution">
+            <div class="loading"><div class="spinner"></div></div>
           </div>
         </div>
       </div>
+    </section>
 
-      <!-- Right Column -->
+    <!-- Protocol Overview & Needs Attention -->
+    <section class="section-grid equal">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">fact_check</span>
+              Protocol Overview
+            </div>
+            <div class="card-subtitle">Completion summary and checklist progress</div>
+          </div>
+          <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
+            <span class="material-icons" style="font-size: 16px;">arrow_forward</span>
+            View Protocol Details
+          </a>
+        </div>
+        <div class="card-body">
+          <div class="protocol-summary" id="protocolSummary">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+          <div class="protocol-progress">
+            <h4>
+              <span class="material-icons" style="font-size: 18px; color: var(--primary-color);">playlist_add_check</span>
+              Protocol Checklist Progress
+            </h4>
+            <div class="protocol-list" id="protocolChecklist"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">notification_important</span>
+              Needs Attention
+            </div>
+            <div class="card-subtitle">Actionable alerts for the research team</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="attention-list" id="needsAttention">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison & Actions -->
+    <section class="section-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">compare</span>
+              <span id="comparisonTitle">Comparison</span>
+            </div>
+            <div class="card-subtitle">Site or cohort comparison based on filters</div>
+          </div>
+        </div>
+        <div class="card-body" id="comparisonPanel">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
       <div>
-        <!-- Quick Links -->
         <div class="card" style="margin-bottom: 2rem;">
           <div class="card-header">
             <h3 class="card-title">
@@ -703,66 +1024,53 @@
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
-                <span class="material-icons">edit_note</span>
+                <span class="material-icons">how_to_reg</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Update Milestones</div>
-                  <div class="quick-link-desc">Mark instruments as completed</div>
+                  <div class="quick-link-title">Mark Attendance</div>
+                  <div class="quick-link-desc">Update attendance for upcoming sessions</div>
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
-                <span class="material-icons">analytics</span>
+                <span class="material-icons">task</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">View Reports & Exports</div>
-                  <div class="quick-link-desc">Cross-site analytics and CSV downloads</div>
+                  <div class="quick-link-title">Update Protocol Checklist</div>
+                  <div class="quick-link-desc">Record completed instruments and notes</div>
+                </div>
+              </a>
+              <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
+                <span class="material-icons">assessment</span>
+                <div class="quick-link-text">
+                  <div class="quick-link-title">Data Exports & Reports</div>
+                  <div class="quick-link-desc">Access analytics, CSV, and reporting tools</div>
                 </div>
               </a>
               <a href="<?= ScriptApp.getService().getUrl() ?>?page=login" class="quick-link">
                 <span class="material-icons">groups</span>
                 <div class="quick-link-text">
-                  <div class="quick-link-title">Manage Cohorts/Rollouts</div>
-                  <div class="quick-link-desc">Set up study cohorts and schedules</div>
+                  <div class="quick-link-title">Manage Study Cohorts</div>
+                  <div class="quick-link-desc">Set up cohort schedules and rosters</div>
                 </div>
               </a>
             </div>
           </div>
         </div>
 
-        <!-- About Section -->
         <div class="card" id="about">
           <div class="card-header">
             <h3 class="card-title">
               <span class="material-icons">school</span>
-              About G4G
+              About the Study
             </h3>
           </div>
           <div class="card-body">
-            <p style="font-size: 0.875rem; color: var(--gray-600); margin-bottom: 1rem;">
-              Gaming4Good (G4G) is a grant-funded research project engaging neurodiverse learners in video game design activities.
+            <p style="font-size: 0.85rem; color: var(--gray-600); margin-bottom: 1rem;">
+              Gaming4Good (G4G) is a multi-site research initiative advancing neurodiverse learning through game design.
             </p>
-            <div class="progress-list">
-              <div class="progress-item">
-                <div class="progress-header">
-                  <span class="progress-label">Research Sites</span>
-                  <span class="progress-value">2 Active</span>
-                </div>
-              </div>
-              <div class="progress-item">
-                <div class="progress-header">
-                  <span class="progress-label">Protocol Items</span>
-                  <span class="progress-value">18 Required</span>
-                </div>
-              </div>
-              <div class="progress-item">
-                <div class="progress-header">
-                  <span class="progress-label">Platform</span>
-                  <span class="progress-value">Nintendo Switch</span>
-                </div>
-              </div>
-            </div>
+            <div id="aboutSummary" class="progress-list"></div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   </main>
 
   <!-- Footer -->
@@ -790,7 +1098,7 @@
       }
 
       loadPublicRollouts(currentPublicSiteFilter);
-      loadDashboardStats();
+      loadLandingSnapshot();
     });
 
     // ============================================
@@ -798,14 +1106,14 @@
     // ============================================
     function handlePublicSiteFilterChange() {
       currentPublicSiteFilter = document.getElementById('publicSiteFilter').value;
-      currentPublicRolloutFilter = 'All'; // Reset rollout filter when site changes
+      currentPublicRolloutFilter = 'All'; // Reset cohort filter when site changes
       loadPublicRollouts(currentPublicSiteFilter);
-      loadDashboardStats();
+      loadLandingSnapshot();
     }
 
     function handlePublicRolloutFilterChange() {
       currentPublicRolloutFilter = document.getElementById('publicRolloutFilter').value;
-      loadDashboardStats();
+      loadLandingSnapshot();
     }
 
     function loadPublicRollouts(siteFilter) {
@@ -815,123 +1123,356 @@
           if (!rolloutSelect) return;
 
           // Clear existing options
-          rolloutSelect.innerHTML = '<option value="All">All cohorts</option>';
+          rolloutSelect.innerHTML = '<option value="All">All Study Cohorts</option>';
 
-          if (result.success && result.rollouts && result.rollouts.length > 0) {
-            result.rollouts.forEach(function(rollout) {
+          if (result.success && result.cohorts && result.cohorts.length > 0) {
+            result.cohorts.forEach(function(cohort) {
               const option = document.createElement('option');
-              option.value = rollout.rolloutId;
-              option.textContent = rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')';
+              option.value = cohort.rolloutId;
+              option.textContent = cohort.schoolName + ' (' + cohort.period + ' ' + cohort.year + ')';
               if (siteFilter === 'All') {
-                option.textContent += ' - ' + rollout.site;
+                option.textContent += ' - ' + cohort.site;
               }
               rolloutSelect.appendChild(option);
             });
           }
         })
         .withFailureHandler(function(error) {
-          console.error('Error loading rollouts:', error);
+          console.error('Error loading cohorts:', error);
         })
         .getPublicRollouts(siteFilter);
     }
 
     // ============================================
-    // LOAD DASHBOARD STATISTICS
+    // LOAD LANDING SNAPSHOT
     // ============================================
-    function loadDashboardStats() {
-      // Show loading state
-      document.getElementById('statsGrid').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    function loadLandingSnapshot() {
+      document.getElementById('kpiGrid').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      document.getElementById('attendanceTrend').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      document.getElementById('attendanceDistribution').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      document.getElementById('protocolSummary').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      document.getElementById('needsAttention').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      document.getElementById('comparisonPanel').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
       google.script.run
-        .withSuccessHandler(renderStats)
+        .withSuccessHandler(renderLandingSnapshot)
         .withFailureHandler(handleError)
-        .getPublicDashboardStats(currentPublicSiteFilter, currentPublicRolloutFilter);
+        .getPublicLandingSnapshot(currentPublicSiteFilter, currentPublicRolloutFilter);
     }
 
-    function renderStats(stats) {
-      // Render stats cards with filter info
-      let filterInfo = '';
-      if (stats.currentRollout) {
-        filterInfo = `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; background: var(--primary-color); color: white; border-radius: var(--border-radius); margin-bottom: 1rem;">
-          Showing data for: <strong>${stats.currentRollout.schoolName}</strong> (${stats.currentRollout.period} ${stats.currentRollout.year}) - ${stats.currentRollout.site}
-        </div>`;
+    function renderLandingSnapshot(result) {
+      if (!result || !result.success) {
+        handleError(result && result.message ? result.message : 'Unable to load snapshot.');
+        return;
       }
 
+      const snapshot = result.snapshot;
+      const metaDate = snapshot.meta && snapshot.meta.generatedAt
+        ? new Date(snapshot.meta.generatedAt).toLocaleString()
+        : new Date().toLocaleString();
+
+      document.getElementById('snapshotContext').textContent = snapshot.contextLine || 'Showing data for selected filters';
+      document.getElementById('snapshotMeta').innerHTML = `
+        <span>Last updated: ${metaDate}</span>
+        <span>Export ready: ${snapshot.meta && snapshot.meta.exportReady ? 'Yes' : 'No'}</span>
+      `;
+
+      renderKpis(snapshot.kpis, snapshot.attendance);
+      renderAttendanceTrend(snapshot.attendance);
+      renderAttendanceDistribution(snapshot.attendance);
+      renderProtocolSummary(snapshot.protocol);
+      renderNeedsAttention(snapshot.attention);
+      renderComparison(snapshot.comparison);
+      renderAboutSummary(snapshot.about);
+    }
+
+    function renderKpis(kpis, attendance) {
+      const statusTone = attendance.participationStatus.tone || 'neutral';
       const statsHtml = `
-        ${filterInfo}
-        <div class="stat-card primary">
+        <div class="stat-card ${statusTone}">
           <div class="stat-card-header">
             <div class="stat-card-icon">
-              <span class="material-icons">groups</span>
+              <span class="material-icons">monitor_heart</span>
             </div>
           </div>
-          <div class="stat-value">${stats.totalParticipants || 0}</div>
-          <div class="stat-label">Total Enrolled</div>
-        </div>
-
-        <div class="stat-card success">
-          <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">person</span>
-            </div>
+          <div class="stat-value">${attendance.participationStatus.label}</div>
+          <div class="stat-label">Participation Health</div>
+          <div class="stat-trend ${statusTone}">
+            ${attendance.participationStatus.subtitle}
           </div>
-          <div class="stat-value">${stats.activeParticipants || 0}</div>
-          <div class="stat-label">Active Participants</div>
         </div>
-
         <div class="stat-card info">
           <div class="stat-card-header">
             <div class="stat-card-icon">
-              <span class="material-icons">trending_up</span>
+              <span class="material-icons">percent</span>
             </div>
           </div>
-          <div class="stat-value">${stats.overallCompletion || 0}%</div>
-          <div class="stat-label">Overall Completion Rate</div>
+          <div class="stat-value">${kpis.averageAttendance || 0}%</div>
+          <div class="stat-label">Average Attendance Rate</div>
+          <div class="stat-trend">Across enrolled participants</div>
         </div>
-
         <div class="stat-card warning">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">priority_high</span>
+            </div>
+          </div>
+          <div class="stat-value">${kpis.atRiskParticipants || 0}</div>
+          <div class="stat-label">At-Risk Participants</div>
+          <div class="stat-trend">Below 70% attendance</div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">check_circle</span>
+            </div>
+          </div>
+          <div class="stat-value">${kpis.protocolCompletionRate || 0}%</div>
+          <div class="stat-label">Protocol Completion Rate</div>
+          <div class="stat-trend">Across required items</div>
+        </div>
+        <div class="stat-card primary">
           <div class="stat-card-header">
             <div class="stat-card-icon">
               <span class="material-icons">event</span>
             </div>
           </div>
-          <div class="stat-value">${stats.activeRollouts || 0}</div>
-          <div class="stat-label">Active Cohorts</div>
+          <div class="stat-value">${kpis.sessionsCompleted || 0} / ${kpis.totalSessions || 0}</div>
+          <div class="stat-label">Sessions Progress</div>
+          <div class="stat-trend">Current cohort schedule</div>
+        </div>
+        <div class="stat-card info">
+          <div class="stat-card-header">
+            <div class="stat-card-icon">
+              <span class="material-icons">groups</span>
+            </div>
+          </div>
+          <div class="stat-value">${kpis.totalEnrolled || 0}</div>
+          <div class="stat-label">Total Enrolled Participants</div>
+          <div class="stat-trend">Currently enrolled</div>
         </div>
       `;
 
-      document.getElementById('statsGrid').innerHTML = statsHtml;
+      document.getElementById('kpiGrid').innerHTML = statsHtml;
+    }
 
-      // Render site comparison
-      document.getElementById('ugaCount').textContent = stats.ugaParticipants || 0;
-      document.getElementById('missouriCount').textContent = stats.missouriParticipants || 0;
+    function renderAttendanceTrend(attendance) {
+      if (!attendance.trendAvailable) {
+        document.getElementById('attendanceTrend').innerHTML =
+          '<p style="color: var(--gray-500); text-align: center;">Select a Study Cohort to view session attendance trends.</p>';
+        return;
+      }
 
-      // Render instrument progress
-      if (stats.instrumentStats && stats.instrumentStats.length > 0) {
-        let instrumentHtml = '';
-        stats.instrumentStats.forEach(inst => {
-          const colorClass = inst.percentage >= 80 ? 'success' :
-                            inst.percentage >= 50 ? 'warning' : 'primary';
-          instrumentHtml += `
-            <div class="instrument-item">
-              <div class="instrument-number">${inst.number}</div>
-              <div class="instrument-name">${inst.name}</div>
-              <div class="instrument-stat">${inst.completed || 0}/${inst.total || 0}</div>
-              <div class="instrument-stat">${inst.percentage}%</div>
+      if (!attendance.trend || attendance.trend.length === 0) {
+        document.getElementById('attendanceTrend').innerHTML =
+          '<p style="color: var(--gray-500); text-align: center;">No attendance data available yet.</p>';
+        return;
+      }
+
+      const trendRows = attendance.trend.map(session => {
+        const total = session.present + session.absent + session.excused + session.notMarked;
+        const presentPercent = total > 0 ? Math.round((session.present / total) * 100) : 0;
+        const absentPercent = 100 - presentPercent;
+        return `
+          <div class="trend-row">
+            <div class="trend-label">${session.label}</div>
+            <div class="trend-bar">
+              <span class="trend-present" style="width: ${presentPercent}%;"></span>
+              <span class="trend-absent" style="width: ${absentPercent}%;"></span>
             </div>
-          `;
-        });
-        document.getElementById('instrumentProgress').innerHTML = instrumentHtml;
+            <div class="trend-rate">${session.attendanceRate}%</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('attendanceTrend').innerHTML = `<div class="trend-list">${trendRows}</div>`;
+    }
+
+    function renderAttendanceDistribution(attendance) {
+      if (!attendance.distribution || attendance.distribution.total === 0) {
+        document.getElementById('attendanceDistribution').innerHTML =
+          '<p style="color: var(--gray-500); text-align: center;">No attendance distribution available yet.</p>';
+        return;
+      }
+
+      const total = attendance.distribution.total;
+      const rows = [
+        { label: '90–100%', value: attendance.distribution.high, className: 'high' },
+        { label: '70–89%', value: attendance.distribution.mid, className: 'mid' },
+        { label: '<70%', value: attendance.distribution.low, className: 'low' }
+      ];
+
+      const html = rows.map(row => {
+        const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
+        return `
+          <div class="band-row">
+            <div class="trend-label">${row.label}</div>
+            <div class="band-bar">
+              <div class="band-fill ${row.className}" style="width: ${percent}%;"></div>
+            </div>
+            <div class="trend-rate">${row.value}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('attendanceDistribution').innerHTML = `<div class="band-list">${html}</div>`;
+    }
+
+    function renderProtocolSummary(protocol) {
+      if (!protocol) {
+        document.getElementById('protocolSummary').innerHTML =
+          '<p style="color: var(--gray-500); text-align: center;">No protocol data available yet.</p>';
+        return;
+      }
+
+      const summaryHtml = `
+        <div class="protocol-metrics">
+          <div class="metric-tile">
+            <h4>${protocol.requiredItems}</h4>
+            <span>Required items</span>
+          </div>
+          <div class="metric-tile">
+            <h4>${protocol.completedItems}</h4>
+            <span>Completed items</span>
+          </div>
+          <div class="metric-tile">
+            <h4>${protocol.completionRate}%</h4>
+            <span>Protocol completion rate</span>
+          </div>
+          <div class="metric-tile">
+            <h4>${protocol.needsReviewCount}</h4>
+            <span>Items below 50%</span>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('protocolSummary').innerHTML = summaryHtml;
+
+      const checklistContainer = document.getElementById('protocolChecklist');
+      if (!checklistContainer) {
+        return;
+      }
+
+      if (protocol.instrumentStats && protocol.instrumentStats.length > 0) {
+        const checklistHtml = protocol.instrumentStats.map(item => `
+          <div class="protocol-item">
+            <div class="badge">${item.number}</div>
+            <div class="name">${item.name}</div>
+            <div class="stat">${item.completed}/${item.total}</div>
+            <div class="stat">${item.percentage}%</div>
+          </div>
+        `).join('');
+        checklistContainer.innerHTML = checklistHtml;
       } else {
-        document.getElementById('instrumentProgress').innerHTML =
-          '<p style="text-align: center; color: var(--gray-500); padding: 2rem;">No data available yet. Enroll participants to see progress.</p>';
+        checklistContainer.innerHTML =
+          '<p style="color: var(--gray-500); font-size: 0.85rem;">No protocol completion data available.</p>';
       }
     }
 
+    function renderNeedsAttention(items) {
+      if (!items || items.length === 0) {
+        document.getElementById('needsAttention').innerHTML =
+          '<p style="color: var(--gray-500); text-align: center;">No critical items detected for this filter.</p>';
+        return;
+      }
+
+      const html = items.map(item => `
+        <div class="attention-item">
+          <span class="attention-badge ${item.severity}">${item.severity}</span>
+          <div>
+            <div style="font-weight: 600; color: var(--gray-800);">${item.message}</div>
+            <div class="card-subtitle">${item.action}</div>
+          </div>
+        </div>
+      `).join('');
+
+      document.getElementById('needsAttention').innerHTML = html;
+    }
+
+    function renderComparison(comparison) {
+      document.getElementById('comparisonTitle').textContent = comparison.title || 'Comparison';
+      if (!comparison.entries || comparison.entries.length === 0) {
+        document.getElementById('comparisonPanel').innerHTML =
+          `<p style="color: var(--gray-500); text-align: center;">${comparison.emptyMessage || 'No comparison data available.'}</p>`;
+        return;
+      }
+
+      const rows = comparison.entries.map(entry => `
+        <tr>
+          <td>${entry.label}</td>
+          <td>${entry.participants}</td>
+          <td>${entry.averageAttendance}%</td>
+          <td>${entry.protocolCompletion}%</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('comparisonPanel').innerHTML = `
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Participants</th>
+              <th>Avg Attendance</th>
+              <th>Protocol Completion</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderAboutSummary(about) {
+      if (!about) return;
+      document.getElementById('aboutSummary').innerHTML = `
+        <div class="progress-item">
+          <div class="progress-header">
+            <span class="progress-label">Research Sites</span>
+            <span class="progress-value">${about.siteCount} Active</span>
+          </div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-header">
+            <span class="progress-label">Study Cohorts</span>
+            <span class="progress-value">${about.cohortCount}</span>
+          </div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-header">
+            <span class="progress-label">Protocol Items</span>
+            <span class="progress-value">${about.protocolItems} Required</span>
+          </div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-header">
+            <span class="progress-label">Total Enrolled Participants</span>
+            <span class="progress-value">${about.totalParticipants}</span>
+          </div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-header">
+            <span class="progress-label">Platform</span>
+            <span class="progress-value">${about.platform}</span>
+          </div>
+        </div>
+      `;
+    }
+
     function handleError(error) {
-      console.error('Error loading stats:', error);
-      document.getElementById('statsGrid').innerHTML =
-        '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load statistics. Please refresh the page.</p>';
+      console.error('Error loading snapshot:', error);
+      document.getElementById('kpiGrid').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load dashboard snapshot. Please refresh the page.</p>';
+      document.getElementById('attendanceTrend').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
+      document.getElementById('attendanceDistribution').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
+      document.getElementById('protocolSummary').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Protocol insights unavailable.</p>';
+      document.getElementById('needsAttention').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Unable to load attention summary.</p>';
+      document.getElementById('comparisonPanel').innerHTML =
+        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Comparison data unavailable.</p>';
     }
   </script>
 </body>
