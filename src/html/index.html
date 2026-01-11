@@ -584,9 +584,68 @@
       color: var(--gray-500);
     }
 
-    .protocol-low-list {
+    .protocol-progress {
+      margin-top: 1.25rem;
+      border-top: 1px solid var(--gray-200);
+      padding-top: 1rem;
+    }
+
+    .protocol-progress h4 {
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+      color: var(--gray-800);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .protocol-list {
+      max-height: 280px;
+      overflow-y: auto;
       display: grid;
       gap: 0.5rem;
+    }
+
+    .protocol-item {
+      display: grid;
+      grid-template-columns: 32px 1fr auto auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.65rem;
+      border-radius: var(--border-radius);
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+    }
+
+    .protocol-item .badge {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--gray-600);
+    }
+
+    .protocol-item .name {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--gray-700);
+    }
+
+    .protocol-item .stat {
+      font-size: 0.7rem;
+      color: var(--gray-500);
+      background: white;
+      border: 1px solid var(--gray-200);
+      padding: 3px 8px;
+      border-radius: 999px;
+      text-align: center;
+      min-width: 58px;
     }
 
     /* Needs Attention */
@@ -893,7 +952,7 @@
               <span class="material-icons">fact_check</span>
               Protocol Overview
             </div>
-            <div class="card-subtitle">Completion summary and lowest-performing items</div>
+            <div class="card-subtitle">Completion summary and checklist progress</div>
           </div>
           <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
             <span class="material-icons" style="font-size: 16px;">arrow_forward</span>
@@ -904,7 +963,13 @@
           <div class="protocol-summary" id="protocolSummary">
             <div class="loading"><div class="spinner"></div></div>
           </div>
-          <div class="protocol-low-list" id="protocolLows"></div>
+          <div class="protocol-progress">
+            <h4>
+              <span class="material-icons" style="font-size: 18px; color: var(--primary-color);">playlist_add_check</span>
+              Protocol Checklist Progress
+            </h4>
+            <div class="protocol-list" id="protocolChecklist"></div>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -919,6 +984,9 @@
         </div>
         <div class="card-body">
           <div class="attention-list" id="needsAttention">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+          <div class="card-body" id="attendanceDistribution">
             <div class="loading"><div class="spinner"></div></div>
           </div>
         </div>
@@ -1283,19 +1351,23 @@
 
       document.getElementById('protocolSummary').innerHTML = summaryHtml;
 
-      if (protocol.lowestItems && protocol.lowestItems.length > 0) {
-        const lows = protocol.lowestItems.map(item => `
-          <div class="attention-item">
-            <span class="attention-badge neutral">Low</span>
-            <div>
-              <div style="font-weight: 600;">${item.name}</div>
-              <div class="card-subtitle">${item.percentage}% completion (${item.completed}/${item.total})</div>
-            </div>
+      const checklistContainer = document.getElementById('protocolChecklist');
+      if (!checklistContainer) {
+        return;
+      }
+
+      if (protocol.instrumentStats && protocol.instrumentStats.length > 0) {
+        const checklistHtml = protocol.instrumentStats.map(item => `
+          <div class="protocol-item">
+            <div class="badge">${item.number}</div>
+            <div class="name">${item.name}</div>
+            <div class="stat">${item.completed}/${item.total}</div>
+            <div class="stat">${item.percentage}%</div>
           </div>
         `).join('');
-        document.getElementById('protocolLows').innerHTML = lows;
+        checklistContainer.innerHTML = checklistHtml;
       } else {
-        document.getElementById('protocolLows').innerHTML =
+        checklistContainer.innerHTML =
           '<p style="color: var(--gray-500); font-size: 0.85rem;">No protocol completion data available.</p>';
       }
     }

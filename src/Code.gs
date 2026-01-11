@@ -3403,6 +3403,7 @@ function buildProtocolSummary(participants, checklistSheet) {
     const counts = instrumentCounts[inst.number];
     const percentage = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
     return {
+      number: inst.number,
       name: inst.name,
       total: counts.total,
       completed: counts.completed,
@@ -3422,6 +3423,7 @@ function buildProtocolSummary(participants, checklistSheet) {
     totalRequired: totalRequired,
     completedItems: totalCompleted,
     completionRate: completionRate,
+    instrumentStats: instrumentStats,
     lowestItems: lowestItems,
     needsReviewCount: needsReviewCount
   };
