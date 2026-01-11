@@ -3407,6 +3407,7 @@ function exportAttendanceCSV(token, filters) {
   };
 
   const sessionSummaryRows = [];
+  const rowsByRollout = {};
   rolloutEntries.forEach(rollout => {
     const sessions = (sessionsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => a.sessionNumber - b.sessionNumber);
     const participants = (participantsByRollout[rollout.rolloutId] || []).slice().sort((a, b) => {
@@ -3416,6 +3417,8 @@ function exportAttendanceCSV(token, filters) {
     sessions.forEach(session => {
       sessionMap[session.sessionNumber] = session.sessionId;
     });
+    const sessionCount = sessions.reduce((count, session) => Math.max(count, session.sessionNumber || 0), 0);
+    rowsByRollout[rollout.rolloutId] = [];
 
     // Assumption: if a participant has no attendance record for a session, count as Absent.
     sessions.forEach(session => {
@@ -3442,7 +3445,7 @@ function exportAttendanceCSV(token, filters) {
       const missedLabels = [];
       const sessionValues = [];
 
-      for (let i = 1; i <= maxSessionCount; i++) {
+      for (let i = 1; i <= sessionCount; i++) {
         if (!sessionMap[i]) {
           sessionValues.push('');
           continue;
@@ -3472,7 +3475,7 @@ function exportAttendanceCSV(token, filters) {
       else if (attendanceRate >= 70) bandCounts.mid++;
       else bandCounts.low++;
 
-      rows.push([
+      const row = [
         participant.fullName || '',
         participant.participantId || '',
         participant.site || rollout.site || '',
@@ -3483,7 +3486,10 @@ function exportAttendanceCSV(token, filters) {
         missedCount,
         attendanceRate + '%',
         missedLabels.length > 0 ? missedLabels.join(', ') : ''
-      ]);
+      ];
+
+      rows.push(row);
+      rowsByRollout[rollout.rolloutId].push(row);
     });
   });
 
@@ -3646,7 +3652,7 @@ function exportAttendanceCSV(token, filters) {
         sheet.setName(sheetName);
       }
 
-      const sheetRows = rows.filter(row => row[3] === `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
+      const sheetRows = rowsByRollout[rollout.rolloutId] || [];
       const sheetSessionSummary = sessionSummaryRows.filter(row => row[0] === `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
       const sessionCount = (sessionsByRollout[rollout.rolloutId] || []).reduce((count, session) => {
         return Math.max(count, session.sessionNumber || 0);
@@ -3655,7 +3661,12 @@ function exportAttendanceCSV(token, filters) {
       renderAttendanceSheet(targetSheet, sheetRows, sheetSessionSummary, sessionCount, `${rollout.schoolName || 'Rollout'} (${rollout.period || ''} ${rollout.year || ''})`.replace(/\s+/g, ' ').trim());
     });
   } else {
-    renderAttendanceSheet(sheet, rows, sessionSummaryRows, maxSessionCount, rolloutLabel);
+    const rollout = rolloutEntries[0];
+    const sheetRows = rollout ? (rowsByRollout[rollout.rolloutId] || rows) : rows;
+    const sessionCount = rollout ? (sessionsByRollout[rollout.rolloutId] || []).reduce((count, session) => {
+      return Math.max(count, session.sessionNumber || 0);
+    }, 0) : maxSessionCount;
+    renderAttendanceSheet(sheet, sheetRows, sessionSummaryRows, sessionCount, rolloutLabel);
   }
 
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
