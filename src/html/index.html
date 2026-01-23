@@ -1100,6 +1100,7 @@
     // ============================================
     // GLOBAL STATE
     // ============================================
+    const WEB_APP_URL = '<?= ScriptApp.getService().getUrl() ?>';
     let currentPublicSiteFilter = 'All';
     let currentPublicRolloutFilter = 'All';
 
@@ -1107,6 +1108,14 @@
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('logout') === '1') {
+        history.replaceState({}, document.title, WEB_APP_URL);
+        setTimeout(function() {
+          window.location.reload();
+        }, 3000);
+      }
+
       const aboutStudyButton = document.getElementById('aboutStudyButton');
       if (aboutStudyButton) {
         aboutStudyButton.addEventListener('click', function() {
