@@ -512,36 +512,9 @@
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-      setupLogoutRefreshWatcher();
       sessionStorage.removeItem('g4g_token');
       sessionStorage.removeItem('g4g_user');
     });
-
-    let logoutRefreshTimer = null;
-
-    function setupLogoutRefreshWatcher() {
-      const storedLogoutAt = localStorage.getItem('g4g_logout_at');
-      if (storedLogoutAt) {
-        scheduleLogoutRefresh(parseInt(storedLogoutAt, 10));
-      }
-
-      window.addEventListener('storage', function(event) {
-        if (event.key === 'g4g_logout_at' && event.newValue) {
-          scheduleLogoutRefresh(parseInt(event.newValue, 10));
-        }
-      });
-    }
-
-    function scheduleLogoutRefresh(logoutAt) {
-      if (!logoutAt || Number.isNaN(logoutAt)) return;
-      if (logoutRefreshTimer) return;
-      const elapsed = Date.now() - logoutAt;
-      const delay = Math.max(0, 5000 - elapsed);
-      logoutRefreshTimer = setTimeout(function() {
-        localStorage.removeItem('g4g_logout_at');
-        window.location.reload();
-      }, delay);
-    }
   </script>
 </body>
 </html>
