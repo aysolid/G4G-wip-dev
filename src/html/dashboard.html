@@ -1095,6 +1095,7 @@
     let attendanceParticipantsCache = [];
     let attendanceParticipantsRolloutId = null;
     let attendanceReportSessionLookup = {};
+    let isLoggingOut = false;
 
     // ============================================
     // INITIALIZATION
@@ -1156,6 +1157,10 @@
     }
 
     function redirectToLogin() {
+      if (isLoggingOut) {
+        window.location.href = WEB_APP_URL + '?page=index';
+        return;
+      }
       sessionStorage.removeItem('g4g_token');
       sessionStorage.removeItem('g4g_user');
       window.location.href = WEB_APP_URL + '?page=login';
@@ -5413,6 +5418,7 @@
     }
 
     function handleLogout() {
+      isLoggingOut = true;
       // Invalidate server session
       google.script.run
         .withSuccessHandler(function() {
