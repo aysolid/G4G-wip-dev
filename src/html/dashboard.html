@@ -1751,12 +1751,12 @@
     }
 
     function renderParticipants(result) {
-      if (!result.success) {
+      if (!result || !result.success) {
         document.getElementById('participantsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
             <h3>Error loading participants</h3>
-            <p>${result.message}</p>
+            <p>${result && result.message ? result.message : 'Unable to load participants.'}</p>
           </div>
         `;
         return;

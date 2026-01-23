@@ -1698,6 +1698,20 @@ function getHeaderValue(row, headers, headerName) {
   return index === -1 ? '' : row[index];
 }
 
+function setCellAsPlainText(sheet, rowIndex, columnIndex, value) {
+  const range = sheet.getRange(rowIndex, columnIndex, 1, 1);
+  range.setNumberFormat('@');
+  range.setValue(value);
+}
+
+function appendParticipantRowAsText(participantsSheet, rowValues) {
+  const rowIndex = participantsSheet.getLastRow() + 1;
+  const range = participantsSheet.getRange(rowIndex, 1, 1, rowValues.length);
+  range.setNumberFormat('@');
+  range.setValues([rowValues]);
+  return rowIndex;
+}
+
 function normalizePhoneDigits(phone) {
   return (phone || '').toString().replace(/\D/g, '');
 }
@@ -1983,7 +1997,7 @@ function enrollParticipant(token, participantData) {
     notes: participantData.notes || '',
     completionPercentage: 0
   });
-  participantsSheet.appendRow(row);
+  appendParticipantRowAsText(participantsSheet, row);
 
   // Create checklist items for all 18 instruments
   CONFIG.INSTRUMENTS.forEach(instrument => {
@@ -2060,7 +2074,37 @@ function updateParticipant(token, participantId, participantData) {
       }
 
       if (participantData.fullName) {
-        participantsSheet.getRange(i + 1, headers.indexOf('fullName') + 1).setValue(participantData.fullName);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('fullName') + 1, participantData.fullName);
+      }
+      if (participantData.parentGuardianNames !== undefined) {
+        const idx = headers.indexOf('parent_guardian_names');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianNames);
+        }
+      }
+      if (participantData.parentGuardianPhone !== undefined) {
+        const idx = headers.indexOf('parent_guardian_phone');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentPhone);
+        }
+      }
+      if (participantData.parentGuardianAddress !== undefined) {
+        const idx = headers.indexOf('parent_guardian_address');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianAddress);
+        }
+      }
+      if (participantData.parentGuardianEmail !== undefined) {
+        const idx = headers.indexOf('parent_guardian_email');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentEmail);
+        }
+      }
+      if (participantData.parentGuardianDob !== undefined) {
+        const idx = headers.indexOf('parent_guardian_dob');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
+        }
       }
       if (participantData.parentGuardianNames !== undefined) {
         const idx = headers.indexOf('parent_guardian_names');
@@ -2083,10 +2127,10 @@ function updateParticipant(token, participantId, participantData) {
         if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(parentDob);
       }
       if (participantData.status) {
-        participantsSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(participantData.status);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
       }
       if (participantData.notes !== undefined) {
-        participantsSheet.getRange(i + 1, headers.indexOf('notes') + 1).setValue(participantData.notes);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('notes') + 1, participantData.notes);
       }
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT', 'participant', participantId,
@@ -2440,7 +2484,7 @@ function importParticipantsCSV(token, fileData) {
       notes: '',
       completionPercentage: 0
     });
-    participantsSheet.appendRow(rowValues);
+    appendParticipantRowAsText(participantsSheet, rowValues);
 
     CONFIG.INSTRUMENTS.forEach(instrument => {
       const checklistId = generateUUID();
@@ -2796,7 +2840,12 @@ function updateParticipantCompletion(participantId) {
 
   for (let i = 1; i < pData.length; i++) {
     if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
-      participantsSheet.getRange(i + 1, pHeaders.indexOf('completionPercentage') + 1).setValue(percentage);
+      setCellAsPlainText(
+        participantsSheet,
+        i + 1,
+        pHeaders.indexOf('completionPercentage') + 1,
+        percentage
+      );
       break;
     }
   }
