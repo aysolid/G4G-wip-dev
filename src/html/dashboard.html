@@ -1096,11 +1096,13 @@
     let attendanceParticipantsRolloutId = null;
     let attendanceReportSessionLookup = {};
     let isLoggingOut = false;
+    let logoutRefreshTimer = null;
 
     // ============================================
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      setupLogoutRefreshWatcher();
       initializeApp();
     });
 
@@ -1164,6 +1166,30 @@
       sessionStorage.removeItem('g4g_token');
       sessionStorage.removeItem('g4g_user');
       window.location.href = WEB_APP_URL + '?page=login';
+    }
+
+    function setupLogoutRefreshWatcher() {
+      const storedLogoutAt = localStorage.getItem('g4g_logout_at');
+      if (storedLogoutAt) {
+        scheduleLogoutRefresh(parseInt(storedLogoutAt, 10));
+      }
+
+      window.addEventListener('storage', function(event) {
+        if (event.key === 'g4g_logout_at' && event.newValue) {
+          scheduleLogoutRefresh(parseInt(event.newValue, 10));
+        }
+      });
+    }
+
+    function scheduleLogoutRefresh(logoutAt) {
+      if (!logoutAt || Number.isNaN(logoutAt)) return;
+      if (logoutRefreshTimer) return;
+      const elapsed = Date.now() - logoutAt;
+      const delay = Math.max(0, 5000 - elapsed);
+      logoutRefreshTimer = setTimeout(function() {
+        localStorage.removeItem('g4g_logout_at');
+        window.location.reload();
+      }, delay);
     }
 
     function applyRoleBasedAccess() {
@@ -5419,15 +5445,16 @@
 
     function handleLogout() {
       isLoggingOut = true;
+      localStorage.setItem('g4g_logout_at', Date.now().toString());
       // Invalidate server session
       google.script.run
         .withSuccessHandler(function() {
           // Redirect to landing page (index)
-          window.location.href = WEB_APP_URL + '?page=index&logout=1';
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .withFailureHandler(function() {
           // Even if server logout fails, still redirect to landing page
-          window.location.href = WEB_APP_URL + '?page=index&logout=1';
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .logoutUser(sessionToken);
     }
