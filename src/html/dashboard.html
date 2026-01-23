@@ -1095,18 +1095,23 @@
     let attendanceParticipantsCache = [];
     let attendanceParticipantsRolloutId = null;
     let attendanceReportSessionLookup = {};
+    let isLoggingOut = false;
+    let logoutRefreshTimer = null;
+    let enrollSubmitting = false;
 
     // ============================================
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      setupLogoutRefreshWatcher();
       initializeApp();
     });
 
     function initializeApp() {
-      // Get token from URL or localStorage
-      const urlParams = new URLSearchParams(window.location.search);
-      sessionToken = urlParams.get('token') || localStorage.getItem('g4g_token');
+      // Get token from session storage (single-use handoff from login)
+      sessionToken = sessionStorage.getItem('g4g_token');
+      sessionStorage.removeItem('g4g_token');
+      sessionStorage.removeItem('g4g_user');
 
       if (!sessionToken) {
         redirectToLogin();
@@ -1134,9 +1139,6 @@
       }
 
       currentUser = user;
-      localStorage.setItem('g4g_token', sessionToken);
-      localStorage.setItem('g4g_user', JSON.stringify(user));
-
       // Update UI with user info
       document.getElementById('userName').textContent = user.fullName;
       document.getElementById('userRole').textContent = user.role;
@@ -1158,9 +1160,37 @@
     }
 
     function redirectToLogin() {
-      localStorage.removeItem('g4g_token');
-      localStorage.removeItem('g4g_user');
+      if (isLoggingOut) {
+        window.location.href = WEB_APP_URL + '?page=index';
+        return;
+      }
+      sessionStorage.removeItem('g4g_token');
+      sessionStorage.removeItem('g4g_user');
       window.location.href = WEB_APP_URL + '?page=login';
+    }
+
+    function setupLogoutRefreshWatcher() {
+      const storedLogoutAt = localStorage.getItem('g4g_logout_at');
+      if (storedLogoutAt) {
+        scheduleLogoutRefresh(parseInt(storedLogoutAt, 10));
+      }
+
+      window.addEventListener('storage', function(event) {
+        if (event.key === 'g4g_logout_at' && event.newValue) {
+          scheduleLogoutRefresh(parseInt(event.newValue, 10));
+        }
+      });
+    }
+
+    function scheduleLogoutRefresh(logoutAt) {
+      if (!logoutAt || Number.isNaN(logoutAt)) return;
+      if (logoutRefreshTimer) return;
+      const elapsed = Date.now() - logoutAt;
+      const delay = Math.max(0, 5000 - elapsed);
+      logoutRefreshTimer = setTimeout(function() {
+        localStorage.removeItem('g4g_logout_at');
+        window.location.reload();
+      }, delay);
     }
 
     function applyRoleBasedAccess() {
@@ -1554,7 +1584,7 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Optional columns include parent/guardian fields. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
@@ -1898,6 +1928,28 @@
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Full Name</div>
                   <div style="font-weight: 600; font-size: 1.125rem;">${p.fullName}</div>
                 </div>
+                ${currentUser.role !== 'viewer' ? `
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Name(s)</div>
+                  <div>${p.parentGuardianNames || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Phone</div>
+                  <div>${p.parentGuardianPhone || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Address</div>
+                  <div>${p.parentGuardianAddress || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Email</div>
+                  <div>${p.parentGuardianEmail || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian DOB</div>
+                  <div>${p.parentGuardianDob || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                ` : ''}
                 <div>
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Site</div>
                   <div><span class="badge ${p.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${p.site}</span></div>
@@ -2043,6 +2095,26 @@
             <label class="form-label">Full Name *</label>
             <input type="text" class="form-input" id="editParticipantName" value="${participant.fullName}" placeholder="Enter full name">
           </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Name(s)</label>
+            <input type="text" class="form-input" id="editParentNames" value="${participant.parentGuardianNames || ''}" placeholder="Enter parent/guardian names (comma-separated if multiple)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Phone Number</label>
+            <input type="text" class="form-input" id="editParentPhone" value="${participant.parentGuardianPhone || ''}" placeholder="(706) 555-1234">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Residential Address</label>
+            <textarea class="form-textarea" id="editParentAddress" rows="3" placeholder="Enter parent/guardian address">${participant.parentGuardianAddress || ''}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Email Address</label>
+            <input type="email" class="form-input" id="editParentEmail" value="${participant.parentGuardianEmail || ''}" placeholder="parent@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Date of Birth</label>
+            <input type="date" class="form-input" id="editParentDob" value="${participant.parentGuardianDob || ''}">
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Site</label>
@@ -2086,8 +2158,17 @@
     }
 
     function saveParticipantEdit(participantId) {
+      const parentEmail = document.getElementById('editParentEmail').value.trim();
+      const parentDob = document.getElementById('editParentDob').value;
+      const parentPhone = document.getElementById('editParentPhone').value.trim();
+
       const data = {
         fullName: document.getElementById('editParticipantName').value.trim(),
+        parentGuardianNames: document.getElementById('editParentNames').value.trim(),
+        parentGuardianPhone: parentPhone,
+        parentGuardianAddress: document.getElementById('editParentAddress').value.trim(),
+        parentGuardianEmail: parentEmail,
+        parentGuardianDob: parentDob,
         notes: document.getElementById('editParticipantNotes').value.trim()
       };
 
@@ -2099,6 +2180,22 @@
       if (!data.fullName) {
         showToast('Please enter a name', 'error');
         return;
+      }
+
+      if (parentEmail && !isValidEmail(parentEmail)) {
+        showToast('Please enter a valid parent/guardian email address', 'error');
+        return;
+      }
+      if (parentDob && !isValidDate(parentDob)) {
+        showToast('Please enter a valid parent/guardian date of birth', 'error');
+        return;
+      }
+      if (parentPhone) {
+        const digits = normalizePhoneDigits(parentPhone);
+        if (digits.length < 10 || digits.length > 15) {
+          showToast('Parent/guardian phone number must include 10 to 15 digits', 'error');
+          return;
+        }
       }
 
       google.script.run
@@ -2497,6 +2594,37 @@
               <div class="form-group">
                 <label class="form-label">Participant Full Name *</label>
                 <input type="text" class="form-input" id="enrollName" required placeholder="Enter participant's full name">
+                <div class="form-error" id="enrollNameError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Name(s)</label>
+                <input type="text" class="form-input" id="enrollParentNames" placeholder="Enter parent/guardian names (comma-separated if multiple)">
+                <div class="form-error" id="enrollParentNamesError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Phone Number</label>
+                <input type="text" class="form-input" id="enrollParentPhone" placeholder="(706) 555-1234">
+                <div class="form-error" id="enrollParentPhoneError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Residential Address</label>
+                <textarea class="form-textarea" id="enrollParentAddress" rows="3" placeholder="Enter parent/guardian address"></textarea>
+                <div class="form-error" id="enrollParentAddressError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Email Address</label>
+                <input type="email" class="form-input" id="enrollParentEmail" placeholder="parent@example.com">
+                <div class="form-error" id="enrollParentEmailError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Date of Birth</label>
+                <input type="date" class="form-input" id="enrollParentDob">
+                <div class="form-error" id="enrollParentDobError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
               </div>
 
               <div class="form-row">
@@ -2507,12 +2635,14 @@
                     <option value="UGA">UGA</option>
                     <option value="Missouri">Missouri</option>
                   </select>
+                  <div class="form-error" id="enrollSiteError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">Study Cohort *</label>
                   <select class="form-select" id="enrollRollout" required disabled>
                     <option value="">Select site first...</option>
                   </select>
+                  <div class="form-error" id="enrollRolloutError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
                 </div>
               </div>
 
@@ -2584,13 +2714,62 @@
     function handleEnroll(event) {
       event.preventDefault();
 
+      if (enrollSubmitting) return;
+
+      clearEnrollErrors();
+
+      const parentEmail = document.getElementById('enrollParentEmail').value.trim();
+      const parentDob = document.getElementById('enrollParentDob').value;
+      const parentPhone = document.getElementById('enrollParentPhone').value.trim();
+
       const data = {
         fullName: document.getElementById('enrollName').value.trim(),
+        parentGuardianNames: document.getElementById('enrollParentNames').value.trim(),
+        parentGuardianPhone: parentPhone,
+        parentGuardianAddress: document.getElementById('enrollParentAddress').value.trim(),
+        parentGuardianEmail: parentEmail,
+        parentGuardianDob: parentDob,
         rolloutId: document.getElementById('enrollRollout').value,
         notes: document.getElementById('enrollNotes').value.trim()
       };
 
+      let hasError = false;
+      if (!data.fullName) {
+        setEnrollError('enrollNameError', 'Participant full name is required.');
+        hasError = true;
+      }
+      if (!document.getElementById('enrollSite').value) {
+        setEnrollError('enrollSiteError', 'Site is required.');
+        hasError = true;
+      }
+      if (!data.rolloutId) {
+        setEnrollError('enrollRolloutError', 'Study cohort is required.');
+        hasError = true;
+      }
+
+      if (parentEmail && !isValidEmail(parentEmail)) {
+        setEnrollError('enrollParentEmailError', 'Please enter a valid email address.');
+        hasError = true;
+      }
+      if (parentDob && !isValidDate(parentDob)) {
+        setEnrollError('enrollParentDobError', 'Please enter a valid date of birth.');
+        hasError = true;
+      }
+      if (parentPhone) {
+        const digits = normalizePhoneDigits(parentPhone);
+        if (digits.length < 10 || digits.length > 15) {
+          setEnrollError('enrollParentPhoneError', 'Phone number must include 10 to 15 digits.');
+          hasError = true;
+        }
+      }
+
+      if (hasError) {
+        showToast('Please correct the highlighted fields', 'error');
+        return;
+      }
+
       const btn = document.getElementById('enrollBtn');
+      enrollSubmitting = true;
       btn.disabled = true;
       btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div> Enrolling...';
 
@@ -2598,19 +2777,87 @@
         .withSuccessHandler(function(result) {
           if (result.success) {
             showToast('Participant enrolled successfully! ID: ' + result.participantId, 'success');
-            viewParticipant(result.participantId);
+            resetEnrollForm();
+            enrollSubmitting = false;
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
           } else {
             showToast(result.message, 'error');
+            enrollSubmitting = false;
             btn.disabled = false;
             btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
           }
         })
         .withFailureHandler(function(error) {
           handleError(error);
+          enrollSubmitting = false;
           btn.disabled = false;
           btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
         })
         .enrollParticipant(sessionToken, data);
+    }
+
+    function resetEnrollForm() {
+      document.getElementById('enrollName').value = '';
+      document.getElementById('enrollParentNames').value = '';
+      document.getElementById('enrollParentPhone').value = '';
+      document.getElementById('enrollParentAddress').value = '';
+      document.getElementById('enrollParentEmail').value = '';
+      document.getElementById('enrollParentDob').value = '';
+      document.getElementById('enrollNotes').value = '';
+      clearEnrollErrors();
+
+      const siteEl = document.getElementById('enrollSite');
+      const rolloutEl = document.getElementById('enrollRollout');
+
+      if (currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All') {
+        siteEl.value = currentUser.site;
+        siteEl.disabled = true;
+        loadRolloutsForSite();
+      } else {
+        siteEl.value = '';
+        siteEl.disabled = false;
+        rolloutEl.innerHTML = '<option value="">Select site first...</option>';
+        rolloutEl.disabled = true;
+      }
+    }
+
+    function clearEnrollErrors() {
+      [
+        'enrollNameError',
+        'enrollParentNamesError',
+        'enrollParentPhoneError',
+        'enrollParentAddressError',
+        'enrollParentEmailError',
+        'enrollParentDobError',
+        'enrollSiteError',
+        'enrollRolloutError'
+      ].forEach(id => setEnrollError(id, ''));
+    }
+
+    function setEnrollError(id, message) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (message) {
+        el.textContent = message;
+        el.style.display = 'block';
+      } else {
+        el.textContent = '';
+        el.style.display = 'none';
+      }
+    }
+
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function isValidDate(value) {
+      const date = new Date(value);
+      return !Number.isNaN(date.getTime());
+    }
+
+    function normalizePhoneDigits(phone) {
+      return (phone || '').replace(/\D/g, '');
     }
 
     // ============================================
@@ -5415,19 +5662,17 @@
     }
 
     function handleLogout() {
-      // Clear local storage first
-      localStorage.removeItem('g4g_token');
-      localStorage.removeItem('g4g_user');
-
+      isLoggingOut = true;
+      localStorage.setItem('g4g_logout_at', Date.now().toString());
       // Invalidate server session
       google.script.run
         .withSuccessHandler(function() {
           // Redirect to landing page (index)
-          window.location.href = WEB_APP_URL;
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .withFailureHandler(function() {
           // Even if server logout fails, still redirect to landing page
-          window.location.href = WEB_APP_URL;
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .logoutUser(sessionToken);
     }
