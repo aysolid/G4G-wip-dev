@@ -381,6 +381,29 @@ function createSession(userId) {
 function validateSession(token) {
   if (!token) return null;
 
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('Sessions');
+
+  if (sessionsSheet) {
+    const data = sessionsSheet.getDataRange().getValues();
+    const headers = data[0];
+    const tokenCol = headers.indexOf('token');
+    const expiresCol = headers.indexOf('expiresAt');
+    const isActiveCol = headers.indexOf('isActive');
+    const userIdCol = headers.indexOf('userId');
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
+        const expiresAt = new Date(data[i][expiresCol]);
+        if (expiresAt > new Date()) {
+          // Session is valid, get user info
+          const userId = data[i][userIdCol];
+          return getUserById(userId);
+        }
+      }
+    }
+  }
+
   return getUserByUsername(token);
 }
 
@@ -395,7 +418,24 @@ function getCurrentUser(token) {
  * Logout user (invalidate session)
  */
 function logoutUser(token) {
-  return { success: true };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sessionsSheet = ss.getSheetByName('Sessions');
+
+  if (!sessionsSheet) return { success: false };
+
+  const data = sessionsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const tokenCol = headers.indexOf('token');
+  const isActiveCol = headers.indexOf('isActive');
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][tokenCol] === token) {
+      sessionsSheet.getRange(i + 1, isActiveCol + 1).setValue(false);
+      return { success: true };
+    }
+  }
+
+  return { success: false };
 }
 
 /**
@@ -3462,45 +3502,17 @@ function buildComparisonSummary(
   cohorts
 ) {
   if (effectiveSite === 'All' && effectiveCohort === 'All') {
-    const siteEntries = [];
-    const sites = ['UGA', 'Missouri'];
-
-    sites.forEach(site => {
-      const siteParticipants = participantsBySite[site] || [];
-      const siteCohorts = cohorts.filter(cohort => cohort.site === site);
-
-      if (siteParticipants.length === 0 && siteCohorts.length === 0) {
-        return;
-      }
-
-      siteEntries.push({ type: 'site', label: site });
-
-      siteCohorts.forEach(cohort => {
-        const participants = participantsByCohort[cohort.rolloutId] || [];
-        if (participants.length === 0) return;
-        const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
-        const protocol = buildProtocolSummary(participants, checklistSheet);
-        siteEntries.push({
-          type: 'cohort',
-          label: formatCohortDisplayLabel(cohort),
-          participants: participants.length,
-          averageAttendance: summary.averageAttendance,
-          protocolCompletion: protocol.completionRate
-        });
-      });
-
-      if (siteParticipants.length > 0) {
-        const summary = buildAttendanceSummary(siteParticipants, sessionsByCohort, attendanceMap, 'All');
-        const protocol = buildProtocolSummary(siteParticipants, checklistSheet);
-        siteEntries.push({
-          type: 'subtotal',
-          label: `${site} subtotal`,
-          participants: siteParticipants.length,
-          averageAttendance: summary.averageAttendance,
-          protocolCompletion: protocol.completionRate
-        });
-      }
-    });
+    const siteEntries = ['UGA', 'Missouri'].map(site => {
+      const participants = participantsBySite[site] || [];
+      const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+      const protocol = buildProtocolSummary(participants, checklistSheet);
+      return {
+        label: site,
+        participants: participants.length,
+        averageAttendance: summary.averageAttendance,
+        protocolCompletion: protocol.completionRate
+      };
+    }).filter(entry => entry.participants > 0);
 
     return {
       title: 'Site Comparison',
@@ -3518,33 +3530,17 @@ function buildComparisonSummary(
   }
 
   if (effectiveSite !== 'All') {
-    const cohortEntries = [];
-    cohorts.forEach(cohort => {
+    const cohortEntries = cohorts.map(cohort => {
       const participants = participantsByCohort[cohort.rolloutId] || [];
-      if (participants.length === 0) return;
       const summary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
       const protocol = buildProtocolSummary(participants, checklistSheet);
-      cohortEntries.push({
-        type: 'cohort',
+      return {
         label: formatCohortDisplayLabel(cohort),
         participants: participants.length,
         averageAttendance: summary.averageAttendance,
         protocolCompletion: protocol.completionRate
-      });
-    });
-
-    const siteParticipants = participantsBySite[effectiveSite] || [];
-    if (siteParticipants.length > 0) {
-      const summary = buildAttendanceSummary(siteParticipants, sessionsByCohort, attendanceMap, 'All');
-      const protocol = buildProtocolSummary(siteParticipants, checklistSheet);
-      cohortEntries.push({
-        type: 'subtotal',
-        label: `${effectiveSite} subtotal`,
-        participants: siteParticipants.length,
-        averageAttendance: summary.averageAttendance,
-        protocolCompletion: protocol.completionRate
-      });
-    }
+      };
+    }).filter(entry => entry.participants > 0);
 
     return {
       title: 'Cohort Comparison',

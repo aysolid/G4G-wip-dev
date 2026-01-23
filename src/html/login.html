@@ -467,9 +467,9 @@
       const loginSpinner = document.getElementById('loginSpinner');
 
       if (result.success) {
-        // Store session token for the current tab only
-        sessionStorage.setItem('g4g_token', result.token);
-        sessionStorage.setItem('g4g_user', JSON.stringify(result.user));
+        // Store session token in localStorage
+        localStorage.setItem('g4g_token', result.token);
+        localStorage.setItem('g4g_user', JSON.stringify(result.user));
 
         // Show success message
         document.getElementById('successAlert').classList.remove('hidden');
@@ -477,7 +477,7 @@
 
         // Redirect to dashboard
         setTimeout(function() {
-          window.location.href = WEB_APP_URL + '?page=dashboard';
+          window.location.href = WEB_APP_URL + '?page=dashboard&token=' + result.token;
         }, 1000);
       } else {
         // Show error
@@ -512,9 +512,19 @@
       loginSpinner.classList.add('hidden');
     }
 
+    // Check if already logged in
     document.addEventListener('DOMContentLoaded', function() {
-      sessionStorage.removeItem('g4g_token');
-      sessionStorage.removeItem('g4g_user');
+      const token = localStorage.getItem('g4g_token');
+      if (token) {
+        // Verify token is still valid
+        google.script.run
+          .withSuccessHandler(function(user) {
+            if (user) {
+              window.location.href = WEB_APP_URL + '?page=dashboard&token=' + token;
+            }
+          })
+          .getCurrentUser(token);
+      }
     });
   </script>
 </body>
