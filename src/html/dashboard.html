@@ -5423,11 +5423,11 @@
       google.script.run
         .withSuccessHandler(function() {
           // Redirect to landing page (index)
-          window.location.href = WEB_APP_URL + '?page=index';
+          window.location.href = WEB_APP_URL + '?page=index&logout=1';
         })
         .withFailureHandler(function() {
           // Even if server logout fails, still redirect to landing page
-          window.location.href = WEB_APP_URL + '?page=index';
+          window.location.href = WEB_APP_URL + '?page=index&logout=1';
         })
         .logoutUser(sessionToken);
     }
