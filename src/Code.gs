@@ -381,29 +381,6 @@ function createSession(userId) {
 function validateSession(token) {
   if (!token) return null;
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
-
-  if (sessionsSheet) {
-    const data = sessionsSheet.getDataRange().getValues();
-    const headers = data[0];
-    const tokenCol = headers.indexOf('token');
-    const expiresCol = headers.indexOf('expiresAt');
-    const isActiveCol = headers.indexOf('isActive');
-    const userIdCol = headers.indexOf('userId');
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
-        const expiresAt = new Date(data[i][expiresCol]);
-        if (expiresAt > new Date()) {
-          // Session is valid, get user info
-          const userId = data[i][userIdCol];
-          return getUserById(userId);
-        }
-      }
-    }
-  }
-
   return getUserByUsername(token);
 }
 
@@ -418,24 +395,7 @@ function getCurrentUser(token) {
  * Logout user (invalidate session)
  */
 function logoutUser(token) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
-
-  if (!sessionsSheet) return { success: false };
-
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const tokenCol = headers.indexOf('token');
-  const isActiveCol = headers.indexOf('isActive');
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][tokenCol] === token) {
-      sessionsSheet.getRange(i + 1, isActiveCol + 1).setValue(false);
-      return { success: true };
-    }
-  }
-
-  return { success: false };
+  return { success: true };
 }
 
 /**
