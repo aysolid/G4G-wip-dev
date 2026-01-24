@@ -2876,8 +2876,8 @@
             </button>
           </div>
         </div>
-        <div class="table-container" style="max-height: 360px; overflow-y: auto; overflow-x: hidden;">
-          <table class="data-table" style="table-layout: fixed;">
+        <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+          <table class="data-table" style="min-width: 720px;">
             <thead>
               <tr>
                 <th style="width: 50px;">
@@ -2897,9 +2897,9 @@
                   <div style="font-size: 0.8rem; color: var(--gray-500);">${p.participantId} • ${p.schoolName}</div>
                 </td>
                 <td style="word-break: break-word;">
-                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                  <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                     ${linkBadge(p.dataLink)}
-                    ${p.dataLink ? `<span style="font-size: 0.8rem; color: var(--gray-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(p.dataLink)}</span>` : ''}
+                    ${p.dataLink ? `<span style="font-size: 0.8rem; color: var(--gray-600); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(p.dataLink)}</span>` : ''}
                   </div>
                 </td>
                 <td>
