@@ -139,7 +139,9 @@ function initializeDatabase() {
 
   // Create Participants sheet
   createSheetIfNotExists(ss, 'Participants', [
-    'participantId', 'fullName', 'site', 'rolloutId', 'schoolName', 'period', 'year',
+    'participantId', 'fullName', 'parent_guardian_names', 'parent_guardian_phone',
+    'parent_guardian_address', 'parent_guardian_email', 'parent_guardian_dob',
+    'site', 'rolloutId', 'schoolName', 'period', 'year',
     'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
   ]);
 
@@ -147,6 +149,12 @@ function initializeDatabase() {
   createSheetIfNotExists(ss, 'Checklist', [
     'checklistId', 'participantId', 'instrumentNumber', 'instrumentName', 'category',
     'status', 'completedDate', 'completedBy', 'notes'
+  ]);
+
+  // Create ChecklistLinks sheet
+  createSheetIfNotExists(ss, 'ChecklistLinks', [
+    'id', 'participant_id', 'checklist_item_id', 'url', 'created_at',
+    'updated_at', 'updated_by', 'site', 'cohort'
   ]);
 
   // Create StudySessions sheet
@@ -381,29 +389,6 @@ function createSession(userId) {
 function validateSession(token) {
   if (!token) return null;
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
-
-  if (sessionsSheet) {
-    const data = sessionsSheet.getDataRange().getValues();
-    const headers = data[0];
-    const tokenCol = headers.indexOf('token');
-    const expiresCol = headers.indexOf('expiresAt');
-    const isActiveCol = headers.indexOf('isActive');
-    const userIdCol = headers.indexOf('userId');
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][tokenCol] === token && data[i][isActiveCol] === true) {
-        const expiresAt = new Date(data[i][expiresCol]);
-        if (expiresAt > new Date()) {
-          // Session is valid, get user info
-          const userId = data[i][userIdCol];
-          return getUserById(userId);
-        }
-      }
-    }
-  }
-
   return getUserByUsername(token);
 }
 
@@ -418,24 +403,7 @@ function getCurrentUser(token) {
  * Logout user (invalidate session)
  */
 function logoutUser(token) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sessionsSheet = ss.getSheetByName('Sessions');
-
-  if (!sessionsSheet) return { success: false };
-
-  const data = sessionsSheet.getDataRange().getValues();
-  const headers = data[0];
-  const tokenCol = headers.indexOf('token');
-  const isActiveCol = headers.indexOf('isActive');
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][tokenCol] === token) {
-      sessionsSheet.getRange(i + 1, isActiveCol + 1).setValue(false);
-      return { success: true };
-    }
-  }
-
-  return { success: false };
+  return { success: true };
 }
 
 /**
@@ -1696,6 +1664,104 @@ function getAttendanceStatsByRollout(token, rolloutId) {
 // PARTICIPANT FUNCTIONS
 // ============================================
 
+const PARTICIPANT_PARENT_HEADERS = [
+  'parent_guardian_names',
+  'parent_guardian_phone',
+  'parent_guardian_address',
+  'parent_guardian_email',
+  'parent_guardian_dob'
+];
+
+function ensureParticipantColumns(participantsSheet) {
+  const requiredHeaders = [
+    'participantId', 'fullName',
+    'parent_guardian_names', 'parent_guardian_phone', 'parent_guardian_address',
+    'parent_guardian_email', 'parent_guardian_dob',
+    'site', 'rolloutId', 'schoolName', 'period', 'year',
+    'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+  ];
+
+  const headerRange = participantsSheet.getRange(1, 1, 1, participantsSheet.getLastColumn() || 1);
+  const headers = headerRange.getValues()[0].filter(Boolean);
+  let updated = false;
+
+  requiredHeaders.forEach(header => {
+    if (headers.indexOf(header) === -1) {
+      headers.push(header);
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    participantsSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  return headers;
+}
+
+function getHeaderValue(row, headers, headerName) {
+  const index = headers.indexOf(headerName);
+  return index === -1 ? '' : row[index];
+}
+
+function setCellAsPlainText(sheet, rowIndex, columnIndex, value) {
+  const range = sheet.getRange(rowIndex, columnIndex, 1, 1);
+  range.setNumberFormat('@');
+  range.setValue(value);
+}
+
+function appendParticipantRowAsText(participantsSheet, rowValues) {
+  const rowIndex = participantsSheet.getLastRow() + 1;
+  const range = participantsSheet.getRange(rowIndex, 1, 1, rowValues.length);
+  range.setNumberFormat('@');
+  range.setValues([rowValues]);
+  return rowIndex;
+}
+
+function normalizePhoneDigits(phone) {
+  return (phone || '').toString().replace(/\D/g, '');
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidDateValue(value) {
+  if (!value) return true;
+  const date = new Date(value);
+  return !isNaN(date.getTime());
+}
+
+function buildParticipantRow(headers, data) {
+  const row = new Array(headers.length).fill('');
+  const setValue = (header, value) => {
+    const idx = headers.indexOf(header);
+    if (idx !== -1) {
+      row[idx] = value;
+    }
+  };
+
+  setValue('participantId', data.participantId);
+  setValue('fullName', data.fullName);
+  setValue('parent_guardian_names', data.parentGuardianNames || '');
+  setValue('parent_guardian_phone', data.parentGuardianPhone || '');
+  setValue('parent_guardian_address', data.parentGuardianAddress || '');
+  setValue('parent_guardian_email', data.parentGuardianEmail || '');
+  setValue('parent_guardian_dob', data.parentGuardianDob || '');
+  setValue('site', data.site);
+  setValue('rolloutId', data.rolloutId);
+  setValue('schoolName', data.schoolName);
+  setValue('period', data.period);
+  setValue('year', data.year);
+  setValue('enrollmentDate', data.enrollmentDate);
+  setValue('enrolledBy', data.enrolledBy);
+  setValue('status', data.status);
+  setValue('notes', data.notes || '');
+  setValue('completionPercentage', data.completionPercentage || 0);
+
+  return row;
+}
+
 /**
  * Get all participants with optional filters
  */
@@ -1710,27 +1776,35 @@ function getAllParticipants(token, filters) {
 
   if (!participantsSheet) return { success: false, message: 'Participants sheet not found' };
 
-  const data = participantsSheet.getDataRange().getValues();
-  const headers = data[0];
+  const headers = ensureParticipantColumns(participantsSheet);
+  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
   const participants = [];
 
   filters = filters || {};
 
   for (let i = 1; i < data.length; i++) {
     const participant = {
-      participantId: data[i][headers.indexOf('participantId')],
-      fullName: data[i][headers.indexOf('fullName')],
-      site: data[i][headers.indexOf('site')],
-      rolloutId: data[i][headers.indexOf('rolloutId')],
-      schoolName: data[i][headers.indexOf('schoolName')],
-      period: data[i][headers.indexOf('period')],
-      year: data[i][headers.indexOf('year')],
-      enrollmentDate: data[i][headers.indexOf('enrollmentDate')],
-      enrolledBy: data[i][headers.indexOf('enrolledBy')],
-      status: data[i][headers.indexOf('status')],
-      notes: data[i][headers.indexOf('notes')],
-      completionPercentage: data[i][headers.indexOf('completionPercentage')] || 0
+      participantId: getHeaderValue(data[i], headers, 'participantId'),
+      fullName: getHeaderValue(data[i], headers, 'fullName'),
+      site: getHeaderValue(data[i], headers, 'site'),
+      rolloutId: getHeaderValue(data[i], headers, 'rolloutId'),
+      schoolName: getHeaderValue(data[i], headers, 'schoolName'),
+      period: getHeaderValue(data[i], headers, 'period'),
+      year: getHeaderValue(data[i], headers, 'year'),
+      enrollmentDate: getHeaderValue(data[i], headers, 'enrollmentDate'),
+      enrolledBy: getHeaderValue(data[i], headers, 'enrolledBy'),
+      status: getHeaderValue(data[i], headers, 'status'),
+      notes: getHeaderValue(data[i], headers, 'notes'),
+      completionPercentage: getHeaderValue(data[i], headers, 'completionPercentage') || 0
     };
+
+    if (currentUser.role !== 'viewer') {
+      participant.parentGuardianNames = getHeaderValue(data[i], headers, 'parent_guardian_names');
+      participant.parentGuardianPhone = getHeaderValue(data[i], headers, 'parent_guardian_phone');
+      participant.parentGuardianAddress = getHeaderValue(data[i], headers, 'parent_guardian_address');
+      participant.parentGuardianEmail = getHeaderValue(data[i], headers, 'parent_guardian_email');
+      participant.parentGuardianDob = getHeaderValue(data[i], headers, 'parent_guardian_dob');
+    }
 
     // Apply filters
     let include = true;
@@ -1784,26 +1858,34 @@ function getParticipantById(token, participantId) {
   }
 
   // Get participant data
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const pHeaders = ensureParticipantColumns(participantsSheet);
+  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
   let participant = null;
 
   for (let i = 1; i < pData.length; i++) {
     if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
       participant = {
-        participantId: pData[i][pHeaders.indexOf('participantId')],
-        fullName: pData[i][pHeaders.indexOf('fullName')],
-        site: pData[i][pHeaders.indexOf('site')],
-        rolloutId: pData[i][pHeaders.indexOf('rolloutId')],
-        schoolName: pData[i][pHeaders.indexOf('schoolName')],
-        period: pData[i][pHeaders.indexOf('period')],
-        year: pData[i][pHeaders.indexOf('year')],
-        enrollmentDate: pData[i][pHeaders.indexOf('enrollmentDate')],
-        enrolledBy: pData[i][pHeaders.indexOf('enrolledBy')],
-        status: pData[i][pHeaders.indexOf('status')],
-        notes: pData[i][pHeaders.indexOf('notes')],
-        completionPercentage: pData[i][pHeaders.indexOf('completionPercentage')] || 0
+        participantId: getHeaderValue(pData[i], pHeaders, 'participantId'),
+        fullName: getHeaderValue(pData[i], pHeaders, 'fullName'),
+        site: getHeaderValue(pData[i], pHeaders, 'site'),
+        rolloutId: getHeaderValue(pData[i], pHeaders, 'rolloutId'),
+        schoolName: getHeaderValue(pData[i], pHeaders, 'schoolName'),
+        period: getHeaderValue(pData[i], pHeaders, 'period'),
+        year: getHeaderValue(pData[i], pHeaders, 'year'),
+        enrollmentDate: getHeaderValue(pData[i], pHeaders, 'enrollmentDate'),
+        enrolledBy: getHeaderValue(pData[i], pHeaders, 'enrolledBy'),
+        status: getHeaderValue(pData[i], pHeaders, 'status'),
+        notes: getHeaderValue(pData[i], pHeaders, 'notes'),
+        completionPercentage: getHeaderValue(pData[i], pHeaders, 'completionPercentage') || 0
       };
+
+      if (currentUser.role !== 'viewer') {
+        participant.parentGuardianNames = getHeaderValue(pData[i], pHeaders, 'parent_guardian_names');
+        participant.parentGuardianPhone = getHeaderValue(pData[i], pHeaders, 'parent_guardian_phone');
+        participant.parentGuardianAddress = getHeaderValue(pData[i], pHeaders, 'parent_guardian_address');
+        participant.parentGuardianEmail = getHeaderValue(pData[i], pHeaders, 'parent_guardian_email');
+        participant.parentGuardianDob = getHeaderValue(pData[i], pHeaders, 'parent_guardian_dob');
+      }
       break;
     }
   }
@@ -1852,9 +1934,34 @@ function enrollParticipant(token, participantData) {
     return { success: false, message: 'Unauthorized' };
   }
 
+  if (!participantData || !participantData.fullName || !participantData.fullName.trim()) {
+    return { success: false, message: 'Participant full name is required' };
+  }
+  if (!participantData.rolloutId) {
+    return { success: false, message: 'Study cohort is required' };
+  }
+
+  const parentEmail = (participantData.parentGuardianEmail || '').trim();
+  const parentDob = (participantData.parentGuardianDob || '').trim();
+  const parentPhone = (participantData.parentGuardianPhone || '').trim();
+
+  if (parentEmail && !isValidEmail(parentEmail)) {
+    return { success: false, message: 'Parent/guardian email is invalid' };
+  }
+  if (parentDob && !isValidDateValue(parentDob)) {
+    return { success: false, message: 'Parent/guardian date of birth is invalid' };
+  }
+  if (parentPhone) {
+    const digits = normalizePhoneDigits(parentPhone);
+    if (digits.length < 10 || digits.length > 15) {
+      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
+    }
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
+  const participantHeaders = ensureParticipantColumns(participantsSheet);
 
   // Get cohort info
   const cohort = getRolloutById(participantData.rolloutId);
@@ -1877,20 +1984,26 @@ function enrollParticipant(token, participantData) {
   const timestamp = new Date().toISOString();
 
   // Add participant
-  participantsSheet.appendRow([
-    participantId,
-    participantData.fullName,
-    cohort.site,
-    participantData.rolloutId,
-    cohort.schoolName,
-    cohort.period,
-    cohort.year,
-    timestamp,
-    currentUser.userId,
-    'active',
-    participantData.notes || '',
-    0 // completionPercentage
-  ]);
+  const row = buildParticipantRow(participantHeaders, {
+    participantId: participantId,
+    fullName: participantData.fullName,
+    parentGuardianNames: participantData.parentGuardianNames,
+    parentGuardianPhone: parentPhone,
+    parentGuardianAddress: participantData.parentGuardianAddress,
+    parentGuardianEmail: parentEmail,
+    parentGuardianDob: parentDob,
+    site: cohort.site,
+    rolloutId: participantData.rolloutId,
+    schoolName: cohort.schoolName,
+    period: cohort.period,
+    year: cohort.year,
+    enrollmentDate: timestamp,
+    enrolledBy: currentUser.userId,
+    status: 'active',
+    notes: participantData.notes || '',
+    completionPercentage: 0
+  });
+  appendParticipantRowAsText(participantsSheet, row);
 
   // Create checklist items for all 18 instruments
   CONFIG.INSTRUMENTS.forEach(instrument => {
@@ -1939,8 +2052,25 @@ function updateParticipant(token, participantId, participantData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
-  const data = participantsSheet.getDataRange().getValues();
-  const headers = data[0];
+  const headers = ensureParticipantColumns(participantsSheet);
+  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
+
+  const parentEmail = (participantData.parentGuardianEmail || '').trim();
+  const parentDob = (participantData.parentGuardianDob || '').trim();
+  const parentPhone = (participantData.parentGuardianPhone || '').trim();
+
+  if (parentEmail && !isValidEmail(parentEmail)) {
+    return { success: false, message: 'Parent/guardian email is invalid' };
+  }
+  if (parentDob && !isValidDateValue(parentDob)) {
+    return { success: false, message: 'Parent/guardian date of birth is invalid' };
+  }
+  if (parentPhone) {
+    const digits = normalizePhoneDigits(parentPhone);
+    if (digits.length < 10 || digits.length > 15) {
+      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
+    }
+  }
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
@@ -1950,13 +2080,43 @@ function updateParticipant(token, participantId, participantData) {
       }
 
       if (participantData.fullName) {
-        participantsSheet.getRange(i + 1, headers.indexOf('fullName') + 1).setValue(participantData.fullName);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('fullName') + 1, participantData.fullName);
+      }
+      if (participantData.parentGuardianNames !== undefined) {
+        const idx = headers.indexOf('parent_guardian_names');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianNames);
+        }
+      }
+      if (participantData.parentGuardianPhone !== undefined) {
+        const idx = headers.indexOf('parent_guardian_phone');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentPhone);
+        }
+      }
+      if (participantData.parentGuardianAddress !== undefined) {
+        const idx = headers.indexOf('parent_guardian_address');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianAddress);
+        }
+      }
+      if (participantData.parentGuardianEmail !== undefined) {
+        const idx = headers.indexOf('parent_guardian_email');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentEmail);
+        }
+      }
+      if (participantData.parentGuardianDob !== undefined) {
+        const idx = headers.indexOf('parent_guardian_dob');
+        if (idx !== -1) {
+          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
+        }
       }
       if (participantData.status) {
-        participantsSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(participantData.status);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
       }
       if (participantData.notes !== undefined) {
-        participantsSheet.getRange(i + 1, headers.indexOf('notes') + 1).setValue(participantData.notes);
+        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('notes') + 1, participantData.notes);
       }
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT', 'participant', participantId,
@@ -2007,6 +2167,7 @@ function deleteParticipant(token, participantId) {
   }
 
   participantsSheet.deleteRow(rowIndex);
+  deleteChecklistLinksForParticipant(participantId);
 
   if (checklistSheet) {
     const cData = checklistSheet.getDataRange().getValues();
@@ -2075,9 +2236,17 @@ function generateEnrollmentTemplate(token) {
   templateSheet.setName('Template');
 
   // Headers
-  templateSheet.getRange('A1').setValue('fullName');
-  templateSheet.getRange('B1').setValue('cohortName');
-  templateSheet.getRange('A1:B1')
+  const headerValues = [
+    'fullName',
+    'parent_guardian_names',
+    'parent_guardian_phone',
+    'parent_guardian_address',
+    'parent_guardian_email',
+    'parent_guardian_dob',
+    'cohortName'
+  ];
+  templateSheet.getRange(1, 1, 1, headerValues.length).setValues([headerValues]);
+  templateSheet.getRange(1, 1, 1, headerValues.length)
     .setFontWeight('bold')
     .setBackground('#f1f5f9');
 
@@ -2095,10 +2264,10 @@ function generateEnrollmentTemplate(token) {
     .requireValueInRange(validationRange, true)
     .setAllowInvalid(false)
     .build();
-  templateSheet.getRange(2, 2, lastRow, 1).setDataValidation(rule);
+  templateSheet.getRange(2, 7, lastRow, 1).setDataValidation(rule);
 
   // Auto-size
-  templateSheet.autoResizeColumns(1, 2);
+  templateSheet.autoResizeColumns(1, headerValues.length);
 
   // Ensure writes complete before export
   SpreadsheetApp.flush();
@@ -2167,6 +2336,10 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const idx = name => headers.indexOf(name);
+  const getValue = (row, name) => {
+    const index = headers.indexOf(name);
+    return index === -1 ? '' : (row[index] || '');
+  };
   const cohortColumn = hasCohortName ? 'cohortName' : 'rolloutName';
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
@@ -2204,17 +2377,7 @@ function importParticipantsCSV(token, fileData) {
     return { success: false, message: 'No accessible cohorts found for this user' };
   }
 
-  // Participant map for upserts
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
-  const participantMap = {};
-  for (let i = 1; i < pData.length; i++) {
-    const pid = pData[i][pHeaders.indexOf('participantId')];
-    participantMap[pid] = {
-      rowIndex: i + 1,
-      data: pData[i]
-    };
-  }
+  const participantHeaders = ensureParticipantColumns(participantsSheet);
 
   const summary = {
     processed: 0,
@@ -2228,8 +2391,13 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const fullName = (row[idx('fullName')] || '').trim();
-    const rolloutName = (row[idx(cohortColumn)] || '').trim();
+    const fullName = (getValue(row, 'fullName') || '').trim();
+    const rolloutName = (getValue(row, cohortColumn) || '').trim();
+    const parentGuardianNames = (getValue(row, 'parent_guardian_names') || '').trim();
+    const parentGuardianPhone = (getValue(row, 'parent_guardian_phone') || '').trim();
+    const parentGuardianAddress = (getValue(row, 'parent_guardian_address') || '').trim();
+    const parentGuardianEmail = (getValue(row, 'parent_guardian_email') || '').trim();
+    const parentGuardianDob = (getValue(row, 'parent_guardian_dob') || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -2255,6 +2423,25 @@ function importParticipantsCSV(token, fileData) {
       continue;
     }
 
+    if (parentGuardianEmail && !isValidEmail(parentGuardianEmail)) {
+      summary.errors.push({ row: rowNumber, message: 'Parent/guardian email is invalid' });
+      summary.skipped++;
+      continue;
+    }
+    if (parentGuardianDob && !isValidDateValue(parentGuardianDob)) {
+      summary.errors.push({ row: rowNumber, message: 'Parent/guardian date of birth is invalid' });
+      summary.skipped++;
+      continue;
+    }
+    if (parentGuardianPhone) {
+      const digits = normalizePhoneDigits(parentGuardianPhone);
+      if (digits.length < 10 || digits.length > 15) {
+        summary.errors.push({ row: rowNumber, message: 'Parent/guardian phone must include 10 to 15 digits' });
+        summary.skipped++;
+        continue;
+      }
+    }
+
     // Create new participant (participantId auto-generated)
     if (isFacilitator && cohort.site !== currentUser.site) {
       summary.errors.push({ row: rowNumber, message: 'Unauthorized to enroll for site ' + cohort.site });
@@ -2265,20 +2452,26 @@ function importParticipantsCSV(token, fileData) {
     const newParticipantId = generateParticipantId(cohort.site);
     const timestamp = new Date().toISOString();
 
-    participantsSheet.appendRow([
-      newParticipantId,
-      fullName,
-      cohort.site,
-      cohort.rolloutId,
-      cohort.schoolName,
-      cohort.period,
-      cohort.year,
-      timestamp,
-      currentUser.userId,
-      'active',
-      '',
-      0
-    ]);
+    const rowValues = buildParticipantRow(participantHeaders, {
+      participantId: newParticipantId,
+      fullName: fullName,
+      parentGuardianNames: parentGuardianNames,
+      parentGuardianPhone: parentGuardianPhone,
+      parentGuardianAddress: parentGuardianAddress,
+      parentGuardianEmail: parentGuardianEmail,
+      parentGuardianDob: parentGuardianDob,
+      site: cohort.site,
+      rolloutId: cohort.rolloutId,
+      schoolName: cohort.schoolName,
+      period: cohort.period,
+      year: cohort.year,
+      enrollmentDate: timestamp,
+      enrolledBy: currentUser.userId,
+      status: 'active',
+      notes: '',
+      completionPercentage: 0
+    });
+    appendParticipantRowAsText(participantsSheet, rowValues);
 
     CONFIG.INSTRUMENTS.forEach(instrument => {
       const checklistId = generateUUID();
@@ -2387,6 +2580,224 @@ function updateChecklistItem(token, checklistId, updateData) {
   }
 
   return { success: false, message: 'Checklist item not found' };
+}
+
+function getChecklistLinksSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('ChecklistLinks');
+  if (!sheet) {
+    sheet = ss.insertSheet('ChecklistLinks');
+    sheet.getRange(1, 1, 1, 9).setValues([[
+      'id', 'participant_id', 'checklist_item_id', 'url', 'created_at',
+      'updated_at', 'updated_by', 'site', 'cohort'
+    ]]);
+    sheet.getRange(1, 1, 1, 9)
+      .setFontWeight('bold')
+      .setBackground('#4285f4')
+      .setFontColor('white');
+  }
+  return sheet;
+}
+
+function validateChecklistLinkUrl(url) {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return { valid: false, message: 'URL is required' };
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return { valid: false, message: 'URL must start with http:// or https://' };
+  }
+  return { valid: true, value: trimmed };
+}
+
+function getParticipantMeta(participantId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (!participantsSheet) return null;
+  const data = participantsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIndex = headers.indexOf('participantId');
+  if (idIndex === -1) return null;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idIndex] === participantId) {
+      return {
+        site: data[i][headers.indexOf('site')],
+        cohort: data[i][headers.indexOf('rolloutId')]
+      };
+    }
+  }
+  return null;
+}
+
+function getChecklistLinksForParticipant(token, participantId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!participantId) {
+    return { success: false, message: 'Participant ID is required' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const links = {};
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+  const urlIndex = headers.indexOf('url');
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId) {
+      const checklistId = data[i][checklistIndex];
+      if (checklistId) {
+        links[checklistId] = data[i][urlIndex];
+      }
+    }
+  }
+
+  return { success: true, links: links };
+}
+
+function getChecklistLink(token, participantId, checklistItemId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      return { success: true, link: buildChecklistLinkRecord(data[i], headers) };
+    }
+  }
+
+  return { success: true, link: null };
+}
+
+function buildChecklistLinkRecord(row, headers) {
+  const idx = name => headers.indexOf(name);
+  return {
+    id: row[idx('id')],
+    participantId: row[idx('participant_id')],
+    checklistItemId: row[idx('checklist_item_id')],
+    url: row[idx('url')],
+    createdAt: row[idx('created_at')],
+    updatedAt: row[idx('updated_at')],
+    updatedBy: row[idx('updated_by')],
+    site: row[idx('site')],
+    cohort: row[idx('cohort')]
+  };
+}
+
+function upsertChecklistLink(token, participantId, checklistItemId, url) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!participantId || !checklistItemId) {
+    return { success: false, message: 'Participant and checklist item are required' };
+  }
+
+  const validation = validateChecklistLinkUrl(url);
+  if (!validation.valid) {
+    return { success: false, message: validation.message };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+  const urlIndex = headers.indexOf('url');
+  const updatedAtIndex = headers.indexOf('updated_at');
+  const updatedByIndex = headers.indexOf('updated_by');
+  const createdAtIndex = headers.indexOf('created_at');
+  const siteIndex = headers.indexOf('site');
+  const cohortIndex = headers.indexOf('cohort');
+
+  const now = new Date().toISOString();
+  const meta = getParticipantMeta(participantId) || {};
+  let action = 'LINK_ADD';
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      action = 'LINK_UPDATE';
+      sheet.getRange(i + 1, urlIndex + 1).setNumberFormat('@').setValue(validation.value);
+      sheet.getRange(i + 1, updatedAtIndex + 1).setValue(now);
+      sheet.getRange(i + 1, updatedByIndex + 1).setValue(currentUser.username || currentUser.userId);
+      if (siteIndex !== -1) sheet.getRange(i + 1, siteIndex + 1).setValue(meta.site || '');
+      if (cohortIndex !== -1) sheet.getRange(i + 1, cohortIndex + 1).setValue(meta.cohort || '');
+      logActivity(currentUser.userId, currentUser.fullName, action, 'checklist_link',
+        participantId + ':' + checklistItemId, 'Updated data link');
+      return { success: true, message: 'Link updated', url: validation.value };
+    }
+  }
+
+  const row = new Array(headers.length).fill('');
+  row[headers.indexOf('id')] = generateUUID();
+  row[participantIndex] = participantId;
+  row[checklistIndex] = checklistItemId;
+  row[urlIndex] = validation.value;
+  row[createdAtIndex] = now;
+  row[updatedAtIndex] = now;
+  row[updatedByIndex] = currentUser.username || currentUser.userId;
+  if (siteIndex !== -1) row[siteIndex] = meta.site || '';
+  if (cohortIndex !== -1) row[cohortIndex] = meta.cohort || '';
+
+  const rowIndex = sheet.getLastRow() + 1;
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  sheet.getRange(rowIndex, urlIndex + 1).setNumberFormat('@');
+
+  logActivity(currentUser.userId, currentUser.fullName, action, 'checklist_link',
+    participantId + ':' + checklistItemId, 'Added data link');
+
+  return { success: true, message: 'Link added', url: validation.value };
+}
+
+function deleteChecklistLink(token, participantId, checklistItemId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      sheet.deleteRow(i + 1);
+      logActivity(currentUser.userId, currentUser.fullName, 'LINK_DELETE', 'checklist_link',
+        participantId + ':' + checklistItemId, 'Deleted data link');
+      return { success: true, message: 'Link removed' };
+    }
+  }
+
+  return { success: false, message: 'Link not found' };
+}
+
+function deleteChecklistLinksForParticipant(participantId) {
+  if (!participantId) return;
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][participantIndex] === participantId) {
+      sheet.deleteRow(i + 1);
+    }
+  }
 }
 
 /**
@@ -2634,7 +3045,12 @@ function updateParticipantCompletion(participantId) {
 
   for (let i = 1; i < pData.length; i++) {
     if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
-      participantsSheet.getRange(i + 1, pHeaders.indexOf('completionPercentage') + 1).setValue(percentage);
+      setCellAsPlainText(
+        participantsSheet,
+        i + 1,
+        pHeaders.indexOf('completionPercentage') + 1,
+        percentage
+      );
       break;
     }
   }
@@ -3767,15 +4183,40 @@ function exportParticipantsCSV(token, filters) {
   const participants = result.participants;
 
   // Create CSV content
-  const headers = ['Participant ID', 'Full Name', 'Site', 'School', 'Period', 'Year',
-    'Enrollment Date', 'Status', 'Completion %', 'Notes'];
+  const includeParentFields = currentUser.role !== 'viewer';
+  const headers = ['Participant ID', 'Full Name'];
+
+  if (includeParentFields) {
+    headers.push(
+      'Parent/Guardian Name(s)',
+      'Parent/Guardian Phone',
+      'Parent/Guardian Address',
+      'Parent/Guardian Email',
+      'Parent/Guardian DOB'
+    );
+  }
+
+  headers.push('Site', 'School', 'Period', 'Year', 'Enrollment Date', 'Status', 'Completion %', 'Notes');
 
   let csv = headers.join(',') + '\n';
 
   participants.forEach(p => {
     const row = [
       p.participantId,
-      '"' + (p.fullName || '').replace(/"/g, '""') + '"',
+      '"' + (p.fullName || '').replace(/"/g, '""') + '"'
+    ];
+
+    if (includeParentFields) {
+      row.push(
+        '"' + (p.parentGuardianNames || '').replace(/"/g, '""') + '"',
+        '"' + (p.parentGuardianPhone || '').replace(/"/g, '""') + '"',
+        '"' + (p.parentGuardianAddress || '').replace(/"/g, '""') + '"',
+        '"' + (p.parentGuardianEmail || '').replace(/"/g, '""') + '"',
+        '"' + (p.parentGuardianDob || '').replace(/"/g, '""') + '"'
+      );
+    }
+
+    row.push(
       p.site,
       '"' + (p.schoolName || '').replace(/"/g, '""') + '"',
       p.period,
@@ -3784,7 +4225,7 @@ function exportParticipantsCSV(token, filters) {
       p.status,
       p.completionPercentage,
       '"' + (p.notes || '').replace(/"/g, '""') + '"'
-    ];
+    );
     csv += row.join(',') + '\n';
   });
 
