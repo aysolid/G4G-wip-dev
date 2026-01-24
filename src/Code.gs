@@ -151,6 +151,12 @@ function initializeDatabase() {
     'status', 'completedDate', 'completedBy', 'notes'
   ]);
 
+  // Create ChecklistLinks sheet
+  createSheetIfNotExists(ss, 'ChecklistLinks', [
+    'id', 'participant_id', 'checklist_item_id', 'url', 'created_at',
+    'updated_at', 'updated_by', 'site', 'cohort'
+  ]);
+
   // Create StudySessions sheet
   createSheetIfNotExists(ss, 'StudySessions', [
     'sessionId', 'rolloutId', 'sessionNumber', 'sessionDate', 'sessionName',
@@ -2161,6 +2167,7 @@ function deleteParticipant(token, participantId) {
   }
 
   participantsSheet.deleteRow(rowIndex);
+  deleteChecklistLinksForParticipant(participantId);
 
   if (checklistSheet) {
     const cData = checklistSheet.getDataRange().getValues();
@@ -2573,6 +2580,224 @@ function updateChecklistItem(token, checklistId, updateData) {
   }
 
   return { success: false, message: 'Checklist item not found' };
+}
+
+function getChecklistLinksSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('ChecklistLinks');
+  if (!sheet) {
+    sheet = ss.insertSheet('ChecklistLinks');
+    sheet.getRange(1, 1, 1, 9).setValues([[
+      'id', 'participant_id', 'checklist_item_id', 'url', 'created_at',
+      'updated_at', 'updated_by', 'site', 'cohort'
+    ]]);
+    sheet.getRange(1, 1, 1, 9)
+      .setFontWeight('bold')
+      .setBackground('#4285f4')
+      .setFontColor('white');
+  }
+  return sheet;
+}
+
+function validateChecklistLinkUrl(url) {
+  const trimmed = (url || '').trim();
+  if (!trimmed) return { valid: false, message: 'URL is required' };
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return { valid: false, message: 'URL must start with http:// or https://' };
+  }
+  return { valid: true, value: trimmed };
+}
+
+function getParticipantMeta(participantId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (!participantsSheet) return null;
+  const data = participantsSheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIndex = headers.indexOf('participantId');
+  if (idIndex === -1) return null;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idIndex] === participantId) {
+      return {
+        site: data[i][headers.indexOf('site')],
+        cohort: data[i][headers.indexOf('rolloutId')]
+      };
+    }
+  }
+  return null;
+}
+
+function getChecklistLinksForParticipant(token, participantId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!participantId) {
+    return { success: false, message: 'Participant ID is required' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const links = {};
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+  const urlIndex = headers.indexOf('url');
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId) {
+      const checklistId = data[i][checklistIndex];
+      if (checklistId) {
+        links[checklistId] = data[i][urlIndex];
+      }
+    }
+  }
+
+  return { success: true, links: links };
+}
+
+function getChecklistLink(token, participantId, checklistItemId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      return { success: true, link: buildChecklistLinkRecord(data[i], headers) };
+    }
+  }
+
+  return { success: true, link: null };
+}
+
+function buildChecklistLinkRecord(row, headers) {
+  const idx = name => headers.indexOf(name);
+  return {
+    id: row[idx('id')],
+    participantId: row[idx('participant_id')],
+    checklistItemId: row[idx('checklist_item_id')],
+    url: row[idx('url')],
+    createdAt: row[idx('created_at')],
+    updatedAt: row[idx('updated_at')],
+    updatedBy: row[idx('updated_by')],
+    site: row[idx('site')],
+    cohort: row[idx('cohort')]
+  };
+}
+
+function upsertChecklistLink(token, participantId, checklistItemId, url) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  if (!participantId || !checklistItemId) {
+    return { success: false, message: 'Participant and checklist item are required' };
+  }
+
+  const validation = validateChecklistLinkUrl(url);
+  if (!validation.valid) {
+    return { success: false, message: validation.message };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+  const urlIndex = headers.indexOf('url');
+  const updatedAtIndex = headers.indexOf('updated_at');
+  const updatedByIndex = headers.indexOf('updated_by');
+  const createdAtIndex = headers.indexOf('created_at');
+  const siteIndex = headers.indexOf('site');
+  const cohortIndex = headers.indexOf('cohort');
+
+  const now = new Date().toISOString();
+  const meta = getParticipantMeta(participantId) || {};
+  let action = 'LINK_ADD';
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      action = 'LINK_UPDATE';
+      sheet.getRange(i + 1, urlIndex + 1).setNumberFormat('@').setValue(validation.value);
+      sheet.getRange(i + 1, updatedAtIndex + 1).setValue(now);
+      sheet.getRange(i + 1, updatedByIndex + 1).setValue(currentUser.username || currentUser.userId);
+      if (siteIndex !== -1) sheet.getRange(i + 1, siteIndex + 1).setValue(meta.site || '');
+      if (cohortIndex !== -1) sheet.getRange(i + 1, cohortIndex + 1).setValue(meta.cohort || '');
+      logActivity(currentUser.userId, currentUser.fullName, action, 'checklist_link',
+        participantId + ':' + checklistItemId, 'Updated data link');
+      return { success: true, message: 'Link updated', url: validation.value };
+    }
+  }
+
+  const row = new Array(headers.length).fill('');
+  row[headers.indexOf('id')] = generateUUID();
+  row[participantIndex] = participantId;
+  row[checklistIndex] = checklistItemId;
+  row[urlIndex] = validation.value;
+  row[createdAtIndex] = now;
+  row[updatedAtIndex] = now;
+  row[updatedByIndex] = currentUser.username || currentUser.userId;
+  if (siteIndex !== -1) row[siteIndex] = meta.site || '';
+  if (cohortIndex !== -1) row[cohortIndex] = meta.cohort || '';
+
+  const rowIndex = sheet.getLastRow() + 1;
+  sheet.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+  sheet.getRange(rowIndex, urlIndex + 1).setNumberFormat('@');
+
+  logActivity(currentUser.userId, currentUser.fullName, action, 'checklist_link',
+    participantId + ':' + checklistItemId, 'Added data link');
+
+  return { success: true, message: 'Link added', url: validation.value };
+}
+
+function deleteChecklistLink(token, participantId, checklistItemId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+  const checklistIndex = headers.indexOf('checklist_item_id');
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][participantIndex] === participantId &&
+        data[i][checklistIndex] === checklistItemId) {
+      sheet.deleteRow(i + 1);
+      logActivity(currentUser.userId, currentUser.fullName, 'LINK_DELETE', 'checklist_link',
+        participantId + ':' + checklistItemId, 'Deleted data link');
+      return { success: true, message: 'Link removed' };
+    }
+  }
+
+  return { success: false, message: 'Link not found' };
+}
+
+function deleteChecklistLinksForParticipant(participantId) {
+  if (!participantId) return;
+  const sheet = getChecklistLinksSheet();
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const participantIndex = headers.indexOf('participant_id');
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][participantIndex] === participantId) {
+      sheet.deleteRow(i + 1);
+    }
+  }
 }
 
 /**
