@@ -148,7 +148,7 @@ function initializeDatabase() {
   // Create Checklist sheet
   createSheetIfNotExists(ss, 'Checklist', [
     'checklistId', 'participantId', 'instrumentNumber', 'instrumentName', 'category',
-    'status', 'completedDate', 'completedBy', 'notes'
+    'status', 'completedDate', 'completedBy', 'notes', 'dataLink'
   ]);
 
   // Create StudySessions sheet
@@ -1693,6 +1693,30 @@ function ensureParticipantColumns(participantsSheet) {
   return headers;
 }
 
+function ensureChecklistColumns(checklistSheet) {
+  const requiredHeaders = [
+    'checklistId', 'participantId', 'instrumentNumber', 'instrumentName', 'category',
+    'status', 'completedDate', 'completedBy', 'notes', 'dataLink'
+  ];
+
+  const headerRange = checklistSheet.getRange(1, 1, 1, checklistSheet.getLastColumn() || 1);
+  const headers = headerRange.getValues()[0].filter(Boolean);
+  let updated = false;
+
+  requiredHeaders.forEach(header => {
+    if (headers.indexOf(header) === -1) {
+      headers.push(header);
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    checklistSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  return headers;
+}
+
 function getHeaderValue(row, headers, headerName) {
   const index = headers.indexOf(headerName);
   return index === -1 ? '' : row[index];
@@ -1893,8 +1917,8 @@ function getParticipantById(token, participantId) {
   }
 
   // Get checklist items
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
+  const cHeaders = ensureChecklistColumns(checklistSheet);
+  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
   const checklist = [];
 
   for (let i = 1; i < cData.length; i++) {
@@ -1908,7 +1932,8 @@ function getParticipantById(token, participantId) {
         status: cData[i][cHeaders.indexOf('status')],
         completedDate: cData[i][cHeaders.indexOf('completedDate')],
         completedBy: cData[i][cHeaders.indexOf('completedBy')],
-        notes: cData[i][cHeaders.indexOf('notes')]
+        notes: cData[i][cHeaders.indexOf('notes')],
+        dataLink: cData[i][cHeaders.indexOf('dataLink')]
       });
     }
   }
@@ -1956,6 +1981,7 @@ function enrollParticipant(token, participantData) {
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
   const participantHeaders = ensureParticipantColumns(participantsSheet);
+  ensureChecklistColumns(checklistSheet);
 
   // Get cohort info
   const cohort = getRolloutById(participantData.rolloutId);
@@ -2009,6 +2035,7 @@ function enrollParticipant(token, participantData) {
       instrument.name,
       instrument.category,
       'not_started',
+      '',
       '',
       '',
       ''
@@ -2477,6 +2504,7 @@ function importParticipantsCSV(token, fileData) {
         'not_started',
         '',
         '',
+        '',
         ''
       ]);
     });
@@ -2514,8 +2542,8 @@ function updateChecklistItem(token, checklistId, updateData) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const data = checklistSheet.getDataRange().getValues();
-  const headers = data[0];
+  const headers = ensureChecklistColumns(checklistSheet);
+  const data = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), headers.length).getValues();
 
   // Build participant site map for authorization checks
   const participantSiteMap = {};
@@ -2542,9 +2570,12 @@ function updateChecklistItem(token, checklistId, updateData) {
         }
       }
 
+      const updateDetails = [];
+
       // Update status
       if (updateData.status) {
         checklistSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(updateData.status);
+        updateDetails.push('status -> ' + updateData.status);
 
         // If marking as completed, set the date and user
         if (updateData.status === 'completed') {
@@ -2560,13 +2591,19 @@ function updateChecklistItem(token, checklistId, updateData) {
       // Update notes
       if (updateData.notes !== undefined) {
         checklistSheet.getRange(i + 1, headers.indexOf('notes') + 1).setValue(updateData.notes);
+        updateDetails.push('notes updated');
+      }
+
+      if (updateData.dataLink !== undefined) {
+        checklistSheet.getRange(i + 1, headers.indexOf('dataLink') + 1).setValue(updateData.dataLink);
+        updateDetails.push(updateData.dataLink ? 'data link saved' : 'data link removed');
       }
 
       // Update participant's completion percentage
       updateParticipantCompletion(participantId);
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_CHECKLIST', 'checklist', checklistId,
-        'Updated: ' + instrumentName + ' -> ' + updateData.status);
+        'Updated: ' + instrumentName + (updateDetails.length ? ' (' + updateDetails.join(', ') + ')' : ''));
 
       return { success: true, message: 'Checklist item updated' };
     }
@@ -2643,13 +2680,14 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
 
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
-  const checklistData = checklistSheet.getDataRange().getValues();
-  const cHeaders = checklistData[0];
+  const cHeaders = ensureChecklistColumns(checklistSheet);
+  const checklistData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
 
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
   const statusCol = cHeaders.indexOf('status');
   const checklistIdCol = cHeaders.indexOf('checklistId');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
 
   const checklistMap = {};
   for (let i = 1; i < checklistData.length; i++) {
@@ -2659,7 +2697,8 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
         checklistId: checklistData[i][checklistIdCol],
         status: checklistData[i][statusCol],
         completedDate: checklistData[i][cHeaders.indexOf('completedDate')],
-        completedBy: checklistData[i][cHeaders.indexOf('completedBy')]
+        completedBy: checklistData[i][cHeaders.indexOf('completedBy')],
+        dataLink: dataLinkCol === -1 ? '' : checklistData[i][dataLinkCol]
       };
     }
   }
@@ -2679,7 +2718,8 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
       status: checklistInfo.status || 'not_started',
       checklistId: checklistInfo.checklistId || '',
       completedDate: checklistInfo.completedDate || '',
-      completedBy: checklistInfo.completedBy || ''
+      completedBy: checklistInfo.completedBy || '',
+      dataLink: checklistInfo.dataLink || ''
     });
   }
 
@@ -2689,6 +2729,63 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     rolloutName: cohort.schoolName,
     site: cohort.site,
     participants: participants
+  };
+}
+
+/**
+ * Bulk update checklist data links for an instrument across participants
+ */
+function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Cohort not found' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  if (!instrument) {
+    return { success: false, message: 'Instrument not found' };
+  }
+
+  if (!updates || !updates.length) {
+    return { success: false, message: 'No updates provided' };
+  }
+
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (let i = 0; i < updates.length; i++) {
+    const update = updates[i];
+    if (!update.checklistId) {
+      errorCount++;
+      continue;
+    }
+
+    const result = updateChecklistItem(token, update.checklistId, {
+      dataLink: update.dataLink || ''
+    });
+
+    if (result.success) {
+      successCount++;
+    } else {
+      errorCount++;
+      if (result.message && result.message.toLowerCase().includes('unauthorized')) {
+        return { success: false, message: result.message };
+      }
+    }
+  }
+
+  return {
+    success: true,
+    message: `Updated ${successCount} links, ${errorCount} errors`
   };
 }
 
