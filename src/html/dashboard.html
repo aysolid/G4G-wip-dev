@@ -3000,25 +3000,28 @@
             updates.push({ checklistId: checklistId, dataLink: '' });
           }
         });
-      } else if (defaultLink) {
-        if (selectedRows.length === 0) {
-          showToast('Select at least one participant', 'error');
-          return;
+      } else {
+        const selectionKeys = batchLinkState.selections ? Object.keys(batchLinkState.selections) : [];
+        if (selectionKeys.length > 0) {
+          selectionKeys.forEach(pid => {
+            const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[pid] : '';
+            if (checklistId && batchLinkState.selections[pid]) {
+              updates.push({ checklistId: checklistId, dataLink: batchLinkState.selections[pid] });
+            }
+          });
+        } else if (defaultLink) {
+          if (selectedRows.length === 0) {
+            showToast('Select at least one participant', 'error');
+            return;
+          }
+          selectedRows.forEach(row => {
+            const participantId = row.getAttribute('data-batch-link-id');
+            const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[participantId] : '';
+            if (checklistId) {
+              updates.push({ checklistId: checklistId, dataLink: defaultLink });
+            }
+          });
         }
-        selectedRows.forEach(row => {
-          const participantId = row.getAttribute('data-batch-link-id');
-          const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[participantId] : '';
-          if (checklistId) {
-            updates.push({ checklistId: checklistId, dataLink: defaultLink });
-          }
-        });
-      } else if (batchLinkState.selections) {
-        Object.keys(batchLinkState.selections).forEach(pid => {
-          const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[pid] : '';
-          if (checklistId && batchLinkState.selections[pid]) {
-            updates.push({ checklistId: checklistId, dataLink: batchLinkState.selections[pid] });
-          }
-        });
       }
 
       if (updates.length === 0) {
