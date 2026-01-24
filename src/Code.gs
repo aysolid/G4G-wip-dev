@@ -2680,14 +2680,13 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
 
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
-  const cHeaders = ensureChecklistColumns(checklistSheet);
-  const checklistData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const cHeaders = checklistData[0];
 
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
   const statusCol = cHeaders.indexOf('status');
   const checklistIdCol = cHeaders.indexOf('checklistId');
-  const dataLinkCol = cHeaders.indexOf('dataLink');
 
   const checklistMap = {};
   for (let i = 1; i < checklistData.length; i++) {
@@ -2697,8 +2696,7 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
         checklistId: checklistData[i][checklistIdCol],
         status: checklistData[i][statusCol],
         completedDate: checklistData[i][cHeaders.indexOf('completedDate')],
-        completedBy: checklistData[i][cHeaders.indexOf('completedBy')],
-        dataLink: dataLinkCol === -1 ? '' : checklistData[i][dataLinkCol]
+        completedBy: checklistData[i][cHeaders.indexOf('completedBy')]
       };
     }
   }
@@ -2718,8 +2716,7 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
       status: checklistInfo.status || 'not_started',
       checklistId: checklistInfo.checklistId || '',
       completedDate: checklistInfo.completedDate || '',
-      completedBy: checklistInfo.completedBy || '',
-      dataLink: checklistInfo.dataLink || ''
+      completedBy: checklistInfo.completedBy || ''
     });
   }
 
@@ -2729,63 +2726,6 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     rolloutName: cohort.schoolName,
     site: cohort.site,
     participants: participants
-  };
-}
-
-/**
- * Bulk update checklist data links for an instrument across participants
- */
-function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role === 'viewer') {
-    return { success: false, message: 'Unauthorized' };
-  }
-
-  const cohort = getRolloutById(rolloutId);
-  if (!cohort) {
-    return { success: false, message: 'Cohort not found' };
-  }
-
-  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
-    return { success: false, message: 'Unauthorized for this site' };
-  }
-
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
-  if (!instrument) {
-    return { success: false, message: 'Instrument not found' };
-  }
-
-  if (!updates || !updates.length) {
-    return { success: false, message: 'No updates provided' };
-  }
-
-  let successCount = 0;
-  let errorCount = 0;
-
-  for (let i = 0; i < updates.length; i++) {
-    const update = updates[i];
-    if (!update.checklistId) {
-      errorCount++;
-      continue;
-    }
-
-    const result = updateChecklistItem(token, update.checklistId, {
-      dataLink: update.dataLink || ''
-    });
-
-    if (result.success) {
-      successCount++;
-    } else {
-      errorCount++;
-      if (result.message && result.message.toLowerCase().includes('unauthorized')) {
-        return { success: false, message: result.message };
-      }
-    }
-  }
-
-  return {
-    success: true,
-    message: `Updated ${successCount} links, ${errorCount} errors`
   };
 }
 
