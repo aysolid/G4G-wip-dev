@@ -545,6 +545,30 @@
       font-size: 0.875rem;
     }
 
+    .batch-link-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: auto;
+    }
+
+    .batch-link-table thead {
+      display: table-header-group;
+    }
+
+    .batch-link-table tbody {
+      display: table-row-group;
+    }
+
+    .batch-link-table tr {
+      display: table-row;
+    }
+
+    .batch-link-table th,
+    .batch-link-table td {
+      display: table-cell;
+      vertical-align: middle;
+    }
+
     /* Status Badges */
     .badge {
       display: inline-flex;
@@ -2580,7 +2604,7 @@
           </div>
         </div>
         <div class="table-container" style="max-height: 360px; overflow-y: auto;">
-          <table class="data-table">
+          <table class="data-table batch-link-table">
             <thead>
               <tr>
                 <th style="width: 50px;">
@@ -2877,7 +2901,7 @@
           </div>
         </div>
         <div class="table-container" style="max-height: 360px; overflow-y: auto;">
-          <table class="data-table">
+          <table class="data-table batch-link-table">
             <thead>
               <tr>
                 <th style="width: 50px;">
