@@ -1098,9 +1098,6 @@
     let isLoggingOut = false;
     let logoutRefreshTimer = null;
     let enrollSubmitting = false;
-    let participantChecklistLinks = {};
-    let checklistLinkSaving = false;
-    let checklistLinkState = null;
 
     // ============================================
     // INITIALIZATION
@@ -1866,27 +1863,12 @@
       `;
 
       google.script.run
-        .withSuccessHandler(function(result) {
-          if (!result.success) {
-            renderParticipantDetail(result);
-            return;
-          }
-          google.script.run
-            .withSuccessHandler(function(linkResult) {
-              const links = linkResult && linkResult.success ? linkResult.links : {};
-              renderParticipantDetail(result, links);
-            })
-            .withFailureHandler(function(error) {
-              handleError(error);
-              renderParticipantDetail(result, {});
-            })
-            .getChecklistLinksForParticipant(sessionToken, participantId);
-        })
+        .withSuccessHandler(renderParticipantDetail)
         .withFailureHandler(handleError)
         .getParticipantById(sessionToken, participantId);
     }
 
-    function renderParticipantDetail(result, linkMap) {
+    function renderParticipantDetail(result) {
       if (!result.success) {
         document.getElementById('participantDetailSection').innerHTML = `
           <div class="card">
@@ -1904,8 +1886,6 @@
 
       const p = result.participant;
       const checklist = result.checklist;
-      participantChecklistLinks = linkMap || {};
-      const canEditLinks = currentUser.role !== 'viewer';
 
       const html = `
         <button class="btn btn-secondary" onclick="showSection('participants')" style="margin-bottom: 1rem;">
@@ -2034,17 +2014,19 @@
                       ${item.notes ? `<div style="font-size: 0.75rem; color: var(--gray-500); font-style: italic;">Note: ${item.notes}</div>` : ''}
                     </div>
 
+                    ${currentUser.role !== 'viewer' ? `
                     <div style="display: flex; gap: 4px;">
-                      ${currentUser.role !== 'viewer' ? `
                       <button class="btn btn-sm ${item.status === 'completed' ? 'btn-success' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'completed', '${p.participantId}')" title="Mark Complete">
                         <span class="material-icons">check</span>
                       </button>
                       <button class="btn btn-sm ${item.status === 'missing' ? 'btn-danger' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'missing', '${p.participantId}')" title="Mark Missing">
                         <span class="material-icons">close</span>
                       </button>
-                      ` : ''}
-                      ${getChecklistLinkButton(item, p.participantId, canEditLinks)}
+                      <button class="btn btn-sm btn-secondary" onclick="addChecklistNote('${item.checklistId}', '${p.participantId}')" title="Add Note">
+                        <span class="material-icons">note_add</span>
+                      </button>
                     </div>
+                    ` : ''}
                   </div>
                 `).join('')}
               </div>
@@ -2054,24 +2036,6 @@
       `;
 
       document.getElementById('participantDetailSection').innerHTML = html;
-    }
-
-    function getChecklistLinkButton(item, participantId, canEditLinks) {
-      const hasLink = participantChecklistLinks[item.checklistId];
-      if (!canEditLinks && !hasLink) {
-        return `
-          <button class="btn btn-sm btn-secondary" disabled title="No data link available">
-            <span class="material-icons">link</span>
-          </button>
-        `;
-      }
-      const buttonClass = hasLink ? 'btn-primary' : 'btn-secondary';
-      const title = hasLink ? 'Open data link' : 'Add data link';
-      return `
-        <button class="btn btn-sm ${buttonClass}" onclick="openChecklistLinkModal('${item.checklistId}', ${JSON.stringify(item.instrumentName)}, '${participantId}')" title="${title}">
-          <span class="material-icons">link</span>
-        </button>
-      `;
     }
 
     function updateChecklistStatus(checklistId, status, participantId) {
@@ -2103,162 +2067,6 @@
           .withFailureHandler(handleError)
           .updateChecklistItem(sessionToken, checklistId, { notes: note });
       }
-    }
-
-    function openChecklistLinkModal(checklistId, instrumentName, participantId) {
-      const url = participantChecklistLinks[checklistId] || '';
-      const canEdit = currentUser.role !== 'viewer';
-
-      checklistLinkState = {
-        checklistId: checklistId,
-        participantId: participantId,
-        instrumentName: instrumentName,
-        url: url
-      };
-
-      if (!url && !canEdit) {
-        showToast('No data link available', 'error');
-        return;
-      }
-
-      if (!url) {
-        renderChecklistLinkEditModal('Add Data Link');
-        return;
-      }
-
-      renderChecklistLinkViewModal();
-    }
-
-    function renderChecklistLinkViewModal() {
-      const canEdit = currentUser.role !== 'viewer';
-      document.getElementById('modalTitle').textContent = 'Data Link';
-      document.getElementById('modalBody').innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-          <div style="font-weight: 600;">${checklistLinkState.instrumentName}</div>
-          <div style="font-size: 0.85rem; color: var(--gray-600);">Paste a Google Drive / Box / OneDrive / Qualtrics link.</div>
-          <a href="${checklistLinkState.url}" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); word-break: break-word;">
-            ${checklistLinkState.url}
-          </a>
-        </div>
-      `;
-      document.getElementById('modalFooter').innerHTML = `
-        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-        <button class="btn btn-primary" type="button" onclick="openChecklistLinkInNewTab()">
-          <span class="material-icons">open_in_new</span>
-          Open Link
-        </button>
-        ${canEdit ? `
-        <button class="btn btn-secondary" type="button" onclick="renderChecklistLinkEditModal('Edit Data Link')">
-          <span class="material-icons">edit</span>
-          Edit Link
-        </button>
-        <button class="btn btn-danger" type="button" onclick="confirmDeleteChecklistLink()">
-          <span class="material-icons">delete</span>
-          Remove Link
-        </button>
-        ` : ''}
-      `;
-      openModal();
-    }
-
-    function renderChecklistLinkEditModal(title) {
-      document.getElementById('modalTitle').textContent = title;
-      document.getElementById('modalBody').innerHTML = `
-        <div class="form-group">
-          <label class="form-label">URL</label>
-          <input type="url" class="form-input" id="checklistLinkUrl" placeholder="https://..." value="${checklistLinkState.url || ''}">
-          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.35rem;">Paste a Google Drive / Box / OneDrive / Qualtrics link.</div>
-          <div class="form-error" id="checklistLinkError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-        </div>
-      `;
-      document.getElementById('modalFooter').innerHTML = `
-        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" id="checklistLinkSaveBtn" type="button" onclick="saveChecklistLink()">
-          <span class="material-icons">save</span>
-          Save Link
-        </button>
-      `;
-      openModal();
-    }
-
-    function openChecklistLinkInNewTab() {
-      if (!checklistLinkState || !checklistLinkState.url) return;
-      window.open(checklistLinkState.url, '_blank', 'noopener');
-    }
-
-    function saveChecklistLink() {
-      if (checklistLinkSaving || !checklistLinkState) return;
-      const input = document.getElementById('checklistLinkUrl');
-      const errorEl = document.getElementById('checklistLinkError');
-      const saveBtn = document.getElementById('checklistLinkSaveBtn');
-      const url = input ? input.value.trim() : '';
-
-      if (!/^https?:\/\//i.test(url)) {
-        if (errorEl) {
-          errorEl.textContent = 'URL must start with http:// or https://';
-          errorEl.style.display = 'block';
-        }
-        return;
-      }
-
-      if (errorEl) errorEl.style.display = 'none';
-      checklistLinkSaving = true;
-      if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<div class="spinner" style="width: 18px; height: 18px;"></div> Saving...';
-      }
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          checklistLinkSaving = false;
-          if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<span class="material-icons">save</span> Save Link';
-          }
-          if (result.success) {
-            showToast(result.message || 'Link saved', 'success');
-            closeModal();
-            viewParticipant(checklistLinkState.participantId);
-          } else {
-            showToast(result.message || 'Unable to save link', 'error');
-          }
-        })
-        .withFailureHandler(function(error) {
-          checklistLinkSaving = false;
-          if (saveBtn) {
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<span class="material-icons">save</span> Save Link';
-          }
-          handleError(error);
-        })
-        .upsertChecklistLink(
-          sessionToken,
-          checklistLinkState.participantId,
-          checklistLinkState.checklistId,
-          url
-        );
-    }
-
-    function confirmDeleteChecklistLink() {
-      if (!checklistLinkState) return;
-      if (!confirm('Remove this data link?')) return;
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result.success) {
-            showToast(result.message || 'Link removed', 'success');
-            closeModal();
-            viewParticipant(checklistLinkState.participantId);
-          } else {
-            showToast(result.message || 'Unable to remove link', 'error');
-          }
-        })
-        .withFailureHandler(handleError)
-        .deleteChecklistLink(
-          sessionToken,
-          checklistLinkState.participantId,
-          checklistLinkState.checklistId
-        );
     }
 
     function editParticipant(participantId) {
