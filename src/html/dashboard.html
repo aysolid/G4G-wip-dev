@@ -2876,16 +2876,16 @@
             </button>
           </div>
         </div>
-        <div class="table-container" style="max-height: 360px; overflow-y: auto;">
-          <table class="data-table">
+        <div class="table-container" style="max-height: 360px; overflow-y: auto; overflow-x: hidden;">
+          <table class="data-table" style="table-layout: fixed;">
             <thead>
               <tr>
                 <th style="width: 50px;">
                   <input type="checkbox" id="batchLinkSelectAll" onclick="toggleBatchLinkSelectAll(this.checked)">
                 </th>
-                <th>Participant</th>
-                <th>Current Link</th>
-                <th style="width: 320px;">New Link</th>
+                <th style="width: 40%;">Participant</th>
+                <th style="width: 25%;">Current Link</th>
+                <th style="width: 35%;">New Link</th>
               </tr>
             </thead>
             <tbody>
@@ -2896,14 +2896,14 @@
                   <div style="font-weight: 600;">${p.fullName}</div>
                   <div style="font-size: 0.8rem; color: var(--gray-500);">${p.participantId} • ${p.schoolName}</div>
                 </td>
-                <td>
+                <td style="word-break: break-word;">
                   <div style="display: flex; gap: 0.5rem; align-items: center;">
                     ${linkBadge(p.dataLink)}
-                    ${p.dataLink ? `<span style="font-size: 0.8rem; color: var(--gray-600); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(p.dataLink)}</span>` : ''}
+                    ${p.dataLink ? `<span style="font-size: 0.8rem; color: var(--gray-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(p.dataLink)}</span>` : ''}
                   </div>
                 </td>
                 <td>
-                  <input class="form-input" data-batch-link-input="${p.participantId}" type="url" placeholder="https://drive.google.com/..." value="${escapeHtml(p.dataLink || '')}" oninput="setBatchParticipantLink('${p.participantId}', this.value)">
+                  <input class="form-input" data-batch-link-input="${p.participantId}" type="url" placeholder="https://drive.google.com/..." value="${escapeHtml(p.dataLink || '')}" oninput="setBatchParticipantLink('${p.participantId}', this.value)" style="width: 100%;">
                 </td>
               </tr>
               `).join('')}
@@ -3001,27 +3001,26 @@
           }
         });
       } else {
-        const selectionKeys = batchLinkState.selections ? Object.keys(batchLinkState.selections) : [];
-        if (selectionKeys.length > 0) {
-          selectionKeys.forEach(pid => {
-            const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[pid] : '';
-            if (checklistId && batchLinkState.selections[pid]) {
-              updates.push({ checklistId: checklistId, dataLink: batchLinkState.selections[pid] });
-            }
-          });
-        } else if (defaultLink) {
-          if (selectedRows.length === 0) {
-            showToast('Select at least one participant', 'error');
+        if (selectedRows.length === 0) {
+          showToast('Select at least one participant', 'error');
+          return;
+        }
+
+        selectedRows.forEach(row => {
+          const participantId = row.getAttribute('data-batch-link-id');
+          const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[participantId] : '';
+          if (!checklistId) return;
+
+          const perRowValue = batchLinkState.selections ? batchLinkState.selections[participantId] : '';
+          if (perRowValue) {
+            updates.push({ checklistId: checklistId, dataLink: perRowValue });
             return;
           }
-          selectedRows.forEach(row => {
-            const participantId = row.getAttribute('data-batch-link-id');
-            const checklistId = batchLinkState.checklistMap ? batchLinkState.checklistMap[participantId] : '';
-            if (checklistId) {
-              updates.push({ checklistId: checklistId, dataLink: defaultLink });
-            }
-          });
-        }
+
+          if (defaultLink) {
+            updates.push({ checklistId: checklistId, dataLink: defaultLink });
+          }
+        });
       }
 
       if (updates.length === 0) {
