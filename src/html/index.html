@@ -699,24 +699,6 @@
       letter-spacing: 0.04em;
     }
 
-    .comparison-row--site td {
-      font-weight: 700;
-      color: var(--gray-800);
-      background: var(--gray-100);
-    }
-
-    .comparison-row--cohort .comparison-label {
-      padding-left: 1rem;
-      color: var(--gray-700);
-    }
-
-    .comparison-row--subtotal td {
-      font-weight: 600;
-      color: var(--gray-800);
-      background: var(--gray-50);
-      border-top: 1px solid var(--gray-200);
-    }
-
     /* Status Pill */
     .status-pill {
       display: inline-flex;
@@ -1002,6 +984,9 @@
         </div>
         <div class="card-body">
           <div class="attention-list" id="needsAttention">
+            <div class="loading"><div class="spinner"></div></div>
+          </div>
+          <div class="card-body" id="attendanceDistribution">
             <div class="loading"><div class="spinner"></div></div>
           </div>
         </div>
@@ -1413,67 +1398,6 @@
         checklistContainer.innerHTML =
           '<p style="color: var(--gray-500); font-size: 0.85rem;">No protocol completion data available.</p>';
       }
-
-      const rows = comparison.entries.map(entry => `
-        <tr>
-          <td>${entry.label}</td>
-          <td>${entry.participants}</td>
-          <td>${entry.averageAttendance}%</td>
-          <td>${entry.protocolCompletion}%</td>
-        </tr>
-      `).join('');
-
-      document.getElementById('comparisonPanel').innerHTML = `
-        <table class="comparison-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Participants</th>
-              <th>Avg Attendance</th>
-              <th>Protocol Completion</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      `;
-    }
-
-    function renderAboutSummary(about) {
-      if (!about) return;
-      document.getElementById('aboutSummary').innerHTML = `
-        <div class="progress-item">
-          <div class="progress-header">
-            <span class="progress-label">Research Sites</span>
-            <span class="progress-value">${about.siteCount} Active</span>
-          </div>
-        </div>
-        <div class="progress-item">
-          <div class="progress-header">
-            <span class="progress-label">Study Cohorts</span>
-            <span class="progress-value">${about.cohortCount}</span>
-          </div>
-        </div>
-        <div class="progress-item">
-          <div class="progress-header">
-            <span class="progress-label">Protocol Items</span>
-            <span class="progress-value">${about.protocolItems} Required</span>
-          </div>
-        </div>
-        <div class="progress-item">
-          <div class="progress-header">
-            <span class="progress-label">Total Enrolled Participants</span>
-            <span class="progress-value">${about.totalParticipants}</span>
-          </div>
-        </div>
-        <div class="progress-item">
-          <div class="progress-header">
-            <span class="progress-label">Platform</span>
-            <span class="progress-value">${about.platform}</span>
-          </div>
-        </div>
-      `;
     }
 
     function renderNeedsAttention(items) {
@@ -1504,25 +1428,14 @@
         return;
       }
 
-      const rows = comparison.entries.map(entry => {
-        const rowType = entry.type || 'cohort';
-        if (rowType === 'site') {
-          return `
-            <tr class="comparison-row--site">
-              <td colspan="4">${entry.label}</td>
-            </tr>
-          `;
-        }
-
-        return `
-          <tr class="comparison-row--${rowType}">
-            <td class="comparison-label">${entry.label}</td>
-            <td>${entry.participants}</td>
-            <td>${entry.averageAttendance}%</td>
-            <td>${entry.protocolCompletion}%</td>
-          </tr>
-        `;
-      }).join('');
+      const rows = comparison.entries.map(entry => `
+        <tr>
+          <td>${entry.label}</td>
+          <td>${entry.participants}</td>
+          <td>${entry.averageAttendance}%</td>
+          <td>${entry.protocolCompletion}%</td>
+        </tr>
+      `).join('');
 
       document.getElementById('comparisonPanel').innerHTML = `
         <table class="comparison-table">
