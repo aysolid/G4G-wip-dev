@@ -1095,18 +1095,26 @@
     let attendanceParticipantsCache = [];
     let attendanceParticipantsRolloutId = null;
     let attendanceReportSessionLookup = {};
+    let isLoggingOut = false;
+    let logoutRefreshTimer = null;
+    let enrollSubmitting = false;
+    let participantChecklistLinks = {};
+    let checklistLinkSaving = false;
+    let checklistLinkState = null;
 
     // ============================================
     // INITIALIZATION
     // ============================================
     document.addEventListener('DOMContentLoaded', function() {
+      setupLogoutRefreshWatcher();
       initializeApp();
     });
 
     function initializeApp() {
-      // Get token from URL or localStorage
-      const urlParams = new URLSearchParams(window.location.search);
-      sessionToken = urlParams.get('token') || localStorage.getItem('g4g_token');
+      // Get token from session storage (single-use handoff from login)
+      sessionToken = sessionStorage.getItem('g4g_token');
+      sessionStorage.removeItem('g4g_token');
+      sessionStorage.removeItem('g4g_user');
 
       if (!sessionToken) {
         redirectToLogin();
@@ -1134,9 +1142,6 @@
       }
 
       currentUser = user;
-      localStorage.setItem('g4g_token', sessionToken);
-      localStorage.setItem('g4g_user', JSON.stringify(user));
-
       // Update UI with user info
       document.getElementById('userName').textContent = user.fullName;
       document.getElementById('userRole').textContent = user.role;
@@ -1158,9 +1163,37 @@
     }
 
     function redirectToLogin() {
-      localStorage.removeItem('g4g_token');
-      localStorage.removeItem('g4g_user');
+      if (isLoggingOut) {
+        window.location.href = WEB_APP_URL + '?page=index';
+        return;
+      }
+      sessionStorage.removeItem('g4g_token');
+      sessionStorage.removeItem('g4g_user');
       window.location.href = WEB_APP_URL + '?page=login';
+    }
+
+    function setupLogoutRefreshWatcher() {
+      const storedLogoutAt = localStorage.getItem('g4g_logout_at');
+      if (storedLogoutAt) {
+        scheduleLogoutRefresh(parseInt(storedLogoutAt, 10));
+      }
+
+      window.addEventListener('storage', function(event) {
+        if (event.key === 'g4g_logout_at' && event.newValue) {
+          scheduleLogoutRefresh(parseInt(event.newValue, 10));
+        }
+      });
+    }
+
+    function scheduleLogoutRefresh(logoutAt) {
+      if (!logoutAt || Number.isNaN(logoutAt)) return;
+      if (logoutRefreshTimer) return;
+      const elapsed = Date.now() - logoutAt;
+      const delay = Math.max(0, 5000 - elapsed);
+      logoutRefreshTimer = setTimeout(function() {
+        localStorage.removeItem('g4g_logout_at');
+        window.location.reload();
+      }, delay);
     }
 
     function applyRoleBasedAccess() {
@@ -1554,7 +1587,7 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
+            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Optional columns include parent/guardian fields. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
@@ -1721,12 +1754,12 @@
     }
 
     function renderParticipants(result) {
-      if (!result.success) {
+      if (!result || !result.success) {
         document.getElementById('participantsList').innerHTML = `
           <div class="empty-state">
             <span class="material-icons">error</span>
             <h3>Error loading participants</h3>
-            <p>${result.message}</p>
+            <p>${result && result.message ? result.message : 'Unable to load participants.'}</p>
           </div>
         `;
         return;
@@ -1833,12 +1866,27 @@
       `;
 
       google.script.run
-        .withSuccessHandler(renderParticipantDetail)
+        .withSuccessHandler(function(result) {
+          if (!result.success) {
+            renderParticipantDetail(result);
+            return;
+          }
+          google.script.run
+            .withSuccessHandler(function(linkResult) {
+              const links = linkResult && linkResult.success ? linkResult.links : {};
+              renderParticipantDetail(result, links);
+            })
+            .withFailureHandler(function(error) {
+              handleError(error);
+              renderParticipantDetail(result, {});
+            })
+            .getChecklistLinksForParticipant(sessionToken, participantId);
+        })
         .withFailureHandler(handleError)
         .getParticipantById(sessionToken, participantId);
     }
 
-    function renderParticipantDetail(result) {
+    function renderParticipantDetail(result, linkMap) {
       if (!result.success) {
         document.getElementById('participantDetailSection').innerHTML = `
           <div class="card">
@@ -1856,6 +1904,8 @@
 
       const p = result.participant;
       const checklist = result.checklist;
+      participantChecklistLinks = linkMap || {};
+      const canEditLinks = currentUser.role !== 'viewer';
 
       const html = `
         <button class="btn btn-secondary" onclick="showSection('participants')" style="margin-bottom: 1rem;">
@@ -1898,6 +1948,28 @@
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Full Name</div>
                   <div style="font-weight: 600; font-size: 1.125rem;">${p.fullName}</div>
                 </div>
+                ${currentUser.role !== 'viewer' ? `
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Name(s)</div>
+                  <div>${p.parentGuardianNames || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Phone</div>
+                  <div>${p.parentGuardianPhone || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Address</div>
+                  <div>${p.parentGuardianAddress || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Email</div>
+                  <div>${p.parentGuardianEmail || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian DOB</div>
+                  <div>${p.parentGuardianDob || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
+                </div>
+                ` : ''}
                 <div>
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Site</div>
                   <div><span class="badge ${p.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${p.site}</span></div>
@@ -1962,19 +2034,17 @@
                       ${item.notes ? `<div style="font-size: 0.75rem; color: var(--gray-500); font-style: italic;">Note: ${item.notes}</div>` : ''}
                     </div>
 
-                    ${currentUser.role !== 'viewer' ? `
                     <div style="display: flex; gap: 4px;">
+                      ${currentUser.role !== 'viewer' ? `
                       <button class="btn btn-sm ${item.status === 'completed' ? 'btn-success' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'completed', '${p.participantId}')" title="Mark Complete">
                         <span class="material-icons">check</span>
                       </button>
                       <button class="btn btn-sm ${item.status === 'missing' ? 'btn-danger' : 'btn-secondary'}" onclick="updateChecklistStatus('${item.checklistId}', 'missing', '${p.participantId}')" title="Mark Missing">
                         <span class="material-icons">close</span>
                       </button>
-                      <button class="btn btn-sm btn-secondary" onclick="addChecklistNote('${item.checklistId}', '${p.participantId}')" title="Add Note">
-                        <span class="material-icons">note_add</span>
-                      </button>
+                      ` : ''}
+                      ${getChecklistLinkButton(item, p.participantId, canEditLinks)}
                     </div>
-                    ` : ''}
                   </div>
                 `).join('')}
               </div>
@@ -1984,6 +2054,24 @@
       `;
 
       document.getElementById('participantDetailSection').innerHTML = html;
+    }
+
+    function getChecklistLinkButton(item, participantId, canEditLinks) {
+      const hasLink = participantChecklistLinks[item.checklistId];
+      if (!canEditLinks && !hasLink) {
+        return `
+          <button class="btn btn-sm btn-secondary" disabled title="No data link available">
+            <span class="material-icons">link</span>
+          </button>
+        `;
+      }
+      const buttonClass = hasLink ? 'btn-primary' : 'btn-secondary';
+      const title = hasLink ? 'Open data link' : 'Add data link';
+      return `
+        <button class="btn btn-sm ${buttonClass}" onclick="openChecklistLinkModal('${item.checklistId}', ${JSON.stringify(item.instrumentName)}, '${participantId}')" title="${title}">
+          <span class="material-icons">link</span>
+        </button>
+      `;
     }
 
     function updateChecklistStatus(checklistId, status, participantId) {
@@ -2017,6 +2105,162 @@
       }
     }
 
+    function openChecklistLinkModal(checklistId, instrumentName, participantId) {
+      const url = participantChecklistLinks[checklistId] || '';
+      const canEdit = currentUser.role !== 'viewer';
+
+      checklistLinkState = {
+        checklistId: checklistId,
+        participantId: participantId,
+        instrumentName: instrumentName,
+        url: url
+      };
+
+      if (!url && !canEdit) {
+        showToast('No data link available', 'error');
+        return;
+      }
+
+      if (!url) {
+        renderChecklistLinkEditModal('Add Data Link');
+        return;
+      }
+
+      renderChecklistLinkViewModal();
+    }
+
+    function renderChecklistLinkViewModal() {
+      const canEdit = currentUser.role !== 'viewer';
+      document.getElementById('modalTitle').textContent = 'Data Link';
+      document.getElementById('modalBody').innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="font-weight: 600;">${checklistLinkState.instrumentName}</div>
+          <div style="font-size: 0.85rem; color: var(--gray-600);">Paste a Google Drive / Box / OneDrive / Qualtrics link.</div>
+          <a href="${checklistLinkState.url}" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); word-break: break-word;">
+            ${checklistLinkState.url}
+          </a>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="openChecklistLinkInNewTab()">
+          <span class="material-icons">open_in_new</span>
+          Open Link
+        </button>
+        ${canEdit ? `
+        <button class="btn btn-secondary" type="button" onclick="renderChecklistLinkEditModal('Edit Data Link')">
+          <span class="material-icons">edit</span>
+          Edit Link
+        </button>
+        <button class="btn btn-danger" type="button" onclick="confirmDeleteChecklistLink()">
+          <span class="material-icons">delete</span>
+          Remove Link
+        </button>
+        ` : ''}
+      `;
+      openModal();
+    }
+
+    function renderChecklistLinkEditModal(title) {
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group">
+          <label class="form-label">URL</label>
+          <input type="url" class="form-input" id="checklistLinkUrl" placeholder="https://..." value="${checklistLinkState.url || ''}">
+          <div style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.35rem;">Paste a Google Drive / Box / OneDrive / Qualtrics link.</div>
+          <div class="form-error" id="checklistLinkError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="checklistLinkSaveBtn" type="button" onclick="saveChecklistLink()">
+          <span class="material-icons">save</span>
+          Save Link
+        </button>
+      `;
+      openModal();
+    }
+
+    function openChecklistLinkInNewTab() {
+      if (!checklistLinkState || !checklistLinkState.url) return;
+      window.open(checklistLinkState.url, '_blank', 'noopener');
+    }
+
+    function saveChecklistLink() {
+      if (checklistLinkSaving || !checklistLinkState) return;
+      const input = document.getElementById('checklistLinkUrl');
+      const errorEl = document.getElementById('checklistLinkError');
+      const saveBtn = document.getElementById('checklistLinkSaveBtn');
+      const url = input ? input.value.trim() : '';
+
+      if (!/^https?:\/\//i.test(url)) {
+        if (errorEl) {
+          errorEl.textContent = 'URL must start with http:// or https://';
+          errorEl.style.display = 'block';
+        }
+        return;
+      }
+
+      if (errorEl) errorEl.style.display = 'none';
+      checklistLinkSaving = true;
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<div class="spinner" style="width: 18px; height: 18px;"></div> Saving...';
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          checklistLinkSaving = false;
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<span class="material-icons">save</span> Save Link';
+          }
+          if (result.success) {
+            showToast(result.message || 'Link saved', 'success');
+            closeModal();
+            viewParticipant(checklistLinkState.participantId);
+          } else {
+            showToast(result.message || 'Unable to save link', 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          checklistLinkSaving = false;
+          if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<span class="material-icons">save</span> Save Link';
+          }
+          handleError(error);
+        })
+        .upsertChecklistLink(
+          sessionToken,
+          checklistLinkState.participantId,
+          checklistLinkState.checklistId,
+          url
+        );
+    }
+
+    function confirmDeleteChecklistLink() {
+      if (!checklistLinkState) return;
+      if (!confirm('Remove this data link?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(result.message || 'Link removed', 'success');
+            closeModal();
+            viewParticipant(checklistLinkState.participantId);
+          } else {
+            showToast(result.message || 'Unable to remove link', 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .deleteChecklistLink(
+          sessionToken,
+          checklistLinkState.participantId,
+          checklistLinkState.checklistId
+        );
+    }
+
     function editParticipant(participantId) {
       // First fetch the participant details
       google.script.run
@@ -2042,6 +2286,26 @@
           <div class="form-group">
             <label class="form-label">Full Name *</label>
             <input type="text" class="form-input" id="editParticipantName" value="${participant.fullName}" placeholder="Enter full name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Name(s)</label>
+            <input type="text" class="form-input" id="editParentNames" value="${participant.parentGuardianNames || ''}" placeholder="Enter parent/guardian names (comma-separated if multiple)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Phone Number</label>
+            <input type="text" class="form-input" id="editParentPhone" value="${participant.parentGuardianPhone || ''}" placeholder="(706) 555-1234">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Residential Address</label>
+            <textarea class="form-textarea" id="editParentAddress" rows="3" placeholder="Enter parent/guardian address">${participant.parentGuardianAddress || ''}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Email Address</label>
+            <input type="email" class="form-input" id="editParentEmail" value="${participant.parentGuardianEmail || ''}" placeholder="parent@example.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parent/Guardian Date of Birth</label>
+            <input type="date" class="form-input" id="editParentDob" value="${participant.parentGuardianDob || ''}">
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -2086,8 +2350,17 @@
     }
 
     function saveParticipantEdit(participantId) {
+      const parentEmail = document.getElementById('editParentEmail').value.trim();
+      const parentDob = document.getElementById('editParentDob').value;
+      const parentPhone = document.getElementById('editParentPhone').value.trim();
+
       const data = {
         fullName: document.getElementById('editParticipantName').value.trim(),
+        parentGuardianNames: document.getElementById('editParentNames').value.trim(),
+        parentGuardianPhone: parentPhone,
+        parentGuardianAddress: document.getElementById('editParentAddress').value.trim(),
+        parentGuardianEmail: parentEmail,
+        parentGuardianDob: parentDob,
         notes: document.getElementById('editParticipantNotes').value.trim()
       };
 
@@ -2099,6 +2372,22 @@
       if (!data.fullName) {
         showToast('Please enter a name', 'error');
         return;
+      }
+
+      if (parentEmail && !isValidEmail(parentEmail)) {
+        showToast('Please enter a valid parent/guardian email address', 'error');
+        return;
+      }
+      if (parentDob && !isValidDate(parentDob)) {
+        showToast('Please enter a valid parent/guardian date of birth', 'error');
+        return;
+      }
+      if (parentPhone) {
+        const digits = normalizePhoneDigits(parentPhone);
+        if (digits.length < 10 || digits.length > 15) {
+          showToast('Parent/guardian phone number must include 10 to 15 digits', 'error');
+          return;
+        }
       }
 
       google.script.run
@@ -2375,7 +2664,9 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th style="width: 50px;">Select</th>
+                <th style="width: 50px;">
+                  <input type="checkbox" id="batchChecklistSelectAll" onclick="toggleBatchChecklistSelectAll(this.checked)">
+                </th>
                 <th>Participant</th>
                 <th>Current Status</th>
                 <th style="width: 220px;">New Status</th>
@@ -2404,6 +2695,7 @@
           </table>
         </div>
       `;
+      updateBatchChecklistSelectAllState();
     }
 
     function toggleBatchChecklistSelection(participantId, checked) {
@@ -2411,12 +2703,42 @@
 
       if (!checked) {
         delete batchChecklistState.selections[participantId];
+        updateBatchChecklistSelectAllState();
         return;
       }
 
       if (!batchChecklistState.selections[participantId]) {
         batchChecklistState.selections[participantId] = '';
       }
+
+      updateBatchChecklistSelectAllState();
+    }
+
+    function toggleBatchChecklistSelectAll(checked) {
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-id]'));
+      if (!batchChecklistState.selections) batchChecklistState.selections = {};
+
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = checked;
+        const participantId = checkbox.getAttribute('data-batch-id');
+        if (checked) {
+          if (!batchChecklistState.selections[participantId]) {
+            batchChecklistState.selections[participantId] = '';
+          }
+        } else {
+          delete batchChecklistState.selections[participantId];
+        }
+      });
+    }
+
+    function updateBatchChecklistSelectAllState() {
+      const selectAll = document.getElementById('batchChecklistSelectAll');
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-id]'));
+      if (!selectAll || checkboxes.length === 0) return;
+
+      const selectedCount = checkboxes.filter(cb => cb.checked).length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      selectAll.checked = selectedCount === checkboxes.length;
     }
 
     function setBatchParticipantStatus(participantId, status) {
@@ -2426,11 +2748,13 @@
       if (!status) {
         delete batchChecklistState.selections[participantId];
         if (checkbox) checkbox.checked = false;
+        updateBatchChecklistSelectAllState();
         return;
       }
 
       batchChecklistState.selections[participantId] = status;
       if (checkbox) checkbox.checked = true;
+      updateBatchChecklistSelectAllState();
     }
 
     function applyBatchChecklistUpdates() {
@@ -2497,6 +2821,37 @@
               <div class="form-group">
                 <label class="form-label">Participant Full Name *</label>
                 <input type="text" class="form-input" id="enrollName" required placeholder="Enter participant's full name">
+                <div class="form-error" id="enrollNameError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Name(s)</label>
+                <input type="text" class="form-input" id="enrollParentNames" placeholder="Enter parent/guardian names (comma-separated if multiple)">
+                <div class="form-error" id="enrollParentNamesError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Phone Number</label>
+                <input type="text" class="form-input" id="enrollParentPhone" placeholder="(706) 555-1234">
+                <div class="form-error" id="enrollParentPhoneError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Residential Address</label>
+                <textarea class="form-textarea" id="enrollParentAddress" rows="3" placeholder="Enter parent/guardian address"></textarea>
+                <div class="form-error" id="enrollParentAddressError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Email Address</label>
+                <input type="email" class="form-input" id="enrollParentEmail" placeholder="parent@example.com">
+                <div class="form-error" id="enrollParentEmailError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Parent/Guardian Date of Birth</label>
+                <input type="date" class="form-input" id="enrollParentDob">
+                <div class="form-error" id="enrollParentDobError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
               </div>
 
               <div class="form-row">
@@ -2507,12 +2862,14 @@
                     <option value="UGA">UGA</option>
                     <option value="Missouri">Missouri</option>
                   </select>
+                  <div class="form-error" id="enrollSiteError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">Study Cohort *</label>
                   <select class="form-select" id="enrollRollout" required disabled>
                     <option value="">Select site first...</option>
                   </select>
+                  <div class="form-error" id="enrollRolloutError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
                 </div>
               </div>
 
@@ -2584,13 +2941,62 @@
     function handleEnroll(event) {
       event.preventDefault();
 
+      if (enrollSubmitting) return;
+
+      clearEnrollErrors();
+
+      const parentEmail = document.getElementById('enrollParentEmail').value.trim();
+      const parentDob = document.getElementById('enrollParentDob').value;
+      const parentPhone = document.getElementById('enrollParentPhone').value.trim();
+
       const data = {
         fullName: document.getElementById('enrollName').value.trim(),
+        parentGuardianNames: document.getElementById('enrollParentNames').value.trim(),
+        parentGuardianPhone: parentPhone,
+        parentGuardianAddress: document.getElementById('enrollParentAddress').value.trim(),
+        parentGuardianEmail: parentEmail,
+        parentGuardianDob: parentDob,
         rolloutId: document.getElementById('enrollRollout').value,
         notes: document.getElementById('enrollNotes').value.trim()
       };
 
+      let hasError = false;
+      if (!data.fullName) {
+        setEnrollError('enrollNameError', 'Participant full name is required.');
+        hasError = true;
+      }
+      if (!document.getElementById('enrollSite').value) {
+        setEnrollError('enrollSiteError', 'Site is required.');
+        hasError = true;
+      }
+      if (!data.rolloutId) {
+        setEnrollError('enrollRolloutError', 'Study cohort is required.');
+        hasError = true;
+      }
+
+      if (parentEmail && !isValidEmail(parentEmail)) {
+        setEnrollError('enrollParentEmailError', 'Please enter a valid email address.');
+        hasError = true;
+      }
+      if (parentDob && !isValidDate(parentDob)) {
+        setEnrollError('enrollParentDobError', 'Please enter a valid date of birth.');
+        hasError = true;
+      }
+      if (parentPhone) {
+        const digits = normalizePhoneDigits(parentPhone);
+        if (digits.length < 10 || digits.length > 15) {
+          setEnrollError('enrollParentPhoneError', 'Phone number must include 10 to 15 digits.');
+          hasError = true;
+        }
+      }
+
+      if (hasError) {
+        showToast('Please correct the highlighted fields', 'error');
+        return;
+      }
+
       const btn = document.getElementById('enrollBtn');
+      enrollSubmitting = true;
       btn.disabled = true;
       btn.innerHTML = '<div class="spinner" style="width: 20px; height: 20px;"></div> Enrolling...';
 
@@ -2598,19 +3004,87 @@
         .withSuccessHandler(function(result) {
           if (result.success) {
             showToast('Participant enrolled successfully! ID: ' + result.participantId, 'success');
-            viewParticipant(result.participantId);
+            resetEnrollForm();
+            enrollSubmitting = false;
+            btn.disabled = false;
+            btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
           } else {
             showToast(result.message, 'error');
+            enrollSubmitting = false;
             btn.disabled = false;
             btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
           }
         })
         .withFailureHandler(function(error) {
           handleError(error);
+          enrollSubmitting = false;
           btn.disabled = false;
           btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
         })
         .enrollParticipant(sessionToken, data);
+    }
+
+    function resetEnrollForm() {
+      document.getElementById('enrollName').value = '';
+      document.getElementById('enrollParentNames').value = '';
+      document.getElementById('enrollParentPhone').value = '';
+      document.getElementById('enrollParentAddress').value = '';
+      document.getElementById('enrollParentEmail').value = '';
+      document.getElementById('enrollParentDob').value = '';
+      document.getElementById('enrollNotes').value = '';
+      clearEnrollErrors();
+
+      const siteEl = document.getElementById('enrollSite');
+      const rolloutEl = document.getElementById('enrollRollout');
+
+      if (currentUser.role === 'facilitator' && currentUser.site && currentUser.site !== 'All') {
+        siteEl.value = currentUser.site;
+        siteEl.disabled = true;
+        loadRolloutsForSite();
+      } else {
+        siteEl.value = '';
+        siteEl.disabled = false;
+        rolloutEl.innerHTML = '<option value="">Select site first...</option>';
+        rolloutEl.disabled = true;
+      }
+    }
+
+    function clearEnrollErrors() {
+      [
+        'enrollNameError',
+        'enrollParentNamesError',
+        'enrollParentPhoneError',
+        'enrollParentAddressError',
+        'enrollParentEmailError',
+        'enrollParentDobError',
+        'enrollSiteError',
+        'enrollRolloutError'
+      ].forEach(id => setEnrollError(id, ''));
+    }
+
+    function setEnrollError(id, message) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (message) {
+        el.textContent = message;
+        el.style.display = 'block';
+      } else {
+        el.textContent = '';
+        el.style.display = 'none';
+      }
+    }
+
+    function isValidEmail(email) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function isValidDate(value) {
+      const date = new Date(value);
+      return !Number.isNaN(date.getTime());
+    }
+
+    function normalizePhoneDigits(phone) {
+      return (phone || '').replace(/\D/g, '');
     }
 
     // ============================================
@@ -5415,19 +5889,17 @@
     }
 
     function handleLogout() {
-      // Clear local storage first
-      localStorage.removeItem('g4g_token');
-      localStorage.removeItem('g4g_user');
-
+      isLoggingOut = true;
+      localStorage.setItem('g4g_logout_at', Date.now().toString());
       // Invalidate server session
       google.script.run
         .withSuccessHandler(function() {
           // Redirect to landing page (index)
-          window.location.href = WEB_APP_URL;
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .withFailureHandler(function() {
           // Even if server logout fails, still redirect to landing page
-          window.location.href = WEB_APP_URL;
+          window.location.href = WEB_APP_URL + '?page=index';
         })
         .logoutUser(sessionToken);
     }
