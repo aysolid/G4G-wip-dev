@@ -2472,7 +2472,9 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th style="width: 50px;">Select</th>
+                <th style="width: 50px;">
+                  <input type="checkbox" id="batchChecklistSelectAll" onclick="toggleBatchChecklistSelectAll(this.checked)">
+                </th>
                 <th>Participant</th>
                 <th>Current Status</th>
                 <th style="width: 220px;">New Status</th>
@@ -2501,6 +2503,7 @@
           </table>
         </div>
       `;
+      updateBatchChecklistSelectAllState();
     }
 
     function toggleBatchChecklistSelection(participantId, checked) {
@@ -2508,12 +2511,42 @@
 
       if (!checked) {
         delete batchChecklistState.selections[participantId];
+        updateBatchChecklistSelectAllState();
         return;
       }
 
       if (!batchChecklistState.selections[participantId]) {
         batchChecklistState.selections[participantId] = '';
       }
+
+      updateBatchChecklistSelectAllState();
+    }
+
+    function toggleBatchChecklistSelectAll(checked) {
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-id]'));
+      if (!batchChecklistState.selections) batchChecklistState.selections = {};
+
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = checked;
+        const participantId = checkbox.getAttribute('data-batch-id');
+        if (checked) {
+          if (!batchChecklistState.selections[participantId]) {
+            batchChecklistState.selections[participantId] = '';
+          }
+        } else {
+          delete batchChecklistState.selections[participantId];
+        }
+      });
+    }
+
+    function updateBatchChecklistSelectAllState() {
+      const selectAll = document.getElementById('batchChecklistSelectAll');
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-id]'));
+      if (!selectAll || checkboxes.length === 0) return;
+
+      const selectedCount = checkboxes.filter(cb => cb.checked).length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      selectAll.checked = selectedCount === checkboxes.length;
     }
 
     function setBatchParticipantStatus(participantId, status) {
@@ -2523,11 +2556,13 @@
       if (!status) {
         delete batchChecklistState.selections[participantId];
         if (checkbox) checkbox.checked = false;
+        updateBatchChecklistSelectAllState();
         return;
       }
 
       batchChecklistState.selections[participantId] = status;
       if (checkbox) checkbox.checked = true;
+      updateBatchChecklistSelectAllState();
     }
 
     function applyBatchChecklistUpdates() {

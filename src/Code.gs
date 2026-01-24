@@ -2106,26 +2106,6 @@ function updateParticipant(token, participantId, participantData) {
           setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
         }
       }
-      if (participantData.parentGuardianNames !== undefined) {
-        const idx = headers.indexOf('parent_guardian_names');
-        if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(participantData.parentGuardianNames);
-      }
-      if (participantData.parentGuardianPhone !== undefined) {
-        const idx = headers.indexOf('parent_guardian_phone');
-        if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(parentPhone);
-      }
-      if (participantData.parentGuardianAddress !== undefined) {
-        const idx = headers.indexOf('parent_guardian_address');
-        if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(participantData.parentGuardianAddress);
-      }
-      if (participantData.parentGuardianEmail !== undefined) {
-        const idx = headers.indexOf('parent_guardian_email');
-        if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(parentEmail);
-      }
-      if (participantData.parentGuardianDob !== undefined) {
-        const idx = headers.indexOf('parent_guardian_dob');
-        if (idx !== -1) participantsSheet.getRange(i + 1, idx + 1).setValue(parentDob);
-      }
       if (participantData.status) {
         setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
       }
