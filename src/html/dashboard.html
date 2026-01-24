@@ -2043,22 +2043,7 @@
                         <span class="material-icons">close</span>
                       </button>
                       ` : ''}
-                      ${(() => {
-                        const hasLink = participantChecklistLinks[item.checklistId];
-                        if (!canEditLinks && !hasLink) {
-                          return `
-                          <button class="btn btn-sm btn-secondary" disabled title="No data link available">
-                            <span class="material-icons">link</span>
-                          </button>`;
-                        }
-                        const buttonClass = hasLink ? 'btn-primary' : 'btn-secondary';
-                        const title = hasLink ? 'Open data link' : 'Add data link';
-                        return `
-                          <button class="btn btn-sm ${buttonClass}" onclick="openChecklistLinkModal('${item.checklistId}', ${JSON.stringify(item.instrumentName)}, '${p.participantId}')" title="${title}">
-                            <span class="material-icons">link</span>
-                          </button>
-                        `;
-                      })()}
+                      ${getChecklistLinkButton(item, p.participantId, canEditLinks)}
                     </div>
                   </div>
                 `).join('')}
@@ -2069,6 +2054,24 @@
       `;
 
       document.getElementById('participantDetailSection').innerHTML = html;
+    }
+
+    function getChecklistLinkButton(item, participantId, canEditLinks) {
+      const hasLink = participantChecklistLinks[item.checklistId];
+      if (!canEditLinks && !hasLink) {
+        return `
+          <button class="btn btn-sm btn-secondary" disabled title="No data link available">
+            <span class="material-icons">link</span>
+          </button>
+        `;
+      }
+      const buttonClass = hasLink ? 'btn-primary' : 'btn-secondary';
+      const title = hasLink ? 'Open data link' : 'Add data link';
+      return `
+        <button class="btn btn-sm ${buttonClass}" onclick="openChecklistLinkModal('${item.checklistId}', ${JSON.stringify(item.instrumentName)}, '${participantId}')" title="${title}">
+          <span class="material-icons">link</span>
+        </button>
+      `;
     }
 
     function updateChecklistStatus(checklistId, status, participantId) {
