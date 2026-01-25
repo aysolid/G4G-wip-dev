@@ -2873,22 +2873,21 @@
             </button>
           </div>
         </div>
-        <div class="table-container" style="max-height: 360px; overflow-y: auto; overflow-x: hidden;">
-          <table class="data-table" style="table-layout: fixed; width: 100%;">
+        <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+          <table class="data-table">
             <thead>
               <tr>
                 <th style="width: 50px;">
                   <input type="checkbox" id="batchLinkSelectAll" onclick="toggleBatchLinkSelectAll(this.checked)">
                 </th>
                 <th>Participant</th>
-                <th style="width: 240px;">Current Link</th>
-                <th style="width: 220px;">New Link</th>
+                <th>Current Link</th>
+                <th style="width: 260px;">New Link</th>
               </tr>
             </thead>
             <tbody>
               ${participants.map(p => {
                 const hasLink = p.dataLink && p.dataLink.trim();
-                const safeLink = escapeHtml(p.dataLink || '');
                 return `
                 <tr>
                   <td><input type="checkbox" data-batch-link-id="${p.participantId}" onchange="toggleBatchLinkSelection('${p.participantId}', this.checked)"></td>
@@ -2899,11 +2898,11 @@
                   <td>
                     ${hasLink ? `
                       <span class="badge badge-success" style="margin-right: 0.35rem;">linked</span>
-                      <span style="font-size: 0.8rem; color: var(--gray-600); display: inline-block; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;" title="${safeLink}">${safeLink}</span>
+                      <span style="font-size: 0.8rem; color: var(--gray-600); word-break: break-all;">${escapeHtml(p.dataLink)}</span>
                     ` : '<span class="badge badge-neutral">no link</span>'}
                   </td>
                   <td>
-                    <input class="form-input" type="url" placeholder="https://..." style="width: 100%;" onchange="setBatchParticipantLink('${p.participantId}', this.value)">
+                    <input class="form-input" type="url" placeholder="https://..." onchange="setBatchParticipantLink('${p.participantId}', this.value)">
                   </td>
                 </tr>
                 `;
