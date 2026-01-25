@@ -1117,6 +1117,7 @@
     let availableRollouts = [];
     let appConfig = null;
     let batchChecklistState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
+    let batchLinkState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
     let batchEnrollmentUpload = null;
     let batchEnrollmentResult = null;
     let instrumentStatsLookup = {};
@@ -1561,6 +1562,10 @@
               <button class="btn btn-secondary" onclick="openBatchChecklistModal()">
                 <span class="material-icons">playlist_add_check</span>
                 Batch Checklist Update
+              </button>
+              <button class="btn btn-secondary" onclick="openBatchLinkModal()">
+                <span class="material-icons">link</span>
+                Batch Link Update
               </button>
               <button class="btn btn-primary" onclick="showSection('enroll')">
                 <span class="material-icons">add</span>
@@ -2715,6 +2720,311 @@
         })
         .withFailureHandler(handleError)
         .bulkUpdateInstrumentStatus(sessionToken, batchChecklistState.rolloutId, batchChecklistState.instrumentNumber, updates);
+    }
+
+    function openBatchLinkModal() {
+      if (currentUser.role === 'viewer') {
+        showToast('Only administrators and facilitators can update links', 'error');
+        return;
+      }
+
+      const instruments = (appConfig && appConfig.instruments) ? appConfig.instruments : [];
+      if (!instruments.length) {
+        showToast('Instruments not loaded yet. Please try again.', 'error');
+        return;
+      }
+
+      const instrumentOptions = instruments
+        .map(inst => `<option value="${inst.number}">${inst.number}. ${inst.name}</option>`)
+        .join('');
+
+      const rolloutOptions = (availableRollouts || [])
+        .filter(r => r.status === 'active')
+        .map(r => {
+          const label = `${r.schoolName} (${r.period} ${r.year}) - ${r.site}`;
+          const selected = currentRolloutFilter !== 'All' && currentRolloutFilter === r.rolloutId ? 'selected' : '';
+          return `<option value="${r.rolloutId}" ${selected}>${label}</option>`;
+        })
+        .join('');
+
+      batchLinkState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
+      batchLinkState.selections = {};
+      batchLinkState.linkValues = {};
+
+      document.getElementById('modalTitle').textContent = 'Batch Link Update';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Protocol Item</label>
+            <select class="form-select" id="batchLinkInstrumentSelect">
+              <option value="">-- Choose protocol item --</option>
+              ${instrumentOptions}
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Cohort</label>
+            <select class="form-select" id="batchLinkRolloutSelect">
+              <option value="">-- Choose cohort --</option>
+              ${rolloutOptions || '<option value="" disabled>No active cohorts found</option>'}
+            </select>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 1rem;">
+          <div class="card-body" id="batchLinkResults">
+            <div class="empty-state">
+              <span class="material-icons">link</span>
+              <h3>Select a protocol item and cohort to load participants.</h3>
+              <p>Use this tool to add or clear data links for multiple participants at once.</p>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="loadBatchLinkParticipants()">
+          <span class="material-icons">refresh</span>
+          Load Participants
+        </button>
+      `;
+      openModal();
+    }
+
+    function loadBatchLinkParticipants() {
+      const instrumentSelect = document.getElementById('batchLinkInstrumentSelect');
+      const rolloutSelect = document.getElementById('batchLinkRolloutSelect');
+      const instrumentNumber = instrumentSelect ? instrumentSelect.value : '';
+      const rolloutId = rolloutSelect ? rolloutSelect.value : '';
+      const results = document.getElementById('batchLinkResults');
+
+      if (!instrumentNumber || !rolloutId) {
+        showToast('Select a protocol item and cohort first', 'error');
+        return;
+      }
+
+      if (results) {
+        results.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            batchLinkState = {
+              participants: result.participants || [],
+              instrumentNumber: instrumentNumber,
+              rolloutId: rolloutId,
+              instrumentName: result.instrumentName || ''
+            };
+            batchLinkState.selections = {};
+            batchLinkState.linkValues = {};
+            renderBatchLinkResults(result);
+          } else if (results) {
+            results.innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>${result.message || 'Unable to load participants'}</h3>
+              </div>
+            `;
+          }
+        })
+        .withFailureHandler(function(error) {
+          if (results) {
+            results.innerHTML = `
+              <div class="empty-state">
+                <span class="material-icons">error</span>
+                <h3>Unable to load participants</h3>
+              </div>
+            `;
+          }
+          handleError(error);
+        })
+        .getInstrumentLinksForRollout(sessionToken, rolloutId, instrumentNumber);
+    }
+
+    function renderBatchLinkResults(result) {
+      const results = document.getElementById('batchLinkResults');
+      if (!results) return;
+
+      const participants = batchLinkState.participants || [];
+      if (participants.length === 0) {
+        results.innerHTML = `
+          <div class="empty-state">
+            <span class="material-icons">groups</span>
+            <h3>No participants found for this cohort</h3>
+          </div>
+        `;
+        return;
+      }
+
+      results.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <div>
+            <div style="font-weight: 600;">${batchLinkState.instrumentName || 'Protocol Item'}</div>
+            <div style="font-size: 0.85rem; color: var(--gray-600);">${result.rolloutName || ''} ${result.site ? '(' + result.site + ')' : ''}</div>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <input class="form-input" id="batchLinkDefaultInput" placeholder="Paste data link to apply..." style="min-width: 240px;">
+            <button class="btn btn-primary" type="button" onclick="applyBatchLinkUpdates('apply')">
+              <span class="material-icons">save</span>
+              Apply to Selected
+            </button>
+            <button class="btn btn-danger" type="button" onclick="applyBatchLinkUpdates('remove')">
+              <span class="material-icons">link_off</span>
+              Remove Links
+            </button>
+          </div>
+        </div>
+        <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 50px;">
+                  <input type="checkbox" id="batchLinkSelectAll" onclick="toggleBatchLinkSelectAll(this.checked)">
+                </th>
+                <th>Participant</th>
+                <th>Current Link</th>
+                <th style="width: 260px;">New Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${participants.map(p => {
+                const hasLink = p.dataLink && p.dataLink.trim();
+                return `
+                <tr>
+                  <td><input type="checkbox" data-batch-link-id="${p.participantId}" onchange="toggleBatchLinkSelection('${p.participantId}', this.checked)"></td>
+                  <td>
+                    <div style="font-weight: 600;">${p.fullName}</div>
+                    <div style="font-size: 0.8rem; color: var(--gray-500);">${p.participantId} • ${p.schoolName}</div>
+                  </td>
+                  <td>
+                    ${hasLink ? `
+                      <span class="badge badge-success" style="margin-right: 0.35rem;">linked</span>
+                      <span style="font-size: 0.8rem; color: var(--gray-600); word-break: break-all;">${escapeHtml(p.dataLink)}</span>
+                    ` : '<span class="badge badge-neutral">no link</span>'}
+                  </td>
+                  <td>
+                    <input class="form-input" type="url" placeholder="https://..." onchange="setBatchParticipantLink('${p.participantId}', this.value)">
+                  </td>
+                </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      updateBatchLinkSelectAllState();
+    }
+
+    function toggleBatchLinkSelection(participantId, checked) {
+      if (!batchLinkState.selections) batchLinkState.selections = {};
+
+      if (!checked) {
+        delete batchLinkState.selections[participantId];
+        updateBatchLinkSelectAllState();
+        return;
+      }
+
+      if (!batchLinkState.selections[participantId]) {
+        batchLinkState.selections[participantId] = true;
+      }
+
+      updateBatchLinkSelectAllState();
+    }
+
+    function toggleBatchLinkSelectAll(checked) {
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-link-id]'));
+      if (!batchLinkState.selections) batchLinkState.selections = {};
+
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = checked;
+        const participantId = checkbox.getAttribute('data-batch-link-id');
+        if (checked) {
+          batchLinkState.selections[participantId] = true;
+        } else {
+          delete batchLinkState.selections[participantId];
+        }
+      });
+    }
+
+    function updateBatchLinkSelectAllState() {
+      const selectAll = document.getElementById('batchLinkSelectAll');
+      const checkboxes = Array.from(document.querySelectorAll('input[data-batch-link-id]'));
+      if (!selectAll || checkboxes.length === 0) return;
+
+      const selectedCount = checkboxes.filter(cb => cb.checked).length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+      selectAll.checked = selectedCount === checkboxes.length;
+    }
+
+    function setBatchParticipantLink(participantId, linkValue) {
+      if (!batchLinkState.linkValues) batchLinkState.linkValues = {};
+      const checkbox = document.querySelector(`input[data-batch-link-id="${participantId}"]`);
+      const trimmed = (linkValue || '').trim();
+
+      if (!trimmed) {
+        delete batchLinkState.linkValues[participantId];
+        if (checkbox) checkbox.checked = false;
+        delete batchLinkState.selections[participantId];
+        updateBatchLinkSelectAllState();
+        return;
+      }
+
+      batchLinkState.linkValues[participantId] = trimmed;
+      if (checkbox) checkbox.checked = true;
+      batchLinkState.selections[participantId] = true;
+      updateBatchLinkSelectAllState();
+    }
+
+    function applyBatchLinkUpdates(action) {
+      if (!batchLinkState.instrumentNumber || !batchLinkState.rolloutId) {
+        showToast('Load participants before applying updates', 'error');
+        return;
+      }
+
+      const selectedRows = Array.from(document.querySelectorAll('input[data-batch-link-id]:checked'));
+      if (selectedRows.length === 0) {
+        showToast('Select at least one participant', 'error');
+        return;
+      }
+
+      const defaultInput = document.getElementById('batchLinkDefaultInput');
+      const defaultLink = defaultInput ? defaultInput.value.trim() : '';
+      const updates = [];
+
+      if (action === 'remove') {
+        const confirmRemoval = confirm('Remove links for the selected participants?');
+        if (!confirmRemoval) return;
+        selectedRows.forEach(row => {
+          updates.push({ participantId: row.getAttribute('data-batch-link-id'), dataLink: '' });
+        });
+      } else if (defaultLink) {
+        selectedRows.forEach(row => {
+          updates.push({ participantId: row.getAttribute('data-batch-link-id'), dataLink: defaultLink });
+        });
+      } else {
+        selectedRows.forEach(row => {
+          const participantId = row.getAttribute('data-batch-link-id');
+          const linkValue = (batchLinkState.linkValues && batchLinkState.linkValues[participantId]) ? batchLinkState.linkValues[participantId] : '';
+          updates.push({ participantId: participantId, dataLink: linkValue });
+        });
+      }
+
+      if (updates.some(update => action !== 'remove' && !update.dataLink)) {
+        showToast('Enter a link for each selected participant', 'error');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showToast(result.message || 'Links updated', 'success');
+            loadBatchLinkParticipants();
+            refreshParticipantData(updates[0].participantId);
+          } else {
+            showToast(result.message, 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .bulkUpdateInstrumentLinks(sessionToken, batchLinkState.rolloutId, batchLinkState.instrumentNumber, updates);
     }
 
     // ============================================
