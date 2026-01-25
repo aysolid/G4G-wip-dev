@@ -2730,6 +2730,81 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
 }
 
 /**
+ * Get checklist data links for a specific instrument within a cohort
+ */
+function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Cohort not found' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  if (!instrument) {
+    return { success: false, message: 'Instrument not found' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet || !checklistSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const cHeaders = checklistData[0];
+
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
+
+  const checklistMap = {};
+  for (let i = 1; i < checklistData.length; i++) {
+    if (String(checklistData[i][instrumentCol]) === String(instrumentNumber)) {
+      const pid = checklistData[i][checklistParticipantCol];
+      checklistMap[pid] = {
+        dataLink: checklistData[i][dataLinkCol] || ''
+      };
+    }
+  }
+
+  const participants = [];
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][pHeaders.indexOf('rolloutId')] !== rolloutId) continue;
+
+    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const checklistInfo = checklistMap[participantId] || {};
+
+    participants.push({
+      participantId: participantId,
+      fullName: pData[i][pHeaders.indexOf('fullName')],
+      site: pData[i][pHeaders.indexOf('site')],
+      schoolName: pData[i][pHeaders.indexOf('schoolName')],
+      dataLink: checklistInfo.dataLink || ''
+    });
+  }
+
+  return {
+    success: true,
+    instrumentName: instrument.name,
+    rolloutName: cohort.schoolName,
+    site: cohort.site,
+    participants: participants
+  };
+}
+
+/**
  * Bulk update an instrument across participants in a cohort
  */
 function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates) {
@@ -2818,6 +2893,102 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
     'Updated ' + successCount + ' ' + instrument.name + ' records for cohort ' + cohort.schoolName);
+
+  return {
+    success: errorCount === 0,
+    message: 'Updated ' + successCount + ' participants' + (errorCount > 0 ? (' (' + errorCount + ' errors)') : '')
+  };
+}
+
+/**
+ * Bulk update data links for an instrument across participants in a cohort
+ */
+function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) {
+    return { success: false, message: 'Cohort not found' };
+  }
+
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  if (!instrument) {
+    return { success: false, message: 'Instrument not found' };
+  }
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return { success: false, message: 'No updates provided' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+
+  if (!participantsSheet || !checklistSheet) {
+    return { success: false, message: 'Required sheets not found' };
+  }
+
+  const pData = participantsSheet.getDataRange().getValues();
+  const pHeaders = pData[0];
+  const participantsInRollout = {};
+
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][pHeaders.indexOf('rolloutId')] === rolloutId) {
+      participantsInRollout[pData[i][pHeaders.indexOf('participantId')]] = true;
+    }
+  }
+
+  const cData = checklistSheet.getDataRange().getValues();
+  const cHeaders = cData[0];
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
+  const checklistIdCol = cHeaders.indexOf('checklistId');
+
+  const checklistMap = {};
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
+      const pid = cData[i][checklistParticipantCol];
+      checklistMap[pid] = cData[i][checklistIdCol];
+    }
+  }
+
+  let successCount = 0;
+  let errorCount = 0;
+
+  updates.forEach(update => {
+    if (!participantsInRollout[update.participantId]) {
+      errorCount++;
+      return;
+    }
+
+    if (update.dataLink === undefined) {
+      errorCount++;
+      return;
+    }
+
+    const checklistId = checklistMap[update.participantId];
+    if (!checklistId) {
+      errorCount++;
+      return;
+    }
+
+    const result = updateChecklistItem(token, checklistId, { dataLink: update.dataLink });
+    if (result.success) {
+      successCount++;
+    } else {
+      errorCount++;
+    }
+  });
+
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT_LINK', 'checklist', instrumentNumber,
+    'Updated ' + successCount + ' ' + instrument.name + ' links for cohort ' + cohort.schoolName);
 
   return {
     success: errorCount === 0,
