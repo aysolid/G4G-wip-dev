@@ -2777,6 +2777,7 @@ function updateChecklistItem(token, checklistId, updateData) {
 
       // Update participant's completion percentage
       updateParticipantCompletion(participantId);
+      syncParticipantStatusFromChecklist(participantId);
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_CHECKLIST', 'checklist', checklistId,
         'Updated: ' + instrumentName + (updateDetails.length ? ' (' + updateDetails.join(', ') + ')' : ''));
@@ -2786,6 +2787,76 @@ function updateChecklistItem(token, checklistId, updateData) {
   }
 
   return { success: false, message: 'Checklist item not found' };
+}
+
+function syncParticipantStatusFromChecklist(participantId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) return;
+
+  const pHeaders = ensureParticipantColumns(participantsSheet);
+  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  let participantRow = -1;
+  let currentStatus = '';
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][pHeaders.indexOf('participantId')]) === String(participantId)) {
+      participantRow = i + 1;
+      currentStatus = String(pData[i][pHeaders.indexOf('status')] || '');
+      break;
+    }
+  }
+  if (participantRow === -1) return;
+  if (currentStatus === 'withdrawn') return; // never auto-overwrite withdrawn
+
+  const cHeaders = ensureChecklistColumns(checklistSheet);
+  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  let hasPostTestCompleted = false;
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][cHeaders.indexOf('participantId')]) !== String(participantId)) continue;
+    const name = String(cData[i][cHeaders.indexOf('instrumentName')] || '').toLowerCase();
+    const status = String(cData[i][cHeaders.indexOf('status')] || '');
+    if (name.indexOf('post-test') !== -1 || name.indexOf('post test') !== -1) {
+      if (status === 'completed') {
+        hasPostTestCompleted = true;
+        break;
+      }
+    }
+  }
+
+  const targetStatus = hasPostTestCompleted ? 'completed' : 'active';
+  if (currentStatus !== targetStatus) {
+    setCellAsPlainText(participantsSheet, participantRow, pHeaders.indexOf('status') + 1, targetStatus);
+  }
+}
+
+function bulkUpdateParticipantStatus(token, rolloutId, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) return { success: false, message: 'Cohort not found' };
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+  if (!Array.isArray(updates) || updates.length === 0) return { success: false, message: 'No updates provided' };
+
+  let successCount = 0;
+  let errorCount = 0;
+  updates.forEach(update => {
+    if (!update || !update.participantId || !update.status) { errorCount++; return; }
+    if (CONFIG.PARTICIPANT_STATUSES.indexOf(update.status) === -1) { errorCount++; return; }
+    const result = updateParticipant(token, update.participantId, { status: update.status });
+    if (result.success) successCount++; else errorCount++;
+  });
+
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
+    'Updated statuses for ' + successCount + ' participants');
+  return {
+    success: errorCount === 0,
+    message: 'Updated ' + successCount + ' participants' + (errorCount > 0 ? (' (' + errorCount + ' errors)') : '')
+  };
 }
 
 /**
