@@ -3520,7 +3520,11 @@
           if (response === null) return;
           const numbers = response.split(',').map(v => v.trim()).filter(Boolean);
           google.script.run.withSuccessHandler(function(saveRes) {
-            showToast(saveRes.message || 'Saved', saveRes.success ? 'success' : 'error');
+            if (saveRes.success && saveRes.sync) {
+              showToast(`${saveRes.message}. Removed ${saveRes.sync.deleted || 0}, added ${saveRes.sync.added || 0} checklist rows.`, 'success');
+            } else {
+              showToast(saveRes.message || 'Saved', saveRes.success ? 'success' : 'error');
+            }
           }).saveRolloutProtocolItems(sessionToken, rolloutId, numbers);
         }).getProtocolItems(sessionToken, rolloutId);
       }).getProtocolItems(sessionToken);
