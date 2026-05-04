@@ -104,16 +104,86 @@ function getWebAppUrl() {
  * Get configuration for client-side use
  */
 function getConfig() {
+  const protocols = getGlobalProtocolItems();
   return {
     appName: CONFIG.APP_NAME,
     version: CONFIG.VERSION,
     sites: CONFIG.SITES,
     periods: CONFIG.PERIODS,
     roles: CONFIG.ROLES,
-    instruments: CONFIG.INSTRUMENTS,
+    instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES
   };
+}
+
+function getGlobalProtocolItems() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet || configSheet.getLastRow() < 2) return CONFIG.INSTRUMENTS;
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'PROTOCOL_ITEMS') {
+      try {
+        const parsed = JSON.parse(data[i][valueCol] || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+  }
+  return CONFIG.INSTRUMENTS;
+}
+
+function getRolloutProtocolItemsInternal(rolloutId) {
+  const globalItems = getGlobalProtocolItems();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet || configSheet.getLastRow() < 2) return globalItems;
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  let overrides = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'ROLLOUT_PROTOCOL_OVERRIDES') {
+      try { overrides = JSON.parse(data[i][valueCol] || '{}') || {}; } catch (e) {}
+      break;
+    }
+  }
+  const selectedIds = overrides[rolloutId];
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0) return globalItems;
+  const selectedMap = {};
+  selectedIds.forEach(id => selectedMap[String(id)] = true);
+  return globalItems.filter(item => selectedMap[String(item.number)]);
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
+}
+
+function getProtocolItemsForFilter(rolloutFilter) {
+  if (rolloutFilter && rolloutFilter !== 'All') {
+    return getRolloutProtocolItemsInternal(rolloutFilter);
+  }
+  return getGlobalProtocolItems();
 }
 
 // ============================================
@@ -888,6 +958,110 @@ function updateRollout(token, rolloutId, rolloutData) {
   }
 
   return { success: false, message: 'Cohort not found' };
+}
+
+function getProtocolItems(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const items = rolloutId ? getRolloutProtocolItemsInternal(rolloutId) : getGlobalProtocolItems();
+  return { success: true, items: items };
+}
+
+function saveGlobalProtocolItems(token, items) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!Array.isArray(items) || items.length === 0) return { success: false, message: 'At least one protocol item is required' };
+  const normalized = items.map((item, idx) => ({
+    number: idx + 1,
+    name: String(item.name || '').trim(),
+    category: String(item.category || 'lesson').trim()
+  })).filter(i => i.name);
+  if (!normalized.length) return { success: false, message: 'Invalid protocol list' };
+  upsertConfigValue('PROTOCOL_ITEMS', JSON.stringify(normalized), 'Global protocol items for new checklist assignments');
+  return { success: true, message: 'Global protocol items updated', items: normalized };
+}
+
+function saveRolloutProtocolItems(token, rolloutId, itemNumbers) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!rolloutId) return { success: false, message: 'rolloutId required' };
+  const globalItems = getGlobalProtocolItems();
+  const globalMap = {};
+  globalItems.forEach(i => globalMap[String(i.number)] = true);
+  const filtered = (itemNumbers || []).map(n => String(n)).filter(n => globalMap[n]);
+  if (filtered.length === 0) return { success: false, message: 'At least one protocol item must remain enabled for a rollout' };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  let overrides = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'ROLLOUT_PROTOCOL_OVERRIDES') {
+      try { overrides = JSON.parse(data[i][valueCol] || '{}') || {}; } catch (e) {}
+    }
+  }
+  overrides[rolloutId] = filtered;
+  upsertConfigValue('ROLLOUT_PROTOCOL_OVERRIDES', JSON.stringify(overrides), 'Per-rollout enabled protocol item numbers');
+  const syncSummary = syncRolloutChecklistProtocolItems(rolloutId, filtered);
+  return { success: true, message: 'Rollout protocol items updated', sync: syncSummary };
+}
+
+function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) return { added: 0, deleted: 0 };
+
+  const pHeaders = ensureParticipantColumns(participantsSheet);
+  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const cHeaders = ensureChecklistColumns(checklistSheet);
+  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const enabledMap = {};
+  enabledNumbers.forEach(n => enabledMap[String(n)] = true);
+  const enabledItems = getGlobalProtocolItems().filter(i => enabledMap[String(i.number)]);
+
+  const rolloutParticipantIds = {};
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][pHeaders.indexOf('rolloutId')]) === String(rolloutId)) {
+      rolloutParticipantIds[String(pData[i][pHeaders.indexOf('participantId')])] = true;
+    }
+  }
+
+  let deleted = 0;
+  for (let i = cData.length - 1; i >= 1; i--) {
+    const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
+    if (!rolloutParticipantIds[participantId]) continue;
+    const number = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
+    if (!enabledMap[number]) {
+      checklistSheet.deleteRow(i + 1);
+      deleted++;
+    }
+  }
+
+  const freshData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const existing = {};
+  for (let i = 1; i < freshData.length; i++) {
+    const participantId = String(freshData[i][cHeaders.indexOf('participantId')]);
+    const number = String(freshData[i][cHeaders.indexOf('instrumentNumber')]);
+    existing[participantId + '|' + number] = true;
+  }
+
+  let added = 0;
+  Object.keys(rolloutParticipantIds).forEach(participantId => {
+    enabledItems.forEach(item => {
+      const key = participantId + '|' + String(item.number);
+      if (!existing[key]) {
+        checklistSheet.appendRow([generateUUID(), participantId, item.number, item.name, item.category, 'not_started', '', '', '', '']);
+        added++;
+      }
+    });
+    updateParticipantCompletion(participantId);
+  });
+
+  return { added: added, deleted: deleted };
 }
 
 /**
@@ -2025,8 +2199,8 @@ function enrollParticipant(token, participantData) {
   });
   appendParticipantRowAsText(participantsSheet, row);
 
-  // Create checklist items for all 18 instruments
-  CONFIG.INSTRUMENTS.forEach(instrument => {
+  // Create checklist items for rollout-configured protocol items
+  getRolloutProtocolItemsInternal(participantData.rolloutId).forEach(instrument => {
     const checklistId = generateUUID();
     checklistSheet.appendRow([
       checklistId,
@@ -2493,7 +2667,7 @@ function importParticipantsCSV(token, fileData) {
     });
     appendParticipantRowAsText(participantsSheet, rowValues);
 
-    CONFIG.INSTRUMENTS.forEach(instrument => {
+    getRolloutProtocolItemsInternal(cohort.rolloutId).forEach(instrument => {
       const checklistId = generateUUID();
       checklistSheet.appendRow([
         checklistId,
@@ -2665,7 +2839,7 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2747,7 +2921,7 @@ function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2822,7 +2996,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2918,7 +3092,7 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -3148,9 +3322,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     const cData = checklistSheet.getDataRange().getValues();
     const cHeaders = cData[0];
 
+    const protocolItems = getProtocolItemsForFilter(rolloutFilter);
     const instrumentCounts = {};
-
-    CONFIG.INSTRUMENTS.forEach(inst => {
+    protocolItems.forEach(inst => {
       instrumentCounts[inst.number] = { total: 0, completed: 0, name: inst.name };
     });
 
@@ -3172,7 +3346,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       }
     }
 
-    stats.instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
+    stats.instrumentStats = protocolItems.map(inst => ({
       number: inst.number,
       name: inst.name,
       category: inst.category,
@@ -3343,7 +3517,8 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     const pendingByInstrument = {};
     const pendingSets = {};
 
-    CONFIG.INSTRUMENTS.forEach(inst => {
+    const protocolItems = getProtocolItemsForFilter(effectiveRollout);
+    protocolItems.forEach(inst => {
       counts[inst.number] = { total: 0, completed: 0, name: inst.name, category: inst.category };
       pendingByInstrument[inst.number] = [];
       pendingSets[inst.number] = new Set();
@@ -3377,7 +3552,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       pendingByInstrument[key].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     });
 
-    instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
+    instrumentStats = protocolItems.map(inst => ({
       number: inst.number,
       name: inst.name,
       category: inst.category,
