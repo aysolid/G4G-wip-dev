@@ -3342,6 +3342,10 @@
               <span class="material-icons">add</span>
               Add Cohort
             </button>
+            <button class="btn btn-secondary" onclick="showGlobalProtocolManager()">
+              <span class="material-icons">fact_check</span>
+              Manage Default Protocols
+            </button>
           </div>
           <div class="card-body" id="rolloutsList">
             <div class="loading">
@@ -3410,6 +3414,9 @@
                     </button>
                     <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Cohort">
                       <span class="material-icons">edit</span>
+                    </button>
+                    <button class="btn btn-sm btn-warning" onclick="showRolloutProtocolManager('${r.rolloutId}', '${r.schoolName}')" title="Manage Protocol Items">
+                      <span class="material-icons">rule</span>
                     </button>
                     <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Cohort">
                       <span class="material-icons">delete</span>
@@ -3483,6 +3490,40 @@
       `;
       openModal();
       generateSessionFields();
+    }
+
+    function showGlobalProtocolManager() {
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result.success) return showToast(result.message || 'Unable to load protocols', 'error');
+        const raw = result.items.map(i => `${i.name}|${i.category}`).join('\n');
+        const edited = prompt('Edit default protocol items (one per line: Name|Category). This affects NEW checklist creation only.', raw);
+        if (edited === null) return;
+        const items = edited.split('\n').map(line => line.trim()).filter(Boolean).map((line, idx) => {
+          const parts = line.split('|');
+          return { number: idx + 1, name: (parts[0] || '').trim(), category: (parts[1] || 'lesson').trim() };
+        }).filter(i => i.name);
+        google.script.run.withSuccessHandler(function(saveResult) {
+          showToast(saveResult.message || 'Saved', saveResult.success ? 'success' : 'error');
+        }).saveGlobalProtocolItems(sessionToken, items);
+      }).getProtocolItems(sessionToken);
+    }
+
+    function showRolloutProtocolManager(rolloutId, schoolName) {
+      google.script.run.withSuccessHandler(function(globalRes) {
+        if (!globalRes.success) return showToast(globalRes.message || 'Unable to load defaults', 'error');
+        google.script.run.withSuccessHandler(function(rolloutRes) {
+          if (!rolloutRes.success) return showToast(rolloutRes.message || 'Unable to load rollout protocol items', 'error');
+          const enabled = {};
+          rolloutRes.items.forEach(i => enabled[String(i.number)] = true);
+          const list = globalRes.items.map(i => `[${enabled[String(i.number)] ? 'x' : ' '}] ${i.number}. ${i.name} (${i.category})`).join('\n');
+          const response = prompt(`Manage protocol items for ${schoolName}.\nEnter enabled protocol numbers separated by commas.\n\n${list}`, rolloutRes.items.map(i => i.number).join(','));
+          if (response === null) return;
+          const numbers = response.split(',').map(v => v.trim()).filter(Boolean);
+          google.script.run.withSuccessHandler(function(saveRes) {
+            showToast(saveRes.message || 'Saved', saveRes.success ? 'success' : 'error');
+          }).saveRolloutProtocolItems(sessionToken, rolloutId, numbers);
+        }).getProtocolItems(sessionToken, rolloutId);
+      }).getProtocolItems(sessionToken);
     }
 
     function generateSessionFields() {
