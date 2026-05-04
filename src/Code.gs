@@ -3387,6 +3387,12 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
         ? Math.round((instrumentCounts[inst.number].completed / instrumentCounts[inst.number].total) * 100)
         : 0
     }));
+
+    const instrumentCompleted = stats.instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
+    const instrumentTotal = stats.instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
+    if (instrumentTotal > 0) {
+      stats.overallCompletion = Math.round((instrumentCompleted / instrumentTotal) * 100);
+    }
   }
 
   return stats;
@@ -3607,6 +3613,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
 
     overview.instrumentsCompleted = instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
     overview.instrumentsTotal = instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
+    if (overview.instrumentsTotal > 0) {
+      overview.averageCompletion = Math.round((overview.instrumentsCompleted / overview.instrumentsTotal) * 100);
+    }
   }
 
   const cohorts = Object.values(rolloutEntries).sort((a, b) => {
