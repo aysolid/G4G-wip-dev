@@ -3220,18 +3220,41 @@ function updateParticipantCompletion(participantId) {
 function buildLiveCompletionMap(participantIds) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const checklistSheet = ss.getSheetByName('Checklist');
+  const participantsSheet = ss.getSheetByName('Participants');
   const map = {};
-  if (!checklistSheet || checklistSheet.getLastRow() < 2) return map;
+  if (!checklistSheet || checklistSheet.getLastRow() < 2 || !participantsSheet || participantsSheet.getLastRow() < 2) return map;
   const set = {};
   (participantIds || []).forEach(id => { set[String(id)] = true; });
   const filterEnabled = participantIds && participantIds.length > 0;
+
+  const pHeaders = ensureParticipantColumns(participantsSheet);
+  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const participantRolloutMap = {};
+  const rolloutAllowedNumbersMap = {};
+  for (let i = 1; i < pData.length; i++) {
+    const pid = String(pData[i][pHeaders.indexOf('participantId')]);
+    if (filterEnabled && !set[pid]) continue;
+    const rolloutId = String(pData[i][pHeaders.indexOf('rolloutId')] || '');
+    participantRolloutMap[pid] = rolloutId;
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => { allowed[String(item.number)] = true; });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
+  }
+
   const cData = checklistSheet.getDataRange().getValues();
   const cHeaders = cData[0];
   const participantCol = cHeaders.indexOf('participantId');
   const statusCol = cHeaders.indexOf('status');
+  const numberCol = cHeaders.indexOf('instrumentNumber');
   for (let i = 1; i < cData.length; i++) {
     const pid = String(cData[i][participantCol]);
     if (filterEnabled && !set[pid]) continue;
+    const rolloutId = participantRolloutMap[pid] || '';
+    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+    const itemNumber = String(cData[i][numberCol]);
+    if (!allowedMap[itemNumber]) continue;
     if (!map[pid]) map[pid] = { total: 0, completed: 0, percentage: 0 };
     map[pid].total++;
     if (cData[i][statusCol] === 'completed') map[pid].completed++;
@@ -3994,23 +4017,42 @@ function parseSessionDate(dateValue) {
 
 function buildProtocolSummary(participants, checklistSheet) {
   const participantIds = new Set(participants.map(p => p.participantId));
+  const participantRolloutMap = {};
+  participants.forEach(p => { participantRolloutMap[String(p.participantId)] = String(p.rolloutId || ''); });
   const instrumentCounts = {};
   let totalCompleted = 0;
-  const requiredItems = CONFIG.INSTRUMENTS.length;
-
-  CONFIG.INSTRUMENTS.forEach(inst => {
-    instrumentCounts[inst.number] = { name: inst.name, total: 0, completed: 0 };
+  const rolloutAllowedNumbersMap = {};
+  const enabledItemsByNumber = {};
+  participants.forEach(p => {
+    const rolloutId = String(p.rolloutId || '');
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
+        allowed[String(item.number)] = true;
+        enabledItemsByNumber[String(item.number)] = item;
+      });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
   });
 
   if (checklistSheet && participantIds.size > 0) {
     const cData = checklistSheet.getDataRange().getValues();
     const cHeaders = cData[0];
     for (let i = 1; i < cData.length; i++) {
-      const participantId = cData[i][cHeaders.indexOf('participantId')];
+      const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
       if (!participantIds.has(participantId)) continue;
-      const instNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
+      const instNumber = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
       const status = cData[i][cHeaders.indexOf('status')];
-      if (!instrumentCounts[instNumber]) continue;
+      const rolloutId = participantRolloutMap[participantId] || '';
+      const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+      if (!allowedMap[instNumber]) continue;
+      if (!instrumentCounts[instNumber]) {
+        instrumentCounts[instNumber] = {
+          name: cData[i][cHeaders.indexOf('instrumentName')] || (enabledItemsByNumber[instNumber] || {}).name || ('Item ' + instNumber),
+          total: 0,
+          completed: 0
+        };
+      }
 
       instrumentCounts[instNumber].total++;
       if (status === 'completed') {
@@ -4020,20 +4062,21 @@ function buildProtocolSummary(participants, checklistSheet) {
     }
   }
 
-  const totalRequired = participants.length * requiredItems;
+  const totalRequired = Object.values(instrumentCounts).reduce((sum, item) => sum + item.total, 0);
+  const requiredItems = participants.length > 0 ? Math.round(totalRequired / participants.length) : 0;
   const completionRate = totalRequired > 0 ? Math.round((totalCompleted / totalRequired) * 100) : 0;
 
-  const instrumentStats = CONFIG.INSTRUMENTS.map(inst => {
-    const counts = instrumentCounts[inst.number];
-    const percentage = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
+  const instrumentStats = Object.keys(instrumentCounts).map(instNumber => {
+    const counts = instrumentCounts[instNumber];
+    const percentage = counts && counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
     return {
-      number: inst.number,
-      name: inst.name,
+      number: Number(instNumber),
+      name: counts.name,
       total: counts.total,
       completed: counts.completed,
       percentage: percentage
     };
-  });
+  }).sort((a, b) => a.number - b.number);
 
   const lowestItems = instrumentStats
     .filter(item => item.total > 0)
