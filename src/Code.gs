@@ -104,16 +104,79 @@ function getWebAppUrl() {
  * Get configuration for client-side use
  */
 function getConfig() {
+  const protocols = getGlobalProtocolItems();
   return {
     appName: CONFIG.APP_NAME,
     version: CONFIG.VERSION,
     sites: CONFIG.SITES,
     periods: CONFIG.PERIODS,
     roles: CONFIG.ROLES,
-    instruments: CONFIG.INSTRUMENTS,
+    instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES
   };
+}
+
+function getGlobalProtocolItems() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet || configSheet.getLastRow() < 2) return CONFIG.INSTRUMENTS;
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'PROTOCOL_ITEMS') {
+      try {
+        const parsed = JSON.parse(data[i][valueCol] || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+  }
+  return CONFIG.INSTRUMENTS;
+}
+
+function getRolloutProtocolItemsInternal(rolloutId) {
+  const globalItems = getGlobalProtocolItems();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  if (!configSheet || configSheet.getLastRow() < 2) return globalItems;
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  let overrides = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'ROLLOUT_PROTOCOL_OVERRIDES') {
+      try { overrides = JSON.parse(data[i][valueCol] || '{}') || {}; } catch (e) {}
+      break;
+    }
+  }
+  const selectedIds = overrides[rolloutId];
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0) return globalItems;
+  const selectedMap = {};
+  selectedIds.forEach(id => selectedMap[String(id)] = true);
+  return globalItems.filter(item => selectedMap[String(item.number)]);
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
 }
 
 // ============================================
@@ -888,6 +951,54 @@ function updateRollout(token, rolloutId, rolloutData) {
   }
 
   return { success: false, message: 'Cohort not found' };
+}
+
+function getProtocolItems(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const items = rolloutId ? getRolloutProtocolItemsInternal(rolloutId) : getGlobalProtocolItems();
+  return { success: true, items: items };
+}
+
+function saveGlobalProtocolItems(token, items) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!Array.isArray(items) || items.length === 0) return { success: false, message: 'At least one protocol item is required' };
+  const normalized = items.map((item, idx) => ({
+    number: idx + 1,
+    name: String(item.name || '').trim(),
+    category: String(item.category || 'lesson').trim()
+  })).filter(i => i.name);
+  if (!normalized.length) return { success: false, message: 'Invalid protocol list' };
+  upsertConfigValue('PROTOCOL_ITEMS', JSON.stringify(normalized), 'Global protocol items for new checklist assignments');
+  return { success: true, message: 'Global protocol items updated', items: normalized };
+}
+
+function saveRolloutProtocolItems(token, rolloutId, itemNumbers) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!rolloutId) return { success: false, message: 'rolloutId required' };
+  const globalItems = getGlobalProtocolItems();
+  const globalMap = {};
+  globalItems.forEach(i => globalMap[String(i.number)] = true);
+  const filtered = (itemNumbers || []).map(n => String(n)).filter(n => globalMap[n]);
+  if (filtered.length === 0) return { success: false, message: 'At least one protocol item must remain enabled for a rollout' };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  let overrides = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'ROLLOUT_PROTOCOL_OVERRIDES') {
+      try { overrides = JSON.parse(data[i][valueCol] || '{}') || {}; } catch (e) {}
+    }
+  }
+  overrides[rolloutId] = filtered;
+  upsertConfigValue('ROLLOUT_PROTOCOL_OVERRIDES', JSON.stringify(overrides), 'Per-rollout enabled protocol item numbers');
+  return { success: true, message: 'Rollout protocol items updated' };
 }
 
 /**
@@ -2025,8 +2136,8 @@ function enrollParticipant(token, participantData) {
   });
   appendParticipantRowAsText(participantsSheet, row);
 
-  // Create checklist items for all 18 instruments
-  CONFIG.INSTRUMENTS.forEach(instrument => {
+  // Create checklist items for rollout-configured protocol items
+  getRolloutProtocolItemsInternal(participantData.rolloutId).forEach(instrument => {
     const checklistId = generateUUID();
     checklistSheet.appendRow([
       checklistId,
@@ -2493,7 +2604,7 @@ function importParticipantsCSV(token, fileData) {
     });
     appendParticipantRowAsText(participantsSheet, rowValues);
 
-    CONFIG.INSTRUMENTS.forEach(instrument => {
+    getRolloutProtocolItemsInternal(cohort.rolloutId).forEach(instrument => {
       const checklistId = generateUUID();
       checklistSheet.appendRow([
         checklistId,
@@ -2665,7 +2776,7 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2747,7 +2858,7 @@ function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2822,7 +2933,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2918,7 +3029,7 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
