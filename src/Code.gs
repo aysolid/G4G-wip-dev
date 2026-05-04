@@ -1971,6 +1971,8 @@ function getAllParticipants(token, filters) {
   const headers = ensureParticipantColumns(participantsSheet);
   const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
   const participants = [];
+  const participantIds = data.slice(1).map(row => getHeaderValue(row, headers, 'participantId')).filter(Boolean);
+  const completionMap = buildLiveCompletionMap(participantIds);
 
   filters = filters || {};
 
@@ -1987,7 +1989,7 @@ function getAllParticipants(token, filters) {
       enrolledBy: getHeaderValue(data[i], headers, 'enrolledBy'),
       status: getHeaderValue(data[i], headers, 'status'),
       notes: getHeaderValue(data[i], headers, 'notes'),
-      completionPercentage: getHeaderValue(data[i], headers, 'completionPercentage') || 0
+      completionPercentage: (completionMap[getHeaderValue(data[i], headers, 'participantId')] || {}).percentage || 0
     };
 
     if (currentUser.role !== 'viewer') {
@@ -3215,6 +3217,32 @@ function updateParticipantCompletion(participantId) {
   return percentage;
 }
 
+function buildLiveCompletionMap(participantIds) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const map = {};
+  if (!checklistSheet || checklistSheet.getLastRow() < 2) return map;
+  const set = {};
+  (participantIds || []).forEach(id => { set[String(id)] = true; });
+  const filterEnabled = participantIds && participantIds.length > 0;
+  const cData = checklistSheet.getDataRange().getValues();
+  const cHeaders = cData[0];
+  const participantCol = cHeaders.indexOf('participantId');
+  const statusCol = cHeaders.indexOf('status');
+  for (let i = 1; i < cData.length; i++) {
+    const pid = String(cData[i][participantCol]);
+    if (filterEnabled && !set[pid]) continue;
+    if (!map[pid]) map[pid] = { total: 0, completed: 0, percentage: 0 };
+    map[pid].total++;
+    if (cData[i][statusCol] === 'completed') map[pid].completed++;
+  }
+  Object.keys(map).forEach(pid => {
+    const entry = map[pid];
+    entry.percentage = entry.total > 0 ? Math.round((entry.completed / entry.total) * 100) : 0;
+  });
+  return map;
+}
+
 // ============================================
 // DASHBOARD & STATISTICS FUNCTIONS
 // ============================================
@@ -3257,7 +3285,6 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   for (let i = 1; i < pData.length; i++) {
     const site = pData[i][pHeaders.indexOf('site')];
     const status = pData[i][pHeaders.indexOf('status')];
-    const completion = pData[i][pHeaders.indexOf('completionPercentage')] || 0;
     const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
     const participantId = pData[i][pHeaders.indexOf('participantId')];
 
@@ -3273,7 +3300,6 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
     filteredParticipantIds.push(participantId);
     stats.totalParticipants++;
-    totalCompletion += completion;
 
     if (status === 'active') stats.activeParticipants++;
     if (status === 'completed') stats.completedParticipants++;
@@ -3282,6 +3308,11 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     if (site === 'UGA') stats.ugaParticipants++;
     if (site === 'Missouri') stats.missouriParticipants++;
   }
+
+  const liveCompletionMap = buildLiveCompletionMap(filteredParticipantIds);
+  filteredParticipantIds.forEach(pid => {
+    totalCompletion += (liveCompletionMap[pid] || {}).percentage || 0;
+  });
 
   stats.overallCompletion = stats.totalParticipants > 0
     ? Math.round(totalCompletion / stats.totalParticipants)
@@ -3447,6 +3478,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const pData = participantsSheet.getDataRange().getValues();
   const pHeaders = pData[0];
   const includedParticipantIds = [];
+  const participantRolloutMap = {};
   const participantNameMap = {};
   let completionSum = 0;
 
@@ -3454,19 +3486,18 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     const site = pData[i][pHeaders.indexOf('site')];
     const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
     const status = pData[i][pHeaders.indexOf('status')];
-    const completion = Number(pData[i][pHeaders.indexOf('completionPercentage')]) || 0;
     const participantId = pData[i][pHeaders.indexOf('participantId')];
 
     if (effectiveSite !== 'All' && site !== effectiveSite) continue;
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
+    participantRolloutMap[participantId] = rolloutId || 'Unassigned';
     participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
     overview.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
-    completionSum += completion;
 
     const key = rolloutId || 'Unassigned';
     if (!rolloutEntries[key]) {
@@ -3491,8 +3522,18 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     rolloutStats.activeParticipants += status === 'active' ? 1 : 0;
     rolloutStats.completedParticipants += status === 'completed' ? 1 : 0;
     rolloutStats.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
-    rolloutStats.completionSum += completion;
+    // completionSum populated from live checklist map below
   }
+
+  const liveCompletionMap = buildLiveCompletionMap(includedParticipantIds);
+  includedParticipantIds.forEach(participantId => {
+    const livePct = (liveCompletionMap[participantId] || {}).percentage || 0;
+    completionSum += livePct;
+    const rolloutKey = participantRolloutMap[participantId] || 'Unassigned';
+    if (rolloutEntries[rolloutKey]) {
+      rolloutEntries[rolloutKey].completionSum += livePct;
+    }
+  });
 
   overview.averageCompletion = overview.totalParticipants > 0
     ? Math.round(completionSum / overview.totalParticipants)
