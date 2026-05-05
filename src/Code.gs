@@ -51,6 +51,30 @@ const RUNTIME_CACHE = {
   sheetSnapshots: {}
 };
 
+function getSheetSnapshot(sheetName, options) {
+  const key = sheetName + '::' + (options && options.ensureFn ? options.ensureFn.name : 'raw');
+  if (RUNTIME_CACHE.sheetSnapshots[key]) return RUNTIME_CACHE.sheetSnapshots[key];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 1) {
+    const empty = { sheet: sheet, headers: [], data: [] };
+    RUNTIME_CACHE.sheetSnapshots[key] = empty;
+    return empty;
+  }
+  let headers = null;
+  if (options && options.ensureFn) {
+    headers = options.ensureFn(sheet);
+  } else {
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  }
+  const rowCount = sheet.getLastRow();
+  const colCount = headers.length || sheet.getLastColumn();
+  const data = rowCount > 0 ? sheet.getRange(1, 1, rowCount, colCount).getValues() : [];
+  const snapshot = { sheet: sheet, headers: headers, data: data };
+  RUNTIME_CACHE.sheetSnapshots[key] = snapshot;
+  return snapshot;
+}
+
 // ============================================
 // WEB APP ENTRY POINTS
 // ============================================
@@ -1042,10 +1066,12 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
   const checklistSheet = ss.getSheetByName('Checklist');
   if (!participantsSheet || !checklistSheet) return { added: 0, deleted: 0 };
 
-  const pHeaders = ensureParticipantColumns(participantsSheet);
-  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
-  const cHeaders = ensureChecklistColumns(checklistSheet);
-  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
   const enabledMap = {};
   enabledNumbers.forEach(n => enabledMap[String(n)] = true);
   const enabledItems = getGlobalProtocolItems().filter(i => enabledMap[String(i.number)]);
@@ -1995,8 +2021,9 @@ function getAllParticipants(token, filters) {
 
   if (!participantsSheet) return { success: false, message: 'Participants sheet not found' };
 
-  const headers = ensureParticipantColumns(participantsSheet);
-  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
   const participants = [];
   const participantIds = data.slice(1).map(row => getHeaderValue(row, headers, 'participantId')).filter(Boolean);
   const completionMap = buildLiveCompletionMap(participantIds);
@@ -2079,8 +2106,9 @@ function getParticipantById(token, participantId) {
   }
 
   // Get participant data
-  const pHeaders = ensureParticipantColumns(participantsSheet);
-  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
   let participant = null;
 
   for (let i = 1; i < pData.length; i++) {
@@ -2120,8 +2148,9 @@ function getParticipantById(token, participantId) {
   }
 
   // Get checklist items
-  const cHeaders = ensureChecklistColumns(checklistSheet);
-  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
   const checklist = [];
 
   for (let i = 1; i < cData.length; i++) {
@@ -2276,8 +2305,9 @@ function updateParticipant(token, participantId, participantData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
-  const headers = ensureParticipantColumns(participantsSheet);
-  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
 
   const parentEmail = (participantData.parentGuardianEmail || '').trim();
   const parentDob = (participantData.parentGuardianDob || '').trim();
@@ -2370,8 +2400,9 @@ function deleteParticipant(token, participantId) {
     return { success: false, message: 'Participants sheet not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantIdCol = pHeaders.indexOf('participantId');
   let participantName = '';
   let participantSite = '';
@@ -2393,8 +2424,9 @@ function deleteParticipant(token, participantId) {
   participantsSheet.deleteRow(rowIndex);
 
   if (checklistSheet) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     const checklistParticipantCol = cHeaders.indexOf('participantId');
 
     for (let i = cData.length - 1; i >= 1; i--) {
@@ -2822,8 +2854,9 @@ function syncParticipantStatusFromChecklist(participantId) {
   const checklistSheet = ss.getSheetByName('Checklist');
   if (!participantsSheet || !checklistSheet) return;
 
-  const pHeaders = ensureParticipantColumns(participantsSheet);
-  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
   let participantRow = -1;
   let currentStatus = '';
   for (let i = 1; i < pData.length; i++) {
@@ -2836,8 +2869,9 @@ function syncParticipantStatusFromChecklist(participantId) {
   if (participantRow === -1) return;
   if (currentStatus === 'withdrawn') return; // never auto-overwrite withdrawn
 
-  const cHeaders = ensureChecklistColumns(checklistSheet);
-  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
   let hasPostTestCompleted = false;
   for (let i = 1; i < cData.length; i++) {
     if (String(cData[i][cHeaders.indexOf('participantId')]) !== String(participantId)) continue;
@@ -2952,8 +2986,9 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const checklistData = checklistSheet.getDataRange().getValues();
   const cHeaders = checklistData[0];
 
@@ -3034,8 +3069,9 @@ function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const checklistData = checklistSheet.getDataRange().getValues();
   const cHeaders = checklistData[0];
 
@@ -3113,8 +3149,9 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantsInRollout = {};
 
   for (let i = 1; i < pData.length; i++) {
@@ -3209,8 +3246,9 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantsInRollout = {};
 
   for (let i = 1; i < pData.length; i++) {
@@ -3297,8 +3335,9 @@ function updateParticipantCompletion(participantId) {
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   // Update participant record
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
 
   for (let i = 1; i < pData.length; i++) {
     if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
@@ -3325,8 +3364,9 @@ function buildLiveCompletionMap(participantIds) {
   (participantIds || []).forEach(id => { set[String(id)] = true; });
   const filterEnabled = participantIds && participantIds.length > 0;
 
-  const pHeaders = ensureParticipantColumns(participantsSheet);
-  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
   const participantRolloutMap = {};
   const rolloutAllowedNumbersMap = {};
   for (let i = 1; i < pData.length; i++) {
@@ -3397,8 +3437,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   if (!participantsSheet) return stats;
 
   // Get participants data
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
 
   let totalCompletion = 0;
   let filteredParticipantIds = [];
@@ -3441,8 +3482,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
   // Get cohorts data
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
 
     for (let i = 1; i < rData.length; i++) {
       const rSite = rData[i][rHeaders.indexOf('site')];
@@ -3471,8 +3513,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
   // Get instrument completion stats (only for filtered participants)
   if (checklistSheet) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
 
     const protocolItems = getProtocolItemsForFilter(rolloutFilter);
     const instrumentCounts = {};
@@ -3561,8 +3604,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
 
   const rolloutEntries = {};
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
 
     for (let i = 1; i < rData.length; i++) {
       const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
@@ -3602,8 +3646,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     rolloutFilter: effectiveRollout
   };
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const includedParticipantIds = [];
   const participantRolloutMap = {};
   const participantNameMap = {};
@@ -3679,8 +3724,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   // Instrument progress for included participants
   let instrumentStats = [];
   if (checklistSheet && includedParticipantIds.length > 0) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     const counts = {};
     const pendingByInstrument = {};
     const pendingSets = {};
@@ -3781,8 +3827,9 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
   const cohorts = [];
 
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
     for (let i = 1; i < rData.length; i++) {
       const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
       const site = rData[i][rHeaders.indexOf('site')];
@@ -4134,8 +4181,9 @@ function buildProtocolSummary(participants, checklistSheet) {
   });
 
   if (checklistSheet && participantIds.size > 0) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     for (let i = 1; i < cData.length; i++) {
       const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
       if (!participantIds.has(participantId)) continue;
@@ -4561,8 +4609,9 @@ function exportChecklistCSV(token, filters) {
   }
 
   // Build participant map scoped to filters
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantMap = {};
 
   for (let i = 1; i < pData.length; i++) {
