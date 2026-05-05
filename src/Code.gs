@@ -2919,14 +2919,19 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
 
   let successCount = 0;
   let errorCount = 0;
+  let hasChanges = false;
   updates.forEach(update => {
     if (!update || !update.participantId || !update.status) { errorCount++; return; }
     if (CONFIG.PARTICIPANT_STATUSES.indexOf(update.status) === -1) { errorCount++; return; }
     const row = rowByParticipantId[String(update.participantId)];
     if (!row) { errorCount++; return; }
-    setCellAsPlainText(participantSnapshot.sheet, row, participantStatusCol + 1, update.status);
+    pData[row - 1][participantStatusCol] = update.status;
+    hasChanges = true;
     successCount++;
   });
+  if (hasChanges) {
+    participantSnapshot.sheet.getRange(1, 1, pData.length, pHeaders.length).setValues(pData);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
     'Updated statuses for ' + successCount + ' participants');
@@ -3197,6 +3202,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
   let errorCount = 0;
   const touchedParticipants = {};
 
+  let hasChanges = false;
   updates.forEach(update => {
     if (!participantsInRollout[update.participantId]) {
       errorCount++;
@@ -3213,17 +3219,22 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
       errorCount++;
       return;
     }
-    checklistSnapshot.sheet.getRange(row, statusCol + 1).setValue(update.status);
+    cData[row - 1][statusCol] = update.status;
     if (update.status === 'completed') {
-      checklistSnapshot.sheet.getRange(row, completedDateCol + 1).setValue(new Date().toISOString());
-      checklistSnapshot.sheet.getRange(row, completedByCol + 1).setValue(currentUser.fullName);
+      cData[row - 1][completedDateCol] = new Date().toISOString();
+      cData[row - 1][completedByCol] = currentUser.fullName;
     } else {
-      checklistSnapshot.sheet.getRange(row, completedDateCol + 1).setValue('');
-      checklistSnapshot.sheet.getRange(row, completedByCol + 1).setValue('');
+      cData[row - 1][completedDateCol] = '';
+      cData[row - 1][completedByCol] = '';
     }
+    hasChanges = true;
     touchedParticipants[update.participantId] = true;
     successCount++;
   });
+
+  if (hasChanges) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+  }
 
   Object.keys(touchedParticipants).forEach(pid => {
     updateParticipantCompletion(pid);
@@ -3303,6 +3314,7 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
   let successCount = 0;
   let errorCount = 0;
 
+  let hasChanges = false;
   updates.forEach(update => {
     if (!participantsInRollout[update.participantId]) {
       errorCount++;
@@ -3319,9 +3331,13 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
       errorCount++;
       return;
     }
-    checklistSnapshot.sheet.getRange(row, dataLinkCol + 1).setValue(update.dataLink);
+    cData[row - 1][dataLinkCol] = update.dataLink;
+    hasChanges = true;
     successCount++;
   });
+  if (hasChanges) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT_LINK', 'checklist', instrumentNumber,
     'Updated ' + successCount + ' ' + instrument.name + ' links for cohort ' + cohort.schoolName);
