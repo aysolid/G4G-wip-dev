@@ -2903,13 +2903,29 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
   }
   if (!Array.isArray(updates) || updates.length === 0) return { success: false, message: 'No updates provided' };
 
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const participantStatusCol = pHeaders.indexOf('status');
+  const participantIdCol = pHeaders.indexOf('participantId');
+  const rolloutCol = pHeaders.indexOf('rolloutId');
+
+  const rowByParticipantId = {};
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][rolloutCol]) === String(rolloutId)) {
+      rowByParticipantId[String(pData[i][participantIdCol])] = i + 1;
+    }
+  }
+
   let successCount = 0;
   let errorCount = 0;
   updates.forEach(update => {
     if (!update || !update.participantId || !update.status) { errorCount++; return; }
     if (CONFIG.PARTICIPANT_STATUSES.indexOf(update.status) === -1) { errorCount++; return; }
-    const result = updateParticipant(token, update.participantId, { status: update.status });
-    if (result.success) successCount++; else errorCount++;
+    const row = rowByParticipantId[String(update.participantId)];
+    if (!row) { errorCount++; return; }
+    setCellAsPlainText(participantSnapshot.sheet, row, participantStatusCol + 1, update.status);
+    successCount++;
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
@@ -3160,22 +3176,26 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
-  const checklistIdCol = cHeaders.indexOf('checklistId');
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const completedByCol = cHeaders.indexOf('completedBy');
 
   const checklistMap = {};
   for (let i = 1; i < cData.length; i++) {
     if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
       const pid = cData[i][checklistParticipantCol];
-      checklistMap[pid] = cData[i][checklistIdCol];
+      checklistMap[pid] = i + 1;
     }
   }
 
   let successCount = 0;
   let errorCount = 0;
+  const touchedParticipants = {};
 
   updates.forEach(update => {
     if (!participantsInRollout[update.participantId]) {
@@ -3188,18 +3208,26 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
       return;
     }
 
-    const checklistId = checklistMap[update.participantId];
-    if (!checklistId) {
+    const row = checklistMap[update.participantId];
+    if (!row) {
       errorCount++;
       return;
     }
-
-    const result = updateChecklistItem(token, checklistId, { status: update.status });
-    if (result.success) {
-      successCount++;
+    checklistSnapshot.sheet.getRange(row, statusCol + 1).setValue(update.status);
+    if (update.status === 'completed') {
+      checklistSnapshot.sheet.getRange(row, completedDateCol + 1).setValue(new Date().toISOString());
+      checklistSnapshot.sheet.getRange(row, completedByCol + 1).setValue(currentUser.fullName);
     } else {
-      errorCount++;
+      checklistSnapshot.sheet.getRange(row, completedDateCol + 1).setValue('');
+      checklistSnapshot.sheet.getRange(row, completedByCol + 1).setValue('');
     }
+    touchedParticipants[update.participantId] = true;
+    successCount++;
+  });
+
+  Object.keys(touchedParticipants).forEach(pid => {
+    updateParticipantCompletion(pid);
+    syncParticipantStatusFromChecklist(pid);
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
@@ -3257,17 +3285,18 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
-  const checklistIdCol = cHeaders.indexOf('checklistId');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
 
   const checklistMap = {};
   for (let i = 1; i < cData.length; i++) {
     if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
       const pid = cData[i][checklistParticipantCol];
-      checklistMap[pid] = cData[i][checklistIdCol];
+      checklistMap[pid] = i + 1;
     }
   }
 
@@ -3285,18 +3314,13 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
       return;
     }
 
-    const checklistId = checklistMap[update.participantId];
-    if (!checklistId) {
+    const row = checklistMap[update.participantId];
+    if (!row) {
       errorCount++;
       return;
     }
-
-    const result = updateChecklistItem(token, checklistId, { dataLink: update.dataLink });
-    if (result.success) {
-      successCount++;
-    } else {
-      errorCount++;
-    }
+    checklistSnapshot.sheet.getRange(row, dataLinkCol + 1).setValue(update.dataLink);
+    successCount++;
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT_LINK', 'checklist', instrumentNumber,
