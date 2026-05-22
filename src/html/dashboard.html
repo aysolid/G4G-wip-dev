@@ -973,6 +973,14 @@
           </a>
         </div>
 
+        <div class="nav-section">
+          <div class="nav-section-title">Session Records</div>
+          <a class="nav-item" onclick="showSection('sessionRecordings')">
+            <span class="material-icons">video_library</span>
+            Session Recordings
+          </a>
+        </div>
+
         <div class="nav-section" id="adminSection">
           <div class="nav-section-title">Administration</div>
           <a class="nav-item" onclick="showSection('cohorts')">
@@ -1069,6 +1077,7 @@
 
         <!-- Attendance Reports Section -->
         <section id="attendanceReportsSection" class="hidden"></section>
+        <section id="sessionRecordingsSection" class="hidden"></section>
 
         <!-- Cohorts Section -->
         <section id="cohortsSection" class="hidden"></section>
@@ -1127,6 +1136,7 @@
     let isLoggingOut = false;
     let logoutRefreshTimer = null;
     let enrollSubmitting = false;
+    let sessionRecordingTypesCurrent = [];
 
     // ============================================
     // INITIALIZATION
@@ -1240,7 +1250,7 @@
     // ============================================
     function showSection(section) {
       // Hide all sections
-      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'sessionRecordings', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
       sections.forEach(s => {
         const el = document.getElementById(s + 'Section');
         if (el) el.classList.add('hidden');
@@ -1282,6 +1292,7 @@
         enroll: 'Enroll Participant',
         attendance: 'Mark Attendance',
         attendanceReports: 'Attendance Reports',
+        sessionRecordings: 'Session Recordings',
         cohorts: 'Study Cohorts',
         users: 'User Management',
         reports: 'Analytics',
@@ -1306,6 +1317,9 @@
           break;
         case 'attendanceReports':
           loadAttendanceReports();
+          break;
+        case 'sessionRecordings':
+          loadSessionRecordingsSection();
           break;
         case 'cohorts':
           loadRollouts();
@@ -5021,6 +5035,69 @@
           `;
         })
         .getAttendanceStatsByRollout(sessionToken, currentRolloutFilter);
+    }
+
+    function loadSessionRecordingsSection() {
+      const section = document.getElementById('sessionRecordingsSection');
+      if (!section) return;
+      if (currentRolloutFilter === 'All') {
+        section.innerHTML = `
+          <div class="card"><div class="card-body"><div class="empty-state">
+            <span class="material-icons">video_library</span>
+            <h3>Select a specific cohort</h3>
+            <p>Use the cohort filter at the top right to select a cohort first.</p>
+          </div></div></div>`;
+        return;
+      }
+      section.innerHTML = '<div class="card"><div class="card-body"><div class="loading"><div class="spinner"></div></div></div></div>';
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result.success) {
+          section.innerHTML = `<div class="card"><div class="card-body"><div class="empty-state"><span class="material-icons">error</span><h3>${result.message || 'Unable to load session recordings'}</h3></div></div></div>`;
+          return;
+        }
+        const sessions = result.sessions || [];
+        const types = result.recordingTypes || ['GoPro', 'Tascam', 'Meeting Owl'];
+        sessionRecordingTypesCurrent = types.slice();
+        section.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3></div>
+            <div class="card-body">
+              <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                ${types.map((t, i) => `<input class="form-input" id="recordingType${i}" value="${escapeHtml(t)}" style="max-width:220px;">`).join('')}
+                <button class="btn btn-secondary btn-sm" onclick="saveRecordingTypeConfig(${types.length})">Save Recording Types</button>
+              </div>
+              ${sessions.map(s => `
+                <div class="card" style="margin-bottom:0.75rem;"><div class="card-body">
+                  <div style="font-weight:600; margin-bottom:0.5rem;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))} ${s.sessionDate ? '• ' + escapeHtml(s.sessionDate) : ''}</div>
+                  ${types.map(t => `<div class="form-group"><label class="form-label">${escapeHtml(t)} Recording</label><input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml((s.recordingLinks||{})[t] || '')}" placeholder="Paste link"></div>`).join('')}
+                  <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
+                </div></div>`).join('') || '<div class="empty-state"><h3>No sessions found</h3></div>'}
+            </div>
+          </div>`;
+      }).withFailureHandler(handleError).getSessionRecordingsByRollout(sessionToken, currentRolloutFilter);
+    }
+
+    function saveSessionRecordingLinksUi(sessionId) {
+      const links = {};
+      sessionRecordingTypesCurrent.forEach(t => {
+        const el = document.getElementById(`rec_${sessionId}_${encodeURIComponent(t)}`);
+        links[t] = el ? el.value.trim() : '';
+      });
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Saved' : 'Failed'), result.success ? 'success' : 'error');
+      }).withFailureHandler(handleError).saveSessionRecordingLinks(sessionToken, sessionId, links);
+    }
+
+    function saveRecordingTypeConfig(count) {
+      const values = [];
+      for (let i = 0; i < count; i++) {
+        const el = document.getElementById('recordingType' + i);
+        if (el && el.value.trim()) values.push(el.value.trim());
+      }
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.success ? 'Recording types saved' : (result.message || 'Save failed'), result.success ? 'success' : 'error');
+        if (result.success) loadSessionRecordingsSection();
+      }).withFailureHandler(handleError).saveSessionRecordingTypes(sessionToken, values);
     }
 
     function buildAttendanceReportHtml(stats) {

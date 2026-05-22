@@ -136,6 +136,7 @@ function getWebAppUrl() {
  */
 function getConfig() {
   const protocols = getGlobalProtocolItems();
+  const recordingTypes = getSessionRecordingTypes();
   return {
     appName: CONFIG.APP_NAME,
     version: CONFIG.VERSION,
@@ -144,67 +145,82 @@ function getConfig() {
     roles: CONFIG.ROLES,
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
-    checklistStatuses: CONFIG.CHECKLIST_STATUSES
+    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
+    sessionRecordingTypes: recordingTypes
   };
 }
 
-function getGlobalProtocolItems() {
-  if (RUNTIME_CACHE.globalProtocolItems) return RUNTIME_CACHE.globalProtocolItems;
-  const configMap = getConfigMap();
-  const raw = configMap.PROTOCOL_ITEMS;
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
   if (raw) {
     try {
-      const parsed = JSON.parse(raw || '[]');
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        RUNTIME_CACHE.globalProtocolItems = parsed;
-        return parsed;
-      }
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
     } catch (e) {}
   }
-  RUNTIME_CACHE.globalProtocolItems = CONFIG.INSTRUMENTS;
-  return CONFIG.INSTRUMENTS;
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
 }
 
-function getRolloutProtocolItemsInternal(rolloutId) {
-  if (RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)]) {
-    return RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)];
-  }
-  const globalItems = getGlobalProtocolItems();
-  let overrides = {};
-  const configMap = getConfigMap();
-  if (configMap.ROLLOUT_PROTOCOL_OVERRIDES) {
-    try { overrides = JSON.parse(configMap.ROLLOUT_PROTOCOL_OVERRIDES || '{}') || {}; } catch (e) {}
-  }
-  const selectedIds = overrides[rolloutId];
-  if (!Array.isArray(selectedIds) || selectedIds.length === 0) {
-    RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)] = globalItems;
-    return globalItems;
-  }
-  const selectedMap = {};
-  selectedIds.forEach(id => selectedMap[String(id)] = true);
-  const filtered = globalItems.filter(item => selectedMap[String(item.number)]);
-  RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)] = filtered;
-  return filtered;
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
 }
 
-function getConfigMap() {
-  if (RUNTIME_CACHE.configMap) return RUNTIME_CACHE.configMap;
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
+function saveSessionRecordingLinks(token, sessionId, links) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const configSheet = ss.getSheetByName('Config');
-  const result = {};
-  if (!configSheet || configSheet.getLastRow() < 2) {
-    RUNTIME_CACHE.configMap = result;
-    return result;
-  }
-  const data = configSheet.getRange(1, 1, configSheet.getLastRow(), configSheet.getLastColumn()).getValues();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
   const headers = data[0];
-  const keyCol = headers.indexOf('key');
-  const valueCol = headers.indexOf('value');
+  const ensureCol = name => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) {
+      headers.push(name);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      idx = headers.length - 1;
+    }
+    return idx + 1;
+  };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
   for (let i = 1; i < data.length; i++) {
-    result[data[i][keyCol]] = data[i][valueCol];
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
   }
-  RUNTIME_CACHE.configMap = result;
-  return result;
+  return { success: false, message: 'Session not found' };
 }
 
 function upsertConfigValue(key, value, description) {
@@ -228,13 +244,6 @@ function upsertConfigValue(key, value, description) {
   RUNTIME_CACHE.configMap = null;
   RUNTIME_CACHE.globalProtocolItems = null;
   RUNTIME_CACHE.rolloutProtocolItems = {};
-}
-
-function getProtocolItemsForFilter(rolloutFilter) {
-  if (rolloutFilter && rolloutFilter !== 'All') {
-    return getRolloutProtocolItemsInternal(rolloutFilter);
-  }
-  return getGlobalProtocolItems();
 }
 
 // ============================================
@@ -1305,7 +1314,11 @@ function getSessionsByRollout(token, rolloutId) {
           sessionName: data[i][headers.indexOf('sessionName')],
           status: data[i][headers.indexOf('status')],
           createdAt: data[i][headers.indexOf('createdAt')],
-          createdBy: data[i][headers.indexOf('createdBy')]
+          createdBy: data[i][headers.indexOf('createdBy')],
+          goproLink: headers.indexOf('goproLink') !== -1 ? data[i][headers.indexOf('goproLink')] : '',
+          tascamLink: headers.indexOf('tascamLink') !== -1 ? data[i][headers.indexOf('tascamLink')] : '',
+          meetingOwlLink: headers.indexOf('meetingOwlLink') !== -1 ? data[i][headers.indexOf('meetingOwlLink')] : '',
+          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : ''
         });
       }
     }
