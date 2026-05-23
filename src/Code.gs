@@ -207,6 +207,41 @@ function getConfig() {
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes
   };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
 }
 
 function getSessionRecordingTypes() {
