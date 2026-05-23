@@ -5066,7 +5066,10 @@
         const firstSessionId = sessions[0].sessionId;
         section.innerHTML = `
           <div class="card">
-            <div class="card-header"><h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3></div>
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem;">
+              <h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3>
+              <button class="btn btn-secondary btn-sm" onclick="manageSessionRecordingTypes()">Manage Recording Types</button>
+            </div>
             <div class="card-body">
               <div class="tabs" style="margin-bottom:1rem; border-bottom:1px solid var(--gray-200);">
                 ${sessions.map((s, idx) => `
@@ -5094,7 +5097,7 @@
                           const statusButton = existing
                             ? `<a class="btn btn-primary btn-sm" href="${escapeHtml(existing)}" target="_blank" rel="noopener noreferrer" style="min-width:110px; justify-content:center;">Open Link</a>`
                             : `<button class="btn btn-secondary btn-sm" disabled style="min-width:110px; justify-content:center; color:var(--gray-500); background:var(--gray-100);">No Link</button>`;
-                          return `<div class="form-group" style="margin-bottom:0.65rem;"><div style="display:grid; grid-template-columns: 200px 110px minmax(250px, 420px); gap:0.5rem; align-items:center;"><label class="form-label" style="margin:0; font-size:1rem;">${safeType} Recording</label>${statusButton}<input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml(existing)}" placeholder="Paste link"></div></div>`;
+                          return `<div class="form-group" style="margin-bottom:0.65rem;"><div style="display:grid; grid-template-columns: 200px 110px minmax(250px, 420px); gap:0.5rem; align-items:center;"><label class="form-label" style="margin:0; font-size:1rem;">${safeType} Recording</label>${statusButton}<input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="" data-existing="${escapeHtml(existing)}" placeholder="${existing ? 'Link saved (paste new link to replace)' : 'Paste link'}"></div></div>`;
                         }).join('')}
                       </div>
                     </div>
@@ -5130,11 +5133,42 @@
       const links = {};
       sessionRecordingTypesCurrent.forEach(t => {
         const el = document.getElementById(`rec_${sessionId}_${encodeURIComponent(t)}`);
-        links[t] = el ? el.value.trim() : '';
+        if (!el) {
+          links[t] = '';
+          return;
+        }
+        const nextValue = (el.value || '').trim();
+        const existing = (el.getAttribute('data-existing') || '').trim();
+        links[t] = nextValue || existing;
       });
       google.script.run.withSuccessHandler(function(result) {
         showToast(result.message || (result.success ? 'Saved' : 'Failed'), result.success ? 'success' : 'error');
+        if (result.success) {
+          loadSessionRecordingsSection();
+        }
       }).withFailureHandler(handleError).saveSessionRecordingLinks(sessionToken, sessionId, links);
+    }
+
+    function manageSessionRecordingTypes() {
+      if (!sessionRecordingTypesCurrent || !sessionRecordingTypesCurrent.length) {
+        sessionRecordingTypesCurrent = ['GoPro', 'Tascam', 'Meeting Owl'];
+      }
+      const initial = sessionRecordingTypesCurrent.join(', ');
+      const input = prompt('Enter recording types separated by commas (global):', initial);
+      if (input === null) return;
+      const values = input.split(',').map(v => v.trim()).filter(Boolean);
+      if (!values.length) {
+        showToast('Please provide at least one recording type', 'error');
+        return;
+      }
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result || !result.success) {
+          showToast((result && result.message) || 'Unable to save recording types', 'error');
+          return;
+        }
+        showToast('Recording types saved globally', 'success');
+        loadSessionRecordingsSection();
+      }).withFailureHandler(handleError).saveSessionRecordingTypes(sessionToken, values);
     }
 
     function saveRecordingTypeConfig(count) {
