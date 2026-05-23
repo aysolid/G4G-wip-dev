@@ -5058,23 +5058,66 @@
         const sessions = result.sessions || [];
         const types = result.recordingTypes || ['GoPro', 'Tascam', 'Meeting Owl'];
         sessionRecordingTypesCurrent = types.slice();
+        if (!sessions.length) {
+          section.innerHTML = '<div class="card"><div class="card-body"><div class="empty-state"><h3>No sessions found</h3></div></div></div>';
+          return;
+        }
+
+        const firstSessionId = sessions[0].sessionId;
         section.innerHTML = `
           <div class="card">
             <div class="card-header"><h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3></div>
             <div class="card-body">
-              <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+              <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
                 ${types.map((t, i) => `<input class="form-input" id="recordingType${i}" value="${escapeHtml(t)}" style="max-width:220px;">`).join('')}
                 <button class="btn btn-secondary btn-sm" onclick="saveRecordingTypeConfig(${types.length})">Save Recording Types</button>
               </div>
-              ${sessions.map(s => `
-                <div class="card" style="margin-bottom:0.75rem;"><div class="card-body">
-                  <div style="font-weight:600; margin-bottom:0.5rem;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))} ${s.sessionDate ? '• ' + escapeHtml(s.sessionDate) : ''}</div>
-                  ${types.map(t => `<div class="form-group"><label class="form-label">${escapeHtml(t)} Recording</label><input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml((s.recordingLinks||{})[t] || '')}" placeholder="Paste link"></div>`).join('')}
-                  <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
-                </div></div>`).join('') || '<div class="empty-state"><h3>No sessions found</h3></div>'}
+              <div class="tabs" style="margin-bottom:1rem; border-bottom:1px solid var(--gray-200);">
+                ${sessions.map((s, idx) => `
+                  <button class="tab-btn ${idx === 0 ? 'active' : ''}" data-session-tab="${s.sessionId}" onclick="showSessionRecordingTab('${s.sessionId}', this)">
+                    <div>${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
+                    <small style="display:block; font-weight:400; color:var(--gray-500);">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</small>
+                  </button>
+                `).join('')}
+              </div>
+              <div id="sessionRecordingPanels">
+                ${sessions.map((s, idx) => `
+                  <div class="session-recording-panel" id="sessionRecordingPanel_${s.sessionId}" style="display:${idx === 0 ? 'block' : 'none'};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; gap:0.75rem;">
+                      <div>
+                        <div style="font-weight:600;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
+                        <div style="color:var(--gray-500); font-size:0.9rem;">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</div>
+                      </div>
+                      <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
+                    </div>
+                    ${types.map(t => `
+                      <div class="form-group">
+                        <label class="form-label">${escapeHtml(t)} Recording</label>
+                        <input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml((s.recordingLinks||{})[t] || '')}" placeholder="Paste link">
+                      </div>
+                    `).join('')}
+                  </div>
+                `).join('')}
+              </div>
             </div>
           </div>`;
+        showSessionRecordingTab(firstSessionId);
       }).withFailureHandler(handleError).getSessionRecordingsByRollout(sessionToken, currentRolloutFilter);
+    }
+
+    function showSessionRecordingTab(sessionId, buttonEl) {
+      const panels = document.querySelectorAll('.session-recording-panel');
+      panels.forEach(panel => {
+        panel.style.display = panel.id === ('sessionRecordingPanel_' + sessionId) ? 'block' : 'none';
+      });
+      const buttons = document.querySelectorAll('[data-session-tab]');
+      buttons.forEach(btn => btn.classList.remove('active'));
+      if (buttonEl) {
+        buttonEl.classList.add('active');
+      } else {
+        const activeButton = document.querySelector(`[data-session-tab="${sessionId}"]`);
+        if (activeButton) activeButton.classList.add('active');
+      }
     }
 
     function saveSessionRecordingLinksUi(sessionId) {
@@ -6268,6 +6311,10 @@
 
       if (isSectionVisible('attendanceReports')) {
         loadAttendanceReports();
+      }
+
+      if (isSectionVisible('sessionRecordings')) {
+        loadSessionRecordingsSection();
       }
     }
 
