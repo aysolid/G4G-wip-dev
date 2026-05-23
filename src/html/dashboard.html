@@ -5068,10 +5068,6 @@
           <div class="card">
             <div class="card-header"><h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3></div>
             <div class="card-body">
-              <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
-                ${types.map((t, i) => `<input class="form-input" id="recordingType${i}" value="${escapeHtml(t)}" style="max-width:220px;">`).join('')}
-                <button class="btn btn-secondary btn-sm" onclick="saveRecordingTypeConfig(${types.length})">Save Recording Types</button>
-              </div>
               <div class="tabs" style="margin-bottom:1rem; border-bottom:1px solid var(--gray-200);">
                 ${sessions.map((s, idx) => `
                   <button class="tab-btn ${idx === 0 ? 'active' : ''}" data-session-tab="${s.sessionId}" onclick="showSessionRecordingTab('${s.sessionId}', this)">
@@ -5083,19 +5079,25 @@
               <div id="sessionRecordingPanels">
                 ${sessions.map((s, idx) => `
                   <div class="session-recording-panel" id="sessionRecordingPanel_${s.sessionId}" style="display:${idx === 0 ? 'block' : 'none'};">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; gap:0.75rem;">
-                      <div>
-                        <div style="font-weight:600;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
-                        <div style="color:var(--gray-500); font-size:0.9rem;">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</div>
+                    <div class="card" style="border:1px solid var(--gray-200); box-shadow:none; margin:0;">
+                      <div class="card-body" style="padding:0.9rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.8rem; gap:0.75rem;">
+                          <div>
+                            <div style="font-size:2rem; font-weight:700;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
+                            <div style="color:var(--gray-500); font-size:0.9rem; margin-top:0.15rem;">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</div>
+                          </div>
+                          <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
+                        </div>
+                        ${types.map(t => {
+                          const existing = (s.recordingLinks || {})[t] || '';
+                          const safeType = escapeHtml(t);
+                          const statusButton = existing
+                            ? `<a class="btn btn-primary btn-sm" href="${escapeHtml(existing)}" target="_blank" rel="noopener noreferrer" style="min-width:110px; justify-content:center;">Open Link</a>`
+                            : `<button class="btn btn-secondary btn-sm" disabled style="min-width:110px; justify-content:center; color:var(--gray-500); background:var(--gray-100);">No Link</button>`;
+                          return `<div class="form-group" style="margin-bottom:0.65rem;"><div style="display:grid; grid-template-columns: 200px 110px minmax(250px, 420px); gap:0.5rem; align-items:center;"><label class="form-label" style="margin:0; font-size:1rem;">${safeType} Recording</label>${statusButton}<input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml(existing)}" placeholder="Paste link"></div></div>`;
+                        }).join('')}
                       </div>
-                      <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
                     </div>
-                    ${types.map(t => `
-                      <div class="form-group">
-                        <label class="form-label">${escapeHtml(t)} Recording</label>
-                        <input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml((s.recordingLinks||{})[t] || '')}" placeholder="Paste link">
-                      </div>
-                    `).join('')}
                   </div>
                 `).join('')}
               </div>
@@ -5103,21 +5105,6 @@
           </div>`;
         showSessionRecordingTab(firstSessionId);
       }).withFailureHandler(handleError).getSessionRecordingsByRollout(sessionToken, currentRolloutFilter);
-    }
-
-    function showSessionRecordingTab(sessionId, buttonEl) {
-      const panels = document.querySelectorAll('.session-recording-panel');
-      panels.forEach(panel => {
-        panel.style.display = panel.id === ('sessionRecordingPanel_' + sessionId) ? 'block' : 'none';
-      });
-      const buttons = document.querySelectorAll('[data-session-tab]');
-      buttons.forEach(btn => btn.classList.remove('active'));
-      if (buttonEl) {
-        buttonEl.classList.add('active');
-      } else {
-        const activeButton = document.querySelector(`[data-session-tab="${sessionId}"]`);
-        if (activeButton) activeButton.classList.add('active');
-      }
     }
 
     function saveSessionRecordingLinksUi(sessionId) {
