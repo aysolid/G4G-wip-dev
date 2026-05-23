@@ -2968,18 +2968,13 @@
       results.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
           <div>
-            <div style="font-weight: 600;">${batchLinkState.instrumentName || 'Protocol Item'}</div>
+            <div style="font-weight: 700; font-size: 1.9rem; line-height:1.2;">${batchLinkState.instrumentName || 'Protocol Item'}</div>
             <div style="font-size: 0.85rem; color: var(--gray-600);">${result.rolloutName || ''} ${result.site ? '(' + result.site + ')' : ''}</div>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-            <input class="form-input" id="batchLinkDefaultInput" placeholder="Paste data link to apply..." style="min-width: 240px;">
             <button class="btn btn-primary" type="button" onclick="applyBatchLinkUpdates('apply')">
               <span class="material-icons">save</span>
               Apply to Selected
-            </button>
-            <button class="btn btn-danger" type="button" onclick="applyBatchLinkUpdates('remove')">
-              <span class="material-icons">link_off</span>
-              Remove Links
             </button>
           </div>
         </div>
@@ -3006,13 +3001,12 @@
                     <div style="font-size: 0.8rem; color: var(--gray-500);">${p.participantId} • ${p.schoolName}</div>
                   </td>
                   <td>
-                    ${hasLink ? `
-                      <span class="badge badge-success" style="margin-right: 0.35rem;">linked</span>
-                      <span style="font-size: 0.8rem; color: var(--gray-600); word-break: break-all;">${escapeHtml(p.dataLink)}</span>
-                    ` : '<span class="badge badge-neutral">no link</span>'}
+                    ${hasLink
+                      ? `<a class="btn btn-primary btn-sm" href="${escapeHtml(p.dataLink)}" target="_blank" rel="noopener noreferrer" style="min-width:88px; justify-content:center;">Open Link</a>`
+                      : '<span class="badge badge-neutral">No link</span>'}
                   </td>
                   <td>
-                    <input class="form-input" type="url" placeholder="https://..." onchange="setBatchParticipantLink('${p.participantId}', this.value)">
+                    <input class="form-input" type="url" placeholder="Paste link..." style="max-width:170px;" onchange="setBatchParticipantLink('${p.participantId}', this.value)">
                   </td>
                 </tr>
                 `;
@@ -3096,29 +3090,14 @@
         return;
       }
 
-      const defaultInput = document.getElementById('batchLinkDefaultInput');
-      const defaultLink = defaultInput ? defaultInput.value.trim() : '';
       const updates = [];
+      selectedRows.forEach(row => {
+        const participantId = row.getAttribute('data-batch-link-id');
+        const linkValue = (batchLinkState.linkValues && batchLinkState.linkValues[participantId]) ? batchLinkState.linkValues[participantId] : '';
+        updates.push({ participantId: participantId, dataLink: linkValue });
+      });
 
-      if (action === 'remove') {
-        const confirmRemoval = confirm('Remove links for the selected participants?');
-        if (!confirmRemoval) return;
-        selectedRows.forEach(row => {
-          updates.push({ participantId: row.getAttribute('data-batch-link-id'), dataLink: '' });
-        });
-      } else if (defaultLink) {
-        selectedRows.forEach(row => {
-          updates.push({ participantId: row.getAttribute('data-batch-link-id'), dataLink: defaultLink });
-        });
-      } else {
-        selectedRows.forEach(row => {
-          const participantId = row.getAttribute('data-batch-link-id');
-          const linkValue = (batchLinkState.linkValues && batchLinkState.linkValues[participantId]) ? batchLinkState.linkValues[participantId] : '';
-          updates.push({ participantId: participantId, dataLink: linkValue });
-        });
-      }
-
-      if (updates.some(update => action !== 'remove' && !update.dataLink)) {
+      if (updates.some(update => !update.dataLink)) {
         showToast('Enter a link for each selected participant', 'error');
         return;
       }
