@@ -973,6 +973,14 @@
           </a>
         </div>
 
+        <div class="nav-section">
+          <div class="nav-section-title">Session Records</div>
+          <a class="nav-item" onclick="showSection('sessionRecordings')">
+            <span class="material-icons">video_library</span>
+            Session Recordings
+          </a>
+        </div>
+
         <div class="nav-section" id="adminSection">
           <div class="nav-section-title">Administration</div>
           <a class="nav-item" onclick="showSection('cohorts')">
@@ -1069,6 +1077,7 @@
 
         <!-- Attendance Reports Section -->
         <section id="attendanceReportsSection" class="hidden"></section>
+        <section id="sessionRecordingsSection" class="hidden"></section>
 
         <!-- Cohorts Section -->
         <section id="cohortsSection" class="hidden"></section>
@@ -1127,6 +1136,7 @@
     let isLoggingOut = false;
     let logoutRefreshTimer = null;
     let enrollSubmitting = false;
+    let sessionRecordingTypesCurrent = [];
 
     // ============================================
     // INITIALIZATION
@@ -1240,7 +1250,7 @@
     // ============================================
     function showSection(section) {
       // Hide all sections
-      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
+      const sections = ['dashboard', 'participants', 'enroll', 'attendance', 'attendanceReports', 'sessionRecordings', 'cohorts', 'users', 'reports', 'exports', 'settings', 'participantDetail'];
       sections.forEach(s => {
         const el = document.getElementById(s + 'Section');
         if (el) el.classList.add('hidden');
@@ -1282,6 +1292,7 @@
         enroll: 'Enroll Participant',
         attendance: 'Mark Attendance',
         attendanceReports: 'Attendance Reports',
+        sessionRecordings: 'Session Recordings',
         cohorts: 'Study Cohorts',
         users: 'User Management',
         reports: 'Analytics',
@@ -1306,6 +1317,9 @@
           break;
         case 'attendanceReports':
           loadAttendanceReports();
+          break;
+        case 'sessionRecordings':
+          loadSessionRecordingsSection();
           break;
         case 'cohorts':
           loadRollouts();
@@ -1566,6 +1580,10 @@
               <button class="btn btn-secondary" onclick="openBatchLinkModal()">
                 <span class="material-icons">link</span>
                 Batch Link Update
+              </button>
+              <button class="btn btn-secondary" onclick="openBatchStatusModal()">
+                <span class="material-icons">group</span>
+                Batch Status Update
               </button>
               <button class="btn btn-primary" onclick="showSection('enroll')">
                 <span class="material-icons">add</span>
@@ -2789,6 +2807,98 @@
       openModal();
     }
 
+    function openBatchStatusModal() {
+      if (currentUser.role === 'viewer') {
+        showToast('Only administrators and facilitators can update statuses', 'error');
+        return;
+      }
+      const rolloutOptions = (availableRollouts || [])
+        .filter(r => r.status === 'active')
+        .map(r => {
+          const label = `${r.schoolName} (${r.period} ${r.year}) - ${r.site}`;
+          const selected = currentRolloutFilter !== 'All' && currentRolloutFilter === r.rolloutId ? 'selected' : '';
+          return `<option value="${r.rolloutId}" ${selected}>${label}</option>`;
+        })
+        .join('');
+      document.getElementById('modalTitle').textContent = 'Batch Status Update';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-row">
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Cohort</label>
+            <select class="form-select" id="batchStatusRolloutSelect">
+              <option value="">-- Choose cohort --</option>
+              ${rolloutOptions || '<option value="" disabled>No active cohorts found</option>'}
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label">Status to Apply</label>
+            <select class="form-select" id="batchParticipantStatusSelect">
+              <option value="">-- Choose status --</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="withdrawn">Withdrawn</option>
+            </select>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 1rem;">
+          <div class="card-body" id="batchStatusResults"></div>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button class="btn btn-primary" type="button" onclick="loadBatchStatusParticipants()">
+          <span class="material-icons">refresh</span>
+          Load Participants
+        </button>
+      `;
+      openModal();
+    }
+
+    function loadBatchStatusParticipants() {
+      const rolloutId = document.getElementById('batchStatusRolloutSelect')?.value || '';
+      const results = document.getElementById('batchStatusResults');
+      if (!rolloutId) return showToast('Select a cohort first', 'error');
+      results.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result.success) return showToast(result.message || 'Unable to load participants', 'error');
+        const participants = result.participants || [];
+        results.innerHTML = `
+          <div style="margin-bottom:0.5rem; font-weight:600;">${participants.length} participants</div>
+          <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+            <button class="btn btn-secondary btn-sm" onclick="toggleBatchStatusSelection(true)">Select All</button>
+            <button class="btn btn-secondary btn-sm" onclick="toggleBatchStatusSelection(false)">Clear</button>
+            <button class="btn btn-primary btn-sm" onclick="applyBatchStatusUpdates()">Apply Status</button>
+          </div>
+          <div class="table-container" style="max-height:320px; overflow-y:auto;">
+            <table class="data-table"><thead><tr><th></th><th>Participant</th><th>Current</th></tr></thead><tbody>
+            ${participants.map(p => `<tr><td><input type="checkbox" class="batch-status-check" value="${p.participantId}"></td><td>${p.fullName}<div style="font-size:0.8rem;color:var(--gray-500)">${p.participantId}</div></td><td><span class="badge badge-${p.status === 'active' ? 'success' : p.status === 'completed' ? 'info' : 'warning'}">${p.status}</span></td></tr>`).join('')}
+            </tbody></table>
+          </div>
+        `;
+      }).withFailureHandler(handleError).getAllParticipants(sessionToken, { rolloutId: rolloutId, site: getParticipantSiteFilter() });
+    }
+
+    function toggleBatchStatusSelection(checked) {
+      document.querySelectorAll('.batch-status-check').forEach(el => { el.checked = checked; });
+    }
+
+    function applyBatchStatusUpdates() {
+      const rolloutId = document.getElementById('batchStatusRolloutSelect')?.value || '';
+      const status = document.getElementById('batchParticipantStatusSelect')?.value || '';
+      if (!rolloutId || !status) return showToast('Select cohort and status', 'error');
+      const selected = Array.from(document.querySelectorAll('.batch-status-check:checked')).map(el => ({ participantId: el.value, status: status }));
+      if (!selected.length) return showToast('Select at least one participant', 'error');
+      google.script.run.withSuccessHandler(function(result) {
+        if (result.success) {
+          showToast(result.message || 'Statuses updated', 'success');
+          loadBatchStatusParticipants();
+          loadParticipants();
+          if (isSectionVisible('dashboard')) loadDashboard();
+          if (isSectionVisible('analytics')) loadAnalyticsSection();
+        } else showToast(result.message || 'Update failed', 'error');
+      }).withFailureHandler(handleError).bulkUpdateParticipantStatus(sessionToken, rolloutId, selected);
+    }
+
     function loadBatchLinkParticipants() {
       const instrumentSelect = document.getElementById('batchLinkInstrumentSelect');
       const rolloutSelect = document.getElementById('batchLinkRolloutSelect');
@@ -3342,6 +3452,10 @@
               <span class="material-icons">add</span>
               Add Cohort
             </button>
+            <button class="btn btn-secondary" onclick="showGlobalProtocolManager()">
+              <span class="material-icons">fact_check</span>
+              Manage Default Protocols
+            </button>
           </div>
           <div class="card-body" id="rolloutsList">
             <div class="loading">
@@ -3410,6 +3524,9 @@
                     </button>
                     <button class="btn btn-sm btn-secondary" onclick="editRollout('${r.rolloutId}')" title="Edit Cohort">
                       <span class="material-icons">edit</span>
+                    </button>
+                    <button class="btn btn-sm btn-warning" onclick="showRolloutProtocolManager('${r.rolloutId}', '${r.schoolName}')" title="Manage Protocol Items">
+                      <span class="material-icons">rule</span>
                     </button>
                     <button class="btn btn-sm btn-danger" onclick="confirmDeleteRollout('${r.rolloutId}', '${r.schoolName}', '${r.period}', '${r.year}')" title="Delete Cohort">
                       <span class="material-icons">delete</span>
@@ -3483,6 +3600,44 @@
       `;
       openModal();
       generateSessionFields();
+    }
+
+    function showGlobalProtocolManager() {
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result.success) return showToast(result.message || 'Unable to load protocols', 'error');
+        const raw = result.items.map(i => `${i.name}|${i.category}`).join('\n');
+        const edited = prompt('Edit default protocol items (one per line: Name|Category). This affects NEW checklist creation only.', raw);
+        if (edited === null) return;
+        const items = edited.split('\n').map(line => line.trim()).filter(Boolean).map((line, idx) => {
+          const parts = line.split('|');
+          return { number: idx + 1, name: (parts[0] || '').trim(), category: (parts[1] || 'lesson').trim() };
+        }).filter(i => i.name);
+        google.script.run.withSuccessHandler(function(saveResult) {
+          showToast(saveResult.message || 'Saved', saveResult.success ? 'success' : 'error');
+        }).saveGlobalProtocolItems(sessionToken, items);
+      }).getProtocolItems(sessionToken);
+    }
+
+    function showRolloutProtocolManager(rolloutId, schoolName) {
+      google.script.run.withSuccessHandler(function(globalRes) {
+        if (!globalRes.success) return showToast(globalRes.message || 'Unable to load defaults', 'error');
+        google.script.run.withSuccessHandler(function(rolloutRes) {
+          if (!rolloutRes.success) return showToast(rolloutRes.message || 'Unable to load rollout protocol items', 'error');
+          const enabled = {};
+          rolloutRes.items.forEach(i => enabled[String(i.number)] = true);
+          const list = globalRes.items.map(i => `[${enabled[String(i.number)] ? 'x' : ' '}] ${i.number}. ${i.name} (${i.category})`).join('\n');
+          const response = prompt(`Manage protocol items for ${schoolName}.\nEnter enabled protocol numbers separated by commas.\n\n${list}`, rolloutRes.items.map(i => i.number).join(','));
+          if (response === null) return;
+          const numbers = response.split(',').map(v => v.trim()).filter(Boolean);
+          google.script.run.withSuccessHandler(function(saveRes) {
+            if (saveRes.success && saveRes.sync) {
+              showToast(`${saveRes.message}. Removed ${saveRes.sync.deleted || 0}, added ${saveRes.sync.added || 0} checklist rows.`, 'success');
+            } else {
+              showToast(saveRes.message || 'Saved', saveRes.success ? 'success' : 'error');
+            }
+          }).saveRolloutProtocolItems(sessionToken, rolloutId, numbers);
+        }).getProtocolItems(sessionToken, rolloutId);
+      }).getProtocolItems(sessionToken);
     }
 
     function generateSessionFields() {
@@ -4882,6 +5037,112 @@
         .getAttendanceStatsByRollout(sessionToken, currentRolloutFilter);
     }
 
+    function loadSessionRecordingsSection() {
+      const section = document.getElementById('sessionRecordingsSection');
+      if (!section) return;
+      if (currentRolloutFilter === 'All') {
+        section.innerHTML = `
+          <div class="card"><div class="card-body"><div class="empty-state">
+            <span class="material-icons">video_library</span>
+            <h3>Select a specific cohort</h3>
+            <p>Use the cohort filter at the top right to select a cohort first.</p>
+          </div></div></div>`;
+        return;
+      }
+      section.innerHTML = '<div class="card"><div class="card-body"><div class="loading"><div class="spinner"></div></div></div></div>';
+      google.script.run.withSuccessHandler(function(result) {
+        if (!result.success) {
+          section.innerHTML = `<div class="card"><div class="card-body"><div class="empty-state"><span class="material-icons">error</span><h3>${result.message || 'Unable to load session recordings'}</h3></div></div></div>`;
+          return;
+        }
+        const sessions = result.sessions || [];
+        const types = result.recordingTypes || ['GoPro', 'Tascam', 'Meeting Owl'];
+        sessionRecordingTypesCurrent = types.slice();
+        if (!sessions.length) {
+          section.innerHTML = '<div class="card"><div class="card-body"><div class="empty-state"><h3>No sessions found</h3></div></div></div>';
+          return;
+        }
+
+        const firstSessionId = sessions[0].sessionId;
+        section.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3 class="card-title"><span class="material-icons">video_library</span>Session Recordings</h3></div>
+            <div class="card-body">
+              <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap; align-items:center;">
+                ${types.map((t, i) => `<input class="form-input" id="recordingType${i}" value="${escapeHtml(t)}" style="max-width:220px;">`).join('')}
+                <button class="btn btn-secondary btn-sm" onclick="saveRecordingTypeConfig(${types.length})">Save Recording Types</button>
+              </div>
+              <div class="tabs" style="margin-bottom:1rem; border-bottom:1px solid var(--gray-200);">
+                ${sessions.map((s, idx) => `
+                  <button class="tab-btn ${idx === 0 ? 'active' : ''}" data-session-tab="${s.sessionId}" onclick="showSessionRecordingTab('${s.sessionId}', this)">
+                    <div>${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
+                    <small style="display:block; font-weight:400; color:var(--gray-500);">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</small>
+                  </button>
+                `).join('')}
+              </div>
+              <div id="sessionRecordingPanels">
+                ${sessions.map((s, idx) => `
+                  <div class="session-recording-panel" id="sessionRecordingPanel_${s.sessionId}" style="display:${idx === 0 ? 'block' : 'none'};">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; gap:0.75rem;">
+                      <div>
+                        <div style="font-weight:600;">${escapeHtml(s.sessionName || ('Session ' + s.sessionNumber))}</div>
+                        <div style="color:var(--gray-500); font-size:0.9rem;">${s.sessionDate ? escapeHtml(s.sessionDate) : ''}</div>
+                      </div>
+                      <button class="btn btn-primary btn-sm" onclick="saveSessionRecordingLinksUi('${s.sessionId}')"><span class="material-icons">save</span>Save Links</button>
+                    </div>
+                    ${types.map(t => `
+                      <div class="form-group">
+                        <label class="form-label">${escapeHtml(t)} Recording</label>
+                        <input class="form-input" id="rec_${s.sessionId}_${encodeURIComponent(t)}" value="${escapeHtml((s.recordingLinks||{})[t] || '')}" placeholder="Paste link">
+                      </div>
+                    `).join('')}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>`;
+        showSessionRecordingTab(firstSessionId);
+      }).withFailureHandler(handleError).getSessionRecordingsByRollout(sessionToken, currentRolloutFilter);
+    }
+
+    function showSessionRecordingTab(sessionId, buttonEl) {
+      const panels = document.querySelectorAll('.session-recording-panel');
+      panels.forEach(panel => {
+        panel.style.display = panel.id === ('sessionRecordingPanel_' + sessionId) ? 'block' : 'none';
+      });
+      const buttons = document.querySelectorAll('[data-session-tab]');
+      buttons.forEach(btn => btn.classList.remove('active'));
+      if (buttonEl) {
+        buttonEl.classList.add('active');
+      } else {
+        const activeButton = document.querySelector(`[data-session-tab="${sessionId}"]`);
+        if (activeButton) activeButton.classList.add('active');
+      }
+    }
+
+    function saveSessionRecordingLinksUi(sessionId) {
+      const links = {};
+      sessionRecordingTypesCurrent.forEach(t => {
+        const el = document.getElementById(`rec_${sessionId}_${encodeURIComponent(t)}`);
+        links[t] = el ? el.value.trim() : '';
+      });
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Saved' : 'Failed'), result.success ? 'success' : 'error');
+      }).withFailureHandler(handleError).saveSessionRecordingLinks(sessionToken, sessionId, links);
+    }
+
+    function saveRecordingTypeConfig(count) {
+      const values = [];
+      for (let i = 0; i < count; i++) {
+        const el = document.getElementById('recordingType' + i);
+        if (el && el.value.trim()) values.push(el.value.trim());
+      }
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.success ? 'Recording types saved' : (result.message || 'Save failed'), result.success ? 'success' : 'error');
+        if (result.success) loadSessionRecordingsSection();
+      }).withFailureHandler(handleError).saveSessionRecordingTypes(sessionToken, values);
+    }
+
     function buildAttendanceReportHtml(stats) {
       attendanceReportSessionLookup = {};
 
@@ -6050,6 +6311,10 @@
 
       if (isSectionVisible('attendanceReports')) {
         loadAttendanceReports();
+      }
+
+      if (isSectionVisible('sessionRecordings')) {
+        loadSessionRecordingsSection();
       }
     }
 
