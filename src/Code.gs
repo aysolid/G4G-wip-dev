@@ -1090,6 +1090,141 @@ function upsertConfigValue(key, value, description) {
   RUNTIME_CACHE.rolloutProtocolItems = {};
 }
 
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
+    } catch (e) {}
+  }
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
+}
+
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
+}
+
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
+
+function getFieldNotesByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const sessions = (sessionsResult.sessions || []).map(function(s) {
+    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
+  });
+  return { success: true, sessions: sessions };
+}
+
+function saveFieldNotesLink(token, sessionId, link) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const sessionIdIdx = headers.indexOf('sessionId');
+  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
+
+  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
+  if (fieldNotesIdx === -1) {
+    headers.push('fieldNotesLink');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    fieldNotesIdx = headers.length - 1;
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
+      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      return { success: true, message: 'Field notes link saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function saveSessionRecordingLinks(token, sessionId, links) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const ensureCol = name => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) {
+      headers.push(name);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      idx = headers.length - 1;
+    }
+    return idx + 1;
+  };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
+}
+
 // ============================================
 // DATABASE INITIALIZATION
 // ============================================
@@ -5994,6 +6129,155 @@ function exportAttendanceCSV(token, filters) {
 /**
  * Export summary report
  */
+
+function exportLinksArtifacts(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Invalid session' };
+  }
+
+  const siteFilter = (filters && filters.site) ? filters.site : 'All';
+  const rolloutFilter = (filters && filters.rolloutId) ? filters.rolloutId : 'All';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) {
+    return { success: false, message: 'Required sheets are missing' };
+  }
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantsData[0] || [];
+  const pIdx = {
+    participantId: participantHeaders.indexOf('participantId'),
+    fullName: participantHeaders.indexOf('fullName'),
+    site: participantHeaders.indexOf('site'),
+    rolloutId: participantHeaders.indexOf('rolloutId'),
+    schoolName: participantHeaders.indexOf('schoolName'),
+    period: participantHeaders.indexOf('period'),
+    year: participantHeaders.indexOf('year')
+  };
+
+  const selectedParticipants = [];
+  const selectedParticipantIds = {};
+  for (var i = 1; i < participantsData.length; i++) {
+    const row = participantsData[i];
+    const site = String(row[pIdx.site] || '');
+    const rolloutId = String(row[pIdx.rolloutId] || '');
+    if (siteFilter !== 'All' && site !== siteFilter) continue;
+    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
+    const pid = String(row[pIdx.participantId] || '');
+    if (!pid) continue;
+    selectedParticipantIds[pid] = true;
+    selectedParticipants.push({
+      participantId: pid,
+      participantName: String(row[pIdx.fullName] || ''),
+      site: site,
+      cohort: String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : ''),
+      rolloutId: rolloutId
+    });
+  }
+
+  if (!selectedParticipants.length) {
+    return { success: false, message: 'No participants found for selected filters' };
+  }
+
+  const exclusion = {
+    'consent form': true,
+    'assent form / pre-test': true,
+    'post-test': true,
+    'participant feedback survey': true,
+    'parent satisfaction survey': true
+  };
+
+  const protocolByRollout = {};
+  if (rolloutFilter !== 'All') {
+    protocolByRollout[String(rolloutFilter)] = getProtocolItemsForFilter(String(rolloutFilter));
+  } else {
+    const uniqueRollouts = {};
+    selectedParticipants.forEach(function(p) { if (p.rolloutId) uniqueRollouts[p.rolloutId] = true; });
+    Object.keys(uniqueRollouts).forEach(function(rid) {
+      protocolByRollout[rid] = getProtocolItemsForFilter(rid);
+    });
+  }
+
+  const protocolNameSet = {};
+  Object.keys(protocolByRollout).forEach(function(rid) {
+    (protocolByRollout[rid] || []).forEach(function(item) {
+      const nm = String(item.instrumentName || '').trim();
+      if (!nm) return;
+      const key = nm.toLowerCase();
+      if (exclusion[key]) return;
+      protocolNameSet[nm] = true;
+    });
+  });
+  const protocolNames = Object.keys(protocolNameSet).sort(function(a,b){ return a.localeCompare(b); });
+
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const checklistHeaders = checklistData[0] || [];
+  const cIdx = {
+    participantId: checklistHeaders.indexOf('participantId'),
+    instrumentName: checklistHeaders.indexOf('instrumentName'),
+    dataLink: checklistHeaders.indexOf('dataLink')
+  };
+
+  const linkMap = {};
+  for (var j = 1; j < checklistData.length; j++) {
+    const crow = checklistData[j];
+    const pid2 = String(crow[cIdx.participantId] || '');
+    if (!selectedParticipantIds[pid2]) continue;
+    const instrument = String(crow[cIdx.instrumentName] || '').trim();
+    if (!instrument || !protocolNameSet[instrument]) continue;
+    const link = String(crow[cIdx.dataLink] || '').trim();
+    if (!link) continue;
+    if (!linkMap[pid2]) linkMap[pid2] = {};
+    linkMap[pid2][instrument] = link;
+  }
+
+  const exportRows = [];
+  selectedParticipants.forEach(function(p) {
+    const row = [p.participantName, p.site, p.cohort];
+    protocolNames.forEach(function(protocolName) {
+      const link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
+      row.push(link ? '=HYPERLINK("' + link.replace(/"/g, '""') + '","Open")' : '');
+    });
+    exportRows.push(row);
+  });
+
+  const headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
+  const spreadsheet = SpreadsheetApp.create('Links and Artifacts Export ' + new Date().toISOString());
+  const sheet = spreadsheet.getSheets()[0];
+  sheet.setName('Links and Artifacts');
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (exportRows.length) {
+    sheet.getRange(2, 1, exportRows.length, headers.length).setValues(exportRows);
+  }
+  sheet.getRange(1,1,1,headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
+  sheet.autoResizeColumns(1, headers.length);
+  sheet.setFrozenRows(1);
+  sheet.getRange(2,4,Math.max(exportRows.length,1),Math.max(headers.length-3,1)).setHorizontalAlignment('center');
+
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to generate export file' };
+  }
+  const blob = response.getBlob().setName('links_artifacts_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
+  const base64 = Utilities.base64Encode(blob.getBytes());
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+  return {
+    success: true,
+    filename: blob.getName(),
+    mimeType: blob.getContentType(),
+    content: base64,
+    message: 'Links and artifacts export generated'
+  };
+}
+
 function exportSummaryReport(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {

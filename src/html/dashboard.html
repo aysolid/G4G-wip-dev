@@ -6221,6 +6221,18 @@
                   Export
                 </button>
               </div>
+
+
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-weight: 500;">Links and Artifacts Export</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Protocol links, session recordings, and field notes</div>
+                </div>
+                <button class="btn btn-primary" onclick="exportLinksArtifacts()">
+                  <span class="material-icons">download</span>
+                  Export
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -6262,6 +6274,17 @@
         .withSuccessHandler(downloadFileFromResult)
         .withFailureHandler(handleError)
         .exportSummaryReport(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
+    }
+
+
+    function exportLinksArtifacts() {
+      google.script.run
+        .withSuccessHandler(downloadFileFromResult)
+        .withFailureHandler(handleError)
+        .exportLinksArtifacts(sessionToken, {
           site: currentSiteFilter,
           rolloutId: currentRolloutFilter
         });
