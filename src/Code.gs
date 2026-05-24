@@ -1267,6 +1267,67 @@ function getSessionRecordingsByRollout(token, rolloutId) {
   return { success: true, sessions: sessions, recordingTypes: types };
 }
 
+/**
+ * Get configuration for client-side use
+ */
+function getConfig() {
+  const protocols = getGlobalProtocolItems();
+  const recordingTypes = getSessionRecordingTypes();
+  return {
+    appName: CONFIG.APP_NAME,
+    version: CONFIG.VERSION,
+    sites: CONFIG.SITES,
+    periods: CONFIG.PERIODS,
+    roles: CONFIG.ROLES,
+    instruments: protocols,
+    participantStatuses: CONFIG.PARTICIPANT_STATUSES,
+    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
+    sessionRecordingTypes: recordingTypes
+  };
+}
+
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
+    } catch (e) {}
+  }
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
+}
+
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
+}
+
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
 
 function getFieldNotesByRollout(token, rolloutId) {
   const currentUser = validateSession(token);
@@ -6317,6 +6378,10 @@ function exportLinksArtifacts(token, filters) {
     return { success: false, message: 'No participants found for selected filters' };
   }
 
+  function normalizeInstrumentName(name) {
+    return String(name || '').toLowerCase().replace(/\s*\([^)]*\)\s*/g, '').replace(/\s+/g, ' ').trim();
+  }
+
   const exclusion = {
     'consent form': true,
     'assent form / pre-test': true,
@@ -6339,9 +6404,9 @@ function exportLinksArtifacts(token, filters) {
   const protocolNameSet = {};
   Object.keys(protocolByRollout).forEach(function(rid) {
     (protocolByRollout[rid] || []).forEach(function(item) {
-      const nm = String(item.instrumentName || '').trim();
+      const nm = String(item.instrumentName || item.name || '').trim();
       if (!nm) return;
-      const key = nm.toLowerCase();
+      const key = normalizeInstrumentName(nm);
       if (exclusion[key]) return;
       protocolNameSet[nm] = true;
     });
