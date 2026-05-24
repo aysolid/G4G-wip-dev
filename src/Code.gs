@@ -44,6 +44,96 @@ const CONFIG = {
   ]
 };
 
+const RUNTIME_CACHE = {
+  configMap: null,
+  globalProtocolItems: null,
+  rolloutProtocolItems: {},
+  sheetSnapshots: {}
+};
+
+function getSheetSnapshot(sheetName, options) {
+  const key = sheetName + '::' + (options && options.ensureFn ? options.ensureFn.name : 'raw');
+  if (RUNTIME_CACHE.sheetSnapshots[key]) return RUNTIME_CACHE.sheetSnapshots[key];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 1) {
+    const empty = { sheet: sheet, headers: [], data: [] };
+    RUNTIME_CACHE.sheetSnapshots[key] = empty;
+    return empty;
+  }
+  const headers = (options && options.ensureFn)
+    ? options.ensureFn(sheet)
+    : sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const rowCount = sheet.getLastRow();
+  const colCount = headers.length || sheet.getLastColumn();
+  const data = rowCount > 0 ? sheet.getRange(1, 1, rowCount, colCount).getValues() : [];
+  const snapshot = { sheet: sheet, headers: headers, data: data };
+  RUNTIME_CACHE.sheetSnapshots[key] = snapshot;
+  return snapshot;
+}
+
+function getGlobalProtocolItems() {
+  if (RUNTIME_CACHE.globalProtocolItems) return RUNTIME_CACHE.globalProtocolItems;
+  const configMap = getConfigMap();
+  const raw = configMap.PROTOCOL_ITEMS;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw || '[]');
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        RUNTIME_CACHE.globalProtocolItems = parsed;
+        return parsed;
+      }
+    } catch (e) {}
+  }
+  RUNTIME_CACHE.globalProtocolItems = CONFIG.INSTRUMENTS;
+  return CONFIG.INSTRUMENTS;
+}
+
+function getRolloutProtocolItemsInternal(rolloutId) {
+  if (RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)]) {
+    return RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)];
+  }
+  const globalItems = getGlobalProtocolItems();
+  let overrides = {};
+  const configMap = getConfigMap();
+  if (configMap.ROLLOUT_PROTOCOL_OVERRIDES) {
+    try { overrides = JSON.parse(configMap.ROLLOUT_PROTOCOL_OVERRIDES || '{}') || {}; } catch (e) {}
+  }
+  const selectedIds = overrides[rolloutId];
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0) {
+    RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)] = globalItems;
+    return globalItems;
+  }
+  const selectedMap = {};
+  selectedIds.forEach(id => selectedMap[String(id)] = true);
+  const filtered = globalItems.filter(item => selectedMap[String(item.number)]);
+  RUNTIME_CACHE.rolloutProtocolItems[String(rolloutId)] = filtered;
+  return filtered;
+}
+
+function getConfigMap() {
+  if (RUNTIME_CACHE.configMap) return RUNTIME_CACHE.configMap;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const result = {};
+  if (!configSheet || configSheet.getLastRow() < 2) {
+    RUNTIME_CACHE.configMap = result;
+    return result;
+  }
+  const data = configSheet.getRange(1, 1, configSheet.getLastRow(), configSheet.getLastColumn()).getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  for (let i = 1; i < data.length; i++) result[data[i][keyCol]] = data[i][valueCol];
+  RUNTIME_CACHE.configMap = result;
+  return result;
+}
+
+function getProtocolItemsForFilter(rolloutFilter) {
+  if (rolloutFilter && rolloutFilter !== 'All') return getRolloutProtocolItemsInternal(rolloutFilter);
+  return getGlobalProtocolItems();
+}
+
 // ============================================
 // WEB APP ENTRY POINTS
 // ============================================
@@ -104,16 +194,154 @@ function getWebAppUrl() {
  * Get configuration for client-side use
  */
 function getConfig() {
+  const protocols = getGlobalProtocolItems();
+  const recordingTypes = getSessionRecordingTypes();
   return {
     appName: CONFIG.APP_NAME,
     version: CONFIG.VERSION,
     sites: CONFIG.SITES,
     periods: CONFIG.PERIODS,
     roles: CONFIG.ROLES,
-    instruments: CONFIG.INSTRUMENTS,
+    instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
-    checklistStatuses: CONFIG.CHECKLIST_STATUSES
+    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
+    sessionRecordingTypes: recordingTypes
   };
+}
+
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
+    } catch (e) {}
+  }
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
+}
+
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
+}
+
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
+
+function getFieldNotesByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const sessions = (sessionsResult.sessions || []).map(function(s) {
+    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
+  });
+  return { success: true, sessions: sessions };
+}
+
+function saveFieldNotesLink(token, sessionId, link) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const sessionIdIdx = headers.indexOf('sessionId');
+  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
+
+  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
+  if (fieldNotesIdx === -1) {
+    headers.push('fieldNotesLink');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    fieldNotesIdx = headers.length - 1;
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
+      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      return { success: true, message: 'Field notes link saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function saveSessionRecordingLinks(token, sessionId, links) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const ensureCol = name => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) {
+      headers.push(name);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      idx = headers.length - 1;
+    }
+    return idx + 1;
+  };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
 }
 
 // ============================================
@@ -890,6 +1118,112 @@ function updateRollout(token, rolloutId, rolloutData) {
   return { success: false, message: 'Cohort not found' };
 }
 
+function getProtocolItems(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const items = rolloutId ? getRolloutProtocolItemsInternal(rolloutId) : getGlobalProtocolItems();
+  return { success: true, items: items };
+}
+
+function saveGlobalProtocolItems(token, items) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!Array.isArray(items) || items.length === 0) return { success: false, message: 'At least one protocol item is required' };
+  const normalized = items.map((item, idx) => ({
+    number: idx + 1,
+    name: String(item.name || '').trim(),
+    category: String(item.category || 'lesson').trim()
+  })).filter(i => i.name);
+  if (!normalized.length) return { success: false, message: 'Invalid protocol list' };
+  upsertConfigValue('PROTOCOL_ITEMS', JSON.stringify(normalized), 'Global protocol items for new checklist assignments');
+  return { success: true, message: 'Global protocol items updated', items: normalized };
+}
+
+function saveRolloutProtocolItems(token, rolloutId, itemNumbers) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!rolloutId) return { success: false, message: 'rolloutId required' };
+  const globalItems = getGlobalProtocolItems();
+  const globalMap = {};
+  globalItems.forEach(i => globalMap[String(i.number)] = true);
+  const filtered = (itemNumbers || []).map(n => String(n)).filter(n => globalMap[n]);
+  if (filtered.length === 0) return { success: false, message: 'At least one protocol item must remain enabled for a rollout' };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  let overrides = {};
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === 'ROLLOUT_PROTOCOL_OVERRIDES') {
+      try { overrides = JSON.parse(data[i][valueCol] || '{}') || {}; } catch (e) {}
+    }
+  }
+  overrides[rolloutId] = filtered;
+  upsertConfigValue('ROLLOUT_PROTOCOL_OVERRIDES', JSON.stringify(overrides), 'Per-rollout enabled protocol item numbers');
+  const syncSummary = syncRolloutChecklistProtocolItems(rolloutId, filtered);
+  return { success: true, message: 'Rollout protocol items updated', sync: syncSummary };
+}
+
+function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) return { added: 0, deleted: 0 };
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  const enabledMap = {};
+  enabledNumbers.forEach(n => enabledMap[String(n)] = true);
+  const enabledItems = getGlobalProtocolItems().filter(i => enabledMap[String(i.number)]);
+
+  const rolloutParticipantIds = {};
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][pHeaders.indexOf('rolloutId')]) === String(rolloutId)) {
+      rolloutParticipantIds[String(pData[i][pHeaders.indexOf('participantId')])] = true;
+    }
+  }
+
+  let deleted = 0;
+  for (let i = cData.length - 1; i >= 1; i--) {
+    const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
+    if (!rolloutParticipantIds[participantId]) continue;
+    const number = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
+    if (!enabledMap[number]) {
+      checklistSheet.deleteRow(i + 1);
+      deleted++;
+    }
+  }
+
+  const freshData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const existing = {};
+  for (let i = 1; i < freshData.length; i++) {
+    const participantId = String(freshData[i][cHeaders.indexOf('participantId')]);
+    const number = String(freshData[i][cHeaders.indexOf('instrumentNumber')]);
+    existing[participantId + '|' + number] = true;
+  }
+
+  let added = 0;
+  Object.keys(rolloutParticipantIds).forEach(participantId => {
+    enabledItems.forEach(item => {
+      const key = participantId + '|' + String(item.number);
+      if (!existing[key]) {
+        checklistSheet.appendRow([generateUUID(), participantId, item.number, item.name, item.category, 'not_started', '', '', '', '']);
+        added++;
+      }
+    });
+    updateParticipantCompletion(participantId);
+  });
+
+  return { added: added, deleted: deleted };
+}
+
 /**
  * Get cohort by ID
  */
@@ -1078,7 +1412,11 @@ function getSessionsByRollout(token, rolloutId) {
           sessionName: data[i][headers.indexOf('sessionName')],
           status: data[i][headers.indexOf('status')],
           createdAt: data[i][headers.indexOf('createdAt')],
-          createdBy: data[i][headers.indexOf('createdBy')]
+          createdBy: data[i][headers.indexOf('createdBy')],
+          goproLink: headers.indexOf('goproLink') !== -1 ? data[i][headers.indexOf('goproLink')] : '',
+          tascamLink: headers.indexOf('tascamLink') !== -1 ? data[i][headers.indexOf('tascamLink')] : '',
+          meetingOwlLink: headers.indexOf('meetingOwlLink') !== -1 ? data[i][headers.indexOf('meetingOwlLink')] : '',
+          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : ''
         });
       }
     }
@@ -1794,9 +2132,12 @@ function getAllParticipants(token, filters) {
 
   if (!participantsSheet) return { success: false, message: 'Participants sheet not found' };
 
-  const headers = ensureParticipantColumns(participantsSheet);
-  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
   const participants = [];
+  const participantIds = data.slice(1).map(row => getHeaderValue(row, headers, 'participantId')).filter(Boolean);
+  const completionMap = buildLiveCompletionMap(participantIds);
 
   filters = filters || {};
 
@@ -1813,7 +2154,7 @@ function getAllParticipants(token, filters) {
       enrolledBy: getHeaderValue(data[i], headers, 'enrolledBy'),
       status: getHeaderValue(data[i], headers, 'status'),
       notes: getHeaderValue(data[i], headers, 'notes'),
-      completionPercentage: getHeaderValue(data[i], headers, 'completionPercentage') || 0
+      completionPercentage: (completionMap[getHeaderValue(data[i], headers, 'participantId')] || {}).percentage || 0
     };
 
     if (currentUser.role !== 'viewer') {
@@ -1876,8 +2217,9 @@ function getParticipantById(token, participantId) {
   }
 
   // Get participant data
-  const pHeaders = ensureParticipantColumns(participantsSheet);
-  const pData = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), pHeaders.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
   let participant = null;
 
   for (let i = 1; i < pData.length; i++) {
@@ -1917,8 +2259,9 @@ function getParticipantById(token, participantId) {
   }
 
   // Get checklist items
-  const cHeaders = ensureChecklistColumns(checklistSheet);
-  const cData = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), cHeaders.length).getValues();
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
   const checklist = [];
 
   for (let i = 1; i < cData.length; i++) {
@@ -2025,8 +2368,8 @@ function enrollParticipant(token, participantData) {
   });
   appendParticipantRowAsText(participantsSheet, row);
 
-  // Create checklist items for all 18 instruments
-  CONFIG.INSTRUMENTS.forEach(instrument => {
+  // Create checklist items for rollout-configured protocol items
+  getRolloutProtocolItemsInternal(participantData.rolloutId).forEach(instrument => {
     const checklistId = generateUUID();
     checklistSheet.appendRow([
       checklistId,
@@ -2073,8 +2416,9 @@ function updateParticipant(token, participantId, participantData) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
-  const headers = ensureParticipantColumns(participantsSheet);
-  const data = participantsSheet.getRange(1, 1, participantsSheet.getLastRow(), headers.length).getValues();
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
 
   const parentEmail = (participantData.parentGuardianEmail || '').trim();
   const parentDob = (participantData.parentGuardianDob || '').trim();
@@ -2167,8 +2511,9 @@ function deleteParticipant(token, participantId) {
     return { success: false, message: 'Participants sheet not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantIdCol = pHeaders.indexOf('participantId');
   let participantName = '';
   let participantSite = '';
@@ -2190,8 +2535,9 @@ function deleteParticipant(token, participantId) {
   participantsSheet.deleteRow(rowIndex);
 
   if (checklistSheet) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     const checklistParticipantCol = cHeaders.indexOf('participantId');
 
     for (let i = cData.length - 1; i >= 1; i--) {
@@ -2493,7 +2839,7 @@ function importParticipantsCSV(token, fileData) {
     });
     appendParticipantRowAsText(participantsSheet, rowValues);
 
-    CONFIG.INSTRUMENTS.forEach(instrument => {
+    getRolloutProtocolItemsInternal(cohort.rolloutId).forEach(instrument => {
       const checklistId = generateUUID();
       checklistSheet.appendRow([
         checklistId,
@@ -2601,6 +2947,7 @@ function updateChecklistItem(token, checklistId, updateData) {
 
       // Update participant's completion percentage
       updateParticipantCompletion(participantId);
+      syncParticipantStatusFromChecklist(participantId);
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_CHECKLIST', 'checklist', checklistId,
         'Updated: ' + instrumentName + (updateDetails.length ? ' (' + updateDetails.join(', ') + ')' : ''));
@@ -2610,6 +2957,99 @@ function updateChecklistItem(token, checklistId, updateData) {
   }
 
   return { success: false, message: 'Checklist item not found' };
+}
+
+function syncParticipantStatusFromChecklist(participantId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) return;
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  let participantRow = -1;
+  let currentStatus = '';
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][pHeaders.indexOf('participantId')]) === String(participantId)) {
+      participantRow = i + 1;
+      currentStatus = String(pData[i][pHeaders.indexOf('status')] || '');
+      break;
+    }
+  }
+  if (participantRow === -1) return;
+  if (currentStatus === 'withdrawn') return; // never auto-overwrite withdrawn
+
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  let hasPostTestCompleted = false;
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][cHeaders.indexOf('participantId')]) !== String(participantId)) continue;
+    const name = String(cData[i][cHeaders.indexOf('instrumentName')] || '').toLowerCase();
+    const status = String(cData[i][cHeaders.indexOf('status')] || '');
+    if (name.indexOf('post-test') !== -1 || name.indexOf('post test') !== -1) {
+      if (status === 'completed') {
+        hasPostTestCompleted = true;
+        break;
+      }
+    }
+  }
+
+  const targetStatus = hasPostTestCompleted ? 'completed' : 'active';
+  if (currentStatus !== targetStatus) {
+    setCellAsPlainText(participantsSheet, participantRow, pHeaders.indexOf('status') + 1, targetStatus);
+  }
+}
+
+function bulkUpdateParticipantStatus(token, rolloutId, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) return { success: false, message: 'Cohort not found' };
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+  if (!Array.isArray(updates) || updates.length === 0) return { success: false, message: 'No updates provided' };
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const participantStatusCol = pHeaders.indexOf('status');
+  const participantIdCol = pHeaders.indexOf('participantId');
+  const rolloutCol = pHeaders.indexOf('rolloutId');
+
+  const rowByParticipantId = {};
+  for (let i = 1; i < pData.length; i++) {
+    if (String(pData[i][rolloutCol]) === String(rolloutId)) {
+      rowByParticipantId[String(pData[i][participantIdCol])] = i + 1;
+    }
+  }
+
+  let successCount = 0;
+  let errorCount = 0;
+  let hasChanges = false;
+  updates.forEach(update => {
+    if (!update || !update.participantId || !update.status) { errorCount++; return; }
+    if (CONFIG.PARTICIPANT_STATUSES.indexOf(update.status) === -1) { errorCount++; return; }
+    const row = rowByParticipantId[String(update.participantId)];
+    if (!row) { errorCount++; return; }
+    pData[row - 1][participantStatusCol] = update.status;
+    hasChanges = true;
+    successCount++;
+  });
+  if (hasChanges) {
+    participantSnapshot.sheet.getRange(1, 1, pData.length, pHeaders.length).setValues(pData);
+  }
+
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
+    'Updated statuses for ' + successCount + ' participants');
+  return {
+    success: errorCount === 0,
+    message: 'Updated ' + successCount + ' participants' + (errorCount > 0 ? (' (' + errorCount + ' errors)') : '')
+  };
 }
 
 /**
@@ -2665,7 +3105,7 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2678,8 +3118,9 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const checklistData = checklistSheet.getDataRange().getValues();
   const cHeaders = checklistData[0];
 
@@ -2747,7 +3188,7 @@ function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2760,8 +3201,9 @@ function getInstrumentLinksForRollout(token, rolloutId, instrumentNumber) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const checklistData = checklistSheet.getDataRange().getValues();
   const cHeaders = checklistData[0];
 
@@ -2822,7 +3264,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2839,8 +3281,9 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantsInRollout = {};
 
   for (let i = 1; i < pData.length; i++) {
@@ -2849,23 +3292,28 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
-  const checklistIdCol = cHeaders.indexOf('checklistId');
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const completedByCol = cHeaders.indexOf('completedBy');
 
   const checklistMap = {};
   for (let i = 1; i < cData.length; i++) {
     if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
       const pid = cData[i][checklistParticipantCol];
-      checklistMap[pid] = cData[i][checklistIdCol];
+      checklistMap[pid] = i + 1;
     }
   }
 
   let successCount = 0;
   let errorCount = 0;
+  const touchedParticipants = {};
 
+  let hasChanges = false;
   updates.forEach(update => {
     if (!participantsInRollout[update.participantId]) {
       errorCount++;
@@ -2877,18 +3325,31 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
       return;
     }
 
-    const checklistId = checklistMap[update.participantId];
-    if (!checklistId) {
+    const row = checklistMap[update.participantId];
+    if (!row) {
       errorCount++;
       return;
     }
-
-    const result = updateChecklistItem(token, checklistId, { status: update.status });
-    if (result.success) {
-      successCount++;
+    cData[row - 1][statusCol] = update.status;
+    if (update.status === 'completed') {
+      cData[row - 1][completedDateCol] = new Date().toISOString();
+      cData[row - 1][completedByCol] = currentUser.fullName;
     } else {
-      errorCount++;
+      cData[row - 1][completedDateCol] = '';
+      cData[row - 1][completedByCol] = '';
     }
+    hasChanges = true;
+    touchedParticipants[update.participantId] = true;
+    successCount++;
+  });
+
+  if (hasChanges) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+  }
+
+  Object.keys(touchedParticipants).forEach(pid => {
+    updateParticipantCompletion(pid);
+    syncParticipantStatusFromChecklist(pid);
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
@@ -2918,7 +3379,7 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     return { success: false, message: 'Unauthorized for this site' };
   }
 
-  const instrument = CONFIG.INSTRUMENTS.find(inst => String(inst.number) === String(instrumentNumber));
+  const instrument = getGlobalProtocolItems().find(inst => String(inst.number) === String(instrumentNumber));
   if (!instrument) {
     return { success: false, message: 'Instrument not found' };
   }
@@ -2935,8 +3396,9 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantsInRollout = {};
 
   for (let i = 1; i < pData.length; i++) {
@@ -2945,23 +3407,25 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
-  const checklistIdCol = cHeaders.indexOf('checklistId');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
 
   const checklistMap = {};
   for (let i = 1; i < cData.length; i++) {
     if (String(cData[i][instrumentCol]) === String(instrumentNumber)) {
       const pid = cData[i][checklistParticipantCol];
-      checklistMap[pid] = cData[i][checklistIdCol];
+      checklistMap[pid] = i + 1;
     }
   }
 
   let successCount = 0;
   let errorCount = 0;
 
+  let hasChanges = false;
   updates.forEach(update => {
     if (!participantsInRollout[update.participantId]) {
       errorCount++;
@@ -2973,19 +3437,18 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
       return;
     }
 
-    const checklistId = checklistMap[update.participantId];
-    if (!checklistId) {
+    const row = checklistMap[update.participantId];
+    if (!row) {
       errorCount++;
       return;
     }
-
-    const result = updateChecklistItem(token, checklistId, { dataLink: update.dataLink });
-    if (result.success) {
-      successCount++;
-    } else {
-      errorCount++;
-    }
+    cData[row - 1][dataLinkCol] = update.dataLink;
+    hasChanges = true;
+    successCount++;
   });
+  if (hasChanges) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+  }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT_LINK', 'checklist', instrumentNumber,
     'Updated ' + successCount + ' ' + instrument.name + ' links for cohort ' + cohort.schoolName);
@@ -3023,8 +3486,9 @@ function updateParticipantCompletion(participantId) {
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   // Update participant record
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
 
   for (let i = 1; i < pData.length; i++) {
     if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
@@ -3039,6 +3503,56 @@ function updateParticipantCompletion(participantId) {
   }
 
   return percentage;
+}
+
+function buildLiveCompletionMap(participantIds) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const participantsSheet = ss.getSheetByName('Participants');
+  const map = {};
+  if (!checklistSheet || checklistSheet.getLastRow() < 2 || !participantsSheet || participantsSheet.getLastRow() < 2) return map;
+  const set = {};
+  (participantIds || []).forEach(id => { set[String(id)] = true; });
+  const filterEnabled = participantIds && participantIds.length > 0;
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const participantRolloutMap = {};
+  const rolloutAllowedNumbersMap = {};
+  for (let i = 1; i < pData.length; i++) {
+    const pid = String(pData[i][pHeaders.indexOf('participantId')]);
+    if (filterEnabled && !set[pid]) continue;
+    const rolloutId = String(pData[i][pHeaders.indexOf('rolloutId')] || '');
+    participantRolloutMap[pid] = rolloutId;
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => { allowed[String(item.number)] = true; });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
+  }
+
+  const cData = checklistSheet.getDataRange().getValues();
+  const cHeaders = cData[0];
+  const participantCol = cHeaders.indexOf('participantId');
+  const statusCol = cHeaders.indexOf('status');
+  const numberCol = cHeaders.indexOf('instrumentNumber');
+  for (let i = 1; i < cData.length; i++) {
+    const pid = String(cData[i][participantCol]);
+    if (filterEnabled && !set[pid]) continue;
+    const rolloutId = participantRolloutMap[pid] || '';
+    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+    const itemNumber = String(cData[i][numberCol]);
+    if (!allowedMap[itemNumber]) continue;
+    if (!map[pid]) map[pid] = { total: 0, completed: 0, percentage: 0 };
+    map[pid].total++;
+    if (cData[i][statusCol] === 'completed') map[pid].completed++;
+  }
+  Object.keys(map).forEach(pid => {
+    const entry = map[pid];
+    entry.percentage = entry.total > 0 ? Math.round((entry.completed / entry.total) * 100) : 0;
+  });
+  return map;
 }
 
 // ============================================
@@ -3074,8 +3588,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   if (!participantsSheet) return stats;
 
   // Get participants data
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
 
   let totalCompletion = 0;
   let filteredParticipantIds = [];
@@ -3083,7 +3598,6 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   for (let i = 1; i < pData.length; i++) {
     const site = pData[i][pHeaders.indexOf('site')];
     const status = pData[i][pHeaders.indexOf('status')];
-    const completion = pData[i][pHeaders.indexOf('completionPercentage')] || 0;
     const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
     const participantId = pData[i][pHeaders.indexOf('participantId')];
 
@@ -3099,7 +3613,6 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
     filteredParticipantIds.push(participantId);
     stats.totalParticipants++;
-    totalCompletion += completion;
 
     if (status === 'active') stats.activeParticipants++;
     if (status === 'completed') stats.completedParticipants++;
@@ -3109,14 +3622,20 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     if (site === 'Missouri') stats.missouriParticipants++;
   }
 
+  const liveCompletionMap = buildLiveCompletionMap(filteredParticipantIds);
+  filteredParticipantIds.forEach(pid => {
+    totalCompletion += (liveCompletionMap[pid] || {}).percentage || 0;
+  });
+
   stats.overallCompletion = stats.totalParticipants > 0
     ? Math.round(totalCompletion / stats.totalParticipants)
     : 0;
 
   // Get cohorts data
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
 
     for (let i = 1; i < rData.length; i++) {
       const rSite = rData[i][rHeaders.indexOf('site')];
@@ -3145,12 +3664,13 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
   // Get instrument completion stats (only for filtered participants)
   if (checklistSheet) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
 
+    const protocolItems = getProtocolItemsForFilter(rolloutFilter);
     const instrumentCounts = {};
-
-    CONFIG.INSTRUMENTS.forEach(inst => {
+    protocolItems.forEach(inst => {
       instrumentCounts[inst.number] = { total: 0, completed: 0, name: inst.name };
     });
 
@@ -3172,7 +3692,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       }
     }
 
-    stats.instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
+    stats.instrumentStats = protocolItems.map(inst => ({
       number: inst.number,
       name: inst.name,
       category: inst.category,
@@ -3182,6 +3702,12 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
         ? Math.round((instrumentCounts[inst.number].completed / instrumentCounts[inst.number].total) * 100)
         : 0
     }));
+
+    const instrumentCompleted = stats.instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
+    const instrumentTotal = stats.instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
+    if (instrumentTotal > 0) {
+      stats.overallCompletion = Math.round((instrumentCompleted / instrumentTotal) * 100);
+    }
   }
 
   return stats;
@@ -3229,8 +3755,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
 
   const rolloutEntries = {};
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
 
     for (let i = 1; i < rData.length; i++) {
       const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
@@ -3270,9 +3797,11 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     rolloutFilter: effectiveRollout
   };
 
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const includedParticipantIds = [];
+  const participantRolloutMap = {};
   const participantNameMap = {};
   let completionSum = 0;
 
@@ -3280,19 +3809,18 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     const site = pData[i][pHeaders.indexOf('site')];
     const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
     const status = pData[i][pHeaders.indexOf('status')];
-    const completion = Number(pData[i][pHeaders.indexOf('completionPercentage')]) || 0;
     const participantId = pData[i][pHeaders.indexOf('participantId')];
 
     if (effectiveSite !== 'All' && site !== effectiveSite) continue;
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
+    participantRolloutMap[participantId] = rolloutId || 'Unassigned';
     participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
     overview.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
-    completionSum += completion;
 
     const key = rolloutId || 'Unassigned';
     if (!rolloutEntries[key]) {
@@ -3317,8 +3845,18 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     rolloutStats.activeParticipants += status === 'active' ? 1 : 0;
     rolloutStats.completedParticipants += status === 'completed' ? 1 : 0;
     rolloutStats.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
-    rolloutStats.completionSum += completion;
+    // completionSum populated from live checklist map below
   }
+
+  const liveCompletionMap = buildLiveCompletionMap(includedParticipantIds);
+  includedParticipantIds.forEach(participantId => {
+    const livePct = (liveCompletionMap[participantId] || {}).percentage || 0;
+    completionSum += livePct;
+    const rolloutKey = participantRolloutMap[participantId] || 'Unassigned';
+    if (rolloutEntries[rolloutKey]) {
+      rolloutEntries[rolloutKey].completionSum += livePct;
+    }
+  });
 
   overview.averageCompletion = overview.totalParticipants > 0
     ? Math.round(completionSum / overview.totalParticipants)
@@ -3337,13 +3875,15 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   // Instrument progress for included participants
   let instrumentStats = [];
   if (checklistSheet && includedParticipantIds.length > 0) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     const counts = {};
     const pendingByInstrument = {};
     const pendingSets = {};
 
-    CONFIG.INSTRUMENTS.forEach(inst => {
+    const protocolItems = getProtocolItemsForFilter(effectiveRollout);
+    protocolItems.forEach(inst => {
       counts[inst.number] = { total: 0, completed: 0, name: inst.name, category: inst.category };
       pendingByInstrument[inst.number] = [];
       pendingSets[inst.number] = new Set();
@@ -3377,7 +3917,7 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       pendingByInstrument[key].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     });
 
-    instrumentStats = CONFIG.INSTRUMENTS.map(inst => ({
+    instrumentStats = protocolItems.map(inst => ({
       number: inst.number,
       name: inst.name,
       category: inst.category,
@@ -3391,6 +3931,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
 
     overview.instrumentsCompleted = instrumentStats.reduce((sum, inst) => sum + inst.completed, 0);
     overview.instrumentsTotal = instrumentStats.reduce((sum, inst) => sum + inst.total, 0);
+    if (overview.instrumentsTotal > 0) {
+      overview.averageCompletion = Math.round((overview.instrumentsCompleted / overview.instrumentsTotal) * 100);
+    }
   }
 
   const cohorts = Object.values(rolloutEntries).sort((a, b) => {
@@ -3435,8 +3978,9 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
   const cohorts = [];
 
   if (rolloutsSheet) {
-    const rData = rolloutsSheet.getDataRange().getValues();
-    const rHeaders = rData[0];
+    const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+    const rData = rolloutSnapshot.data;
+    const rHeaders = rolloutSnapshot.headers;
     for (let i = 1; i < rData.length; i++) {
       const rolloutId = rData[i][rHeaders.indexOf('rolloutId')];
       const site = rData[i][rHeaders.indexOf('site')];
@@ -3769,23 +4313,43 @@ function parseSessionDate(dateValue) {
 
 function buildProtocolSummary(participants, checklistSheet) {
   const participantIds = new Set(participants.map(p => p.participantId));
+  const participantRolloutMap = {};
+  participants.forEach(p => { participantRolloutMap[String(p.participantId)] = String(p.rolloutId || ''); });
   const instrumentCounts = {};
   let totalCompleted = 0;
-  const requiredItems = CONFIG.INSTRUMENTS.length;
-
-  CONFIG.INSTRUMENTS.forEach(inst => {
-    instrumentCounts[inst.number] = { name: inst.name, total: 0, completed: 0 };
+  const rolloutAllowedNumbersMap = {};
+  const enabledItemsByNumber = {};
+  participants.forEach(p => {
+    const rolloutId = String(p.rolloutId || '');
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
+        allowed[String(item.number)] = true;
+        enabledItemsByNumber[String(item.number)] = item;
+      });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
   });
 
   if (checklistSheet && participantIds.size > 0) {
-    const cData = checklistSheet.getDataRange().getValues();
-    const cHeaders = cData[0];
+    const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+    const cData = checklistSnapshot.data;
+    const cHeaders = checklistSnapshot.headers;
     for (let i = 1; i < cData.length; i++) {
-      const participantId = cData[i][cHeaders.indexOf('participantId')];
+      const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
       if (!participantIds.has(participantId)) continue;
-      const instNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
+      const instNumber = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
       const status = cData[i][cHeaders.indexOf('status')];
-      if (!instrumentCounts[instNumber]) continue;
+      const rolloutId = participantRolloutMap[participantId] || '';
+      const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+      if (!allowedMap[instNumber]) continue;
+      if (!instrumentCounts[instNumber]) {
+        instrumentCounts[instNumber] = {
+          name: cData[i][cHeaders.indexOf('instrumentName')] || (enabledItemsByNumber[instNumber] || {}).name || ('Item ' + instNumber),
+          total: 0,
+          completed: 0
+        };
+      }
 
       instrumentCounts[instNumber].total++;
       if (status === 'completed') {
@@ -3795,20 +4359,21 @@ function buildProtocolSummary(participants, checklistSheet) {
     }
   }
 
-  const totalRequired = participants.length * requiredItems;
+  const totalRequired = Object.values(instrumentCounts).reduce((sum, item) => sum + item.total, 0);
+  const requiredItems = participants.length > 0 ? Math.round(totalRequired / participants.length) : 0;
   const completionRate = totalRequired > 0 ? Math.round((totalCompleted / totalRequired) * 100) : 0;
 
-  const instrumentStats = CONFIG.INSTRUMENTS.map(inst => {
-    const counts = instrumentCounts[inst.number];
-    const percentage = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
+  const instrumentStats = Object.keys(instrumentCounts).map(instNumber => {
+    const counts = instrumentCounts[instNumber];
+    const percentage = counts && counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
     return {
-      number: inst.number,
-      name: inst.name,
+      number: Number(instNumber),
+      name: counts.name,
       total: counts.total,
       completed: counts.completed,
       percentage: percentage
     };
-  });
+  }).sort((a, b) => a.number - b.number);
 
   const lowestItems = instrumentStats
     .filter(item => item.total > 0)
@@ -4195,8 +4760,9 @@ function exportChecklistCSV(token, filters) {
   }
 
   // Build participant map scoped to filters
-  const pData = participantsSheet.getDataRange().getValues();
-  const pHeaders = pData[0];
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
   const participantMap = {};
 
   for (let i = 1; i < pData.length; i++) {
@@ -4594,8 +5160,8 @@ function exportAttendanceCSV(token, filters) {
       dataRange.setFontFamily('Arial').setFontSize(10);
     }
 
-    targetSheet.setFrozenRows(tableHeaderRow);
-    targetSheet.setFrozenColumns(4);
+    targetSheet.setFrozenRows(0);
+    targetSheet.setFrozenColumns(0);
 
     if (sheetRows.length > 0 && sessionCount > 0) {
       const sessionStartCol = 5;
@@ -4682,6 +5248,208 @@ function exportAttendanceCSV(token, filters) {
 /**
  * Export summary report
  */
+
+function exportLinksArtifacts(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Invalid session' };
+
+  const siteFilter = (filters && filters.site) ? filters.site : 'All';
+  const rolloutFilter = (filters && filters.rolloutId) ? filters.rolloutId : 'All';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  const checklistSheet = ss.getSheetByName('Checklist');
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  if (!participantsSheet || !checklistSheet || !sessionsSheet) {
+    return { success: false, message: 'Required sheets are missing' };
+  }
+
+  function normalizeInstrumentName(name) {
+    return String(name || '').toLowerCase().replace(/\s*\([^)]*\)\s*/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function makeSafeSheetName(name, used) {
+    var base = String(name || 'Cohort').replace(/[\\/?*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!base) base = 'Cohort';
+    base = base.substring(0, 31);
+    var candidate = base;
+    var n = 2;
+    while (used[candidate]) {
+      var suffix = ' (' + n + ')';
+      candidate = base.substring(0, Math.max(1, 31 - suffix.length)) + suffix;
+      n++;
+    }
+    used[candidate] = true;
+    return candidate;
+  }
+
+  function toHyperlinkFormula(link) {
+    var value = String(link || '').trim();
+    if (!value) return '';
+    if (!/^https?:\/\//i.test(value)) return value;
+    var safe = value.replace(/"/g, '""');
+    return '=HYPERLINK("' + safe + '","Open")';
+  }
+
+  const exclusion = {
+    'consent form': true,
+    'assent form / pre-test': true,
+    'post-test': true,
+    'participant feedback survey': true
+  };
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantsData[0] || [];
+  const pIdx = {
+    participantId: participantHeaders.indexOf('participantId'),
+    fullName: participantHeaders.indexOf('fullName'),
+    site: participantHeaders.indexOf('site'),
+    rolloutId: participantHeaders.indexOf('rolloutId'),
+    schoolName: participantHeaders.indexOf('schoolName'),
+    period: participantHeaders.indexOf('period'),
+    year: participantHeaders.indexOf('year')
+  };
+
+  const selectedParticipants = [];
+  const selectedParticipantIds = {};
+  const rolloutMeta = {};
+  for (var i = 1; i < participantsData.length; i++) {
+    const row = participantsData[i];
+    const site = String(row[pIdx.site] || '');
+    const rolloutId = String(row[pIdx.rolloutId] || '');
+    if (siteFilter !== 'All' && site !== siteFilter) continue;
+    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
+    const pid = String(row[pIdx.participantId] || '');
+    if (!pid) continue;
+    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
+    selectedParticipantIds[pid] = true;
+    selectedParticipants.push({ participantId: pid, participantName: String(row[pIdx.fullName] || ''), site: site, cohort: cohortLabel, rolloutId: rolloutId });
+    if (!rolloutMeta[rolloutId]) rolloutMeta[rolloutId] = { site: site, cohort: cohortLabel };
+  }
+
+  if (!selectedParticipants.length) return { success: false, message: 'No participants found for selected filters' };
+
+  const protocolByRollout = {};
+  Object.keys(rolloutMeta).forEach(function(rid){ protocolByRollout[rid] = getProtocolItemsForFilter(rid) || []; });
+
+  const checklistData = checklistSheet.getDataRange().getValues();
+  const checklistHeaders = checklistData[0] || [];
+  const cIdx = { participantId: checklistHeaders.indexOf('participantId'), instrumentName: checklistHeaders.indexOf('instrumentName'), dataLink: checklistHeaders.indexOf('dataLink') };
+  const linkMap = {};
+  for (var j = 1; j < checklistData.length; j++) {
+    const crow = checklistData[j];
+    const pid2 = String(crow[cIdx.participantId] || '');
+    if (!selectedParticipantIds[pid2]) continue;
+    const instrument = String(crow[cIdx.instrumentName] || '').trim();
+    if (!instrument) continue;
+    const link = String(crow[cIdx.dataLink] || '').trim();
+    if (!link) continue;
+    if (!linkMap[pid2]) linkMap[pid2] = {};
+    linkMap[pid2][instrument] = link;
+  }
+
+  const groups = {};
+  selectedParticipants.forEach(function(p) {
+    const key = p.rolloutId || ('cohort:' + p.cohort);
+    if (!groups[key]) groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
+    groups[key].participants.push(p);
+  });
+
+  const spreadsheet = SpreadsheetApp.create('Links and Artifacts Export ' + new Date().toISOString());
+  const usedNames = {};
+
+  // Sheet 1: Sessions Recording
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sHeaders = sessionData[0] || [];
+  const sIdx = {
+    rolloutId: sHeaders.indexOf('rolloutId'),
+    goproLink: sHeaders.indexOf('goproLink'),
+    tascamLink: sHeaders.indexOf('tascamLink'),
+    meetingOwlLink: sHeaders.indexOf('meetingOwlLink'),
+    recordingLinksJson: sHeaders.indexOf('recordingLinksJson')
+  };
+  const sessionRows = [];
+  for (var sr = 1; sr < sessionData.length; sr++) {
+    const row = sessionData[sr];
+    const rid = String(row[sIdx.rolloutId] || '');
+    if (!rolloutMeta[rid]) continue;
+    let linksJson = {};
+    if (sIdx.recordingLinksJson >= 0 && row[sIdx.recordingLinksJson]) {
+      try { linksJson = JSON.parse(String(row[sIdx.recordingLinksJson])) || {}; } catch (e) {}
+    }
+    const gp = String((linksJson['GoPro'] || (sIdx.goproLink >= 0 ? row[sIdx.goproLink] : '') || '')).trim();
+    const ta = String((linksJson['Tascam'] || (sIdx.tascamLink >= 0 ? row[sIdx.tascamLink] : '') || '')).trim();
+    const mo = String((linksJson['Meeting Owl'] || (sIdx.meetingOwlLink >= 0 ? row[sIdx.meetingOwlLink] : '') || '')).trim();
+    sessionRows.push([
+      rolloutMeta[rid].site,
+      rolloutMeta[rid].cohort,
+      toHyperlinkFormula(gp),
+      toHyperlinkFormula(ta),
+      toHyperlinkFormula(mo)
+    ]);
+  }
+
+  const firstSheet = spreadsheet.getSheets()[0];
+  firstSheet.setName('Sessions Recording');
+  usedNames['Sessions Recording'] = true;
+  const sessHeaders = ['Site', 'Cohort', 'GoPro Recording', 'Tascam Recording', 'Meeting Owl Recording'];
+  firstSheet.getRange(1,1,1,sessHeaders.length).setValues([sessHeaders]);
+  if (sessionRows.length) firstSheet.getRange(2,1,sessionRows.length,sessHeaders.length).setValues(sessionRows);
+  firstSheet.getRange(1,1,1,sessHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+  firstSheet.setRowHeight(1, 70);
+  firstSheet.setColumnWidths(1, sessHeaders.length, 178);
+
+  Object.keys(groups).forEach(function(groupKey) {
+    const group = groups[groupKey];
+    const protocolItems = protocolByRollout[group.rolloutId] || [];
+
+    const protocolNames = [];
+    const seen = {};
+    protocolItems.forEach(function(item) {
+      const nm = String(item.instrumentName || item.name || '').trim();
+      if (!nm) return;
+      const norm = normalizeInstrumentName(nm);
+      if (exclusion[norm]) return;
+      if (!seen[nm]) { seen[nm] = true; protocolNames.push(nm); }
+    });
+
+    const headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
+    const rows = group.participants.map(function(p) {
+      const row = [p.participantName, p.site, p.cohort];
+      protocolNames.forEach(function(protocolName) {
+        const link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
+        row.push(toHyperlinkFormula(link));
+      });
+      return row;
+    });
+
+    const sheet = spreadsheet.insertSheet();
+    const safeName = makeSafeSheetName(group.cohort, usedNames);
+    sheet.setName(safeName);
+
+    sheet.getRange(1,1,1,headers.length).setValues([headers]);
+    if (rows.length) sheet.getRange(2,1,rows.length,headers.length).setValues(rows);
+    sheet.getRange(1,1,1,headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+    sheet.setRowHeight(1, 70);
+    sheet.setColumnWidths(1, headers.length, 178);
+    if (headers.length > 3) sheet.getRange(2,4,Math.max(rows.length,1),headers.length - 3).setHorizontalAlignment('center');
+  });
+
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to generate export file' };
+  }
+  const blob = response.getBlob().setName('links_artifacts_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
+  const base64 = Utilities.base64Encode(blob.getBytes());
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+  return { success: true, filename: blob.getName(), mimeType: blob.getContentType(), content: base64, message: 'Links and artifacts export generated' };
+}
+
 function exportSummaryReport(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {
