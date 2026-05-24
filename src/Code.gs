@@ -1284,6 +1284,41 @@ function getConfig() {
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes
   };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
+      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
+      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
 }
 
 function getSessionRecordingTypes() {
@@ -6364,12 +6399,13 @@ function exportLinksArtifacts(token, filters) {
     if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
     const pid = String(row[pIdx.participantId] || '');
     if (!pid) continue;
+    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
     selectedParticipantIds[pid] = true;
     selectedParticipants.push({
       participantId: pid,
       participantName: String(row[pIdx.fullName] || ''),
       site: site,
-      cohort: String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : ''),
+      cohort: cohortLabel,
       rolloutId: rolloutId
     });
   }
@@ -6380,6 +6416,21 @@ function exportLinksArtifacts(token, filters) {
 
   function normalizeInstrumentName(name) {
     return String(name || '').toLowerCase().replace(/\s*\([^)]*\)\s*/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  function makeSafeSheetName(name, used) {
+    var base = String(name || 'Cohort').replace(/[\\/?*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!base) base = 'Cohort';
+    base = base.substring(0, 31);
+    var candidate = base;
+    var n = 2;
+    while (used[candidate]) {
+      var suffix = ' (' + n + ')';
+      candidate = base.substring(0, Math.max(1, 31 - suffix.length)) + suffix;
+      n++;
+    }
+    used[candidate] = true;
+    return candidate;
   }
 
   const exclusion = {
@@ -6401,18 +6452,6 @@ function exportLinksArtifacts(token, filters) {
     });
   }
 
-  const protocolNameSet = {};
-  Object.keys(protocolByRollout).forEach(function(rid) {
-    (protocolByRollout[rid] || []).forEach(function(item) {
-      const nm = String(item.instrumentName || item.name || '').trim();
-      if (!nm) return;
-      const key = normalizeInstrumentName(nm);
-      if (exclusion[key]) return;
-      protocolNameSet[nm] = true;
-    });
-  });
-  const protocolNames = Object.keys(protocolNameSet).sort(function(a,b){ return a.localeCompare(b); });
-
   const checklistData = checklistSheet.getDataRange().getValues();
   const checklistHeaders = checklistData[0] || [];
   const cIdx = {
@@ -6427,35 +6466,71 @@ function exportLinksArtifacts(token, filters) {
     const pid2 = String(crow[cIdx.participantId] || '');
     if (!selectedParticipantIds[pid2]) continue;
     const instrument = String(crow[cIdx.instrumentName] || '').trim();
-    if (!instrument || !protocolNameSet[instrument]) continue;
+    if (!instrument) continue;
     const link = String(crow[cIdx.dataLink] || '').trim();
     if (!link) continue;
     if (!linkMap[pid2]) linkMap[pid2] = {};
     linkMap[pid2][instrument] = link;
   }
 
-  const exportRows = [];
+  const groups = {};
   selectedParticipants.forEach(function(p) {
-    const row = [p.participantName, p.site, p.cohort];
-    protocolNames.forEach(function(protocolName) {
-      const link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
-      row.push(link ? '=HYPERLINK("' + link.replace(/"/g, '""') + '","Open")' : '');
-    });
-    exportRows.push(row);
+    var key = p.rolloutId || ('cohort:' + p.cohort);
+    if (!groups[key]) {
+      groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
+    }
+    groups[key].participants.push(p);
   });
 
-  const headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
   const spreadsheet = SpreadsheetApp.create('Links and Artifacts Export ' + new Date().toISOString());
-  const sheet = spreadsheet.getSheets()[0];
-  sheet.setName('Links and Artifacts');
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  if (exportRows.length) {
-    sheet.getRange(2, 1, exportRows.length, headers.length).setValues(exportRows);
-  }
-  sheet.getRange(1,1,1,headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
-  sheet.autoResizeColumns(1, headers.length);
-  sheet.setFrozenRows(1);
-  sheet.getRange(2,4,Math.max(exportRows.length,1),Math.max(headers.length-3,1)).setHorizontalAlignment('center');
+  const defaultSheet = spreadsheet.getSheets()[0];
+  const usedNames = {};
+  var sheetCount = 0;
+
+  Object.keys(groups).forEach(function(groupKey) {
+    var group = groups[groupKey];
+    var protocolItems = protocolByRollout[group.rolloutId] || getProtocolItemsForFilter(group.rolloutId || 'All') || [];
+
+    var protocolNames = [];
+    var seen = {};
+    protocolItems.forEach(function(item) {
+      var nm = String(item.instrumentName || item.name || '').trim();
+      if (!nm) return;
+      var norm = normalizeInstrumentName(nm);
+      if (exclusion[norm]) return;
+      if (!seen[nm]) {
+        seen[nm] = true;
+        protocolNames.push(nm);
+      }
+    });
+
+    var headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
+    var rows = group.participants.map(function(p) {
+      var row = [p.participantName, p.site, p.cohort];
+      protocolNames.forEach(function(protocolName) {
+        var link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
+        row.push(link ? '=HYPERLINK("' + link.replace(/"/g, '""') + '","Open")' : '');
+      });
+      return row;
+    });
+
+    var sheet = sheetCount === 0 ? defaultSheet : spreadsheet.insertSheet();
+    var safeName = makeSafeSheetName(group.cohort, usedNames);
+    sheet.setName(safeName);
+
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+    sheet.setRowHeight(1, 70);
+    sheet.setColumnWidths(1, headers.length, 181);
+    sheet.setFrozenRows(1);
+    if (headers.length > 3) {
+      sheet.getRange(2, 4, Math.max(rows.length, 1), headers.length - 3).setHorizontalAlignment('center');
+    }
+    sheetCount++;
+  });
 
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
