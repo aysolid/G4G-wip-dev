@@ -6312,8 +6312,9 @@
       }
 
       // Handle binary file (base64) or CSV fallback
-      if (result.file && result.mimeType) {
-        const byteCharacters = atob(result.file);
+      const base64Content = result.file || result.content;
+      if (base64Content && result.mimeType) {
+        const byteCharacters = atob(base64Content);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
           byteNumbers[i] = byteCharacters.charCodeAt(i);
