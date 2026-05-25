@@ -6579,6 +6579,7 @@ function exportLinksArtifacts(token, filters) {
   const checklistHeaders = checklistData[0] || [];
   const cIdx = { participantId: checklistHeaders.indexOf('participantId'), instrumentName: checklistHeaders.indexOf('instrumentName'), dataLink: checklistHeaders.indexOf('dataLink') };
   const linkMap = {};
+  const linkMapNormalized = {};
   for (var j = 1; j < checklistData.length; j++) {
     const crow = checklistData[j];
     const pid2 = String(crow[cIdx.participantId] || '');
@@ -6588,7 +6589,9 @@ function exportLinksArtifacts(token, filters) {
     const link = String(crow[cIdx.dataLink] || '').trim();
     if (!link) continue;
     if (!linkMap[pid2]) linkMap[pid2] = {};
+    if (!linkMapNormalized[pid2]) linkMapNormalized[pid2] = {};
     linkMap[pid2][instrument] = link;
+    linkMapNormalized[pid2][normalizeInstrumentName(instrument)] = link;
   }
 
   const groups = {};
@@ -6606,9 +6609,12 @@ function exportLinksArtifacts(token, filters) {
   const sHeaders = sessionData[0] || [];
   const sIdx = {
     rolloutId: sHeaders.indexOf('rolloutId'),
+    sessionName: sHeaders.indexOf('sessionName'),
+    sessionNumber: sHeaders.indexOf('sessionNumber'),
     goproLink: sHeaders.indexOf('goproLink'),
     tascamLink: sHeaders.indexOf('tascamLink'),
     meetingOwlLink: sHeaders.indexOf('meetingOwlLink'),
+    fieldNotesLink: sHeaders.indexOf('fieldNotesLink'),
     recordingLinksJson: sHeaders.indexOf('recordingLinksJson')
   };
   const sessionRows = [];
@@ -6623,19 +6629,23 @@ function exportLinksArtifacts(token, filters) {
     const gp = String((linksJson['GoPro'] || (sIdx.goproLink >= 0 ? row[sIdx.goproLink] : '') || '')).trim();
     const ta = String((linksJson['Tascam'] || (sIdx.tascamLink >= 0 ? row[sIdx.tascamLink] : '') || '')).trim();
     const mo = String((linksJson['Meeting Owl'] || (sIdx.meetingOwlLink >= 0 ? row[sIdx.meetingOwlLink] : '') || '')).trim();
+    const sessionLabel = String((sIdx.sessionName >= 0 ? row[sIdx.sessionName] : '') || '').trim() || ('Session ' + String((sIdx.sessionNumber >= 0 ? row[sIdx.sessionNumber] : '') || '').trim());
+    const fn = String((sIdx.fieldNotesLink >= 0 ? row[sIdx.fieldNotesLink] : '') || '').trim();
     sessionRows.push([
       rolloutMeta[rid].site,
       rolloutMeta[rid].cohort,
+      sessionLabel,
       toHyperlinkFormula(gp),
       toHyperlinkFormula(ta),
-      toHyperlinkFormula(mo)
+      toHyperlinkFormula(mo),
+      toHyperlinkFormula(fn)
     ]);
   }
 
   const firstSheet = spreadsheet.getSheets()[0];
   firstSheet.setName('Sessions Recording');
   usedNames['Sessions Recording'] = true;
-  const sessHeaders = ['Site', 'Cohort', 'GoPro Recording', 'Tascam Recording', 'Meeting Owl Recording'];
+  const sessHeaders = ['Site', 'Cohort', 'Sessions', 'GoPro Recording', 'Tascam Recording', 'Meeting Owl Recording', 'Field note'];
   firstSheet.getRange(1,1,1,sessHeaders.length).setValues([sessHeaders]);
   if (sessionRows.length) firstSheet.getRange(2,1,sessionRows.length,sessHeaders.length).setValues(sessionRows);
   firstSheet.getRange(1,1,1,sessHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
@@ -6660,7 +6670,13 @@ function exportLinksArtifacts(token, filters) {
     const rows = group.participants.map(function(p) {
       const row = [p.participantName, p.site, p.cohort];
       protocolNames.forEach(function(protocolName) {
-        const link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
+        var link = '';
+        if (linkMap[p.participantId] && linkMap[p.participantId][protocolName]) {
+          link = linkMap[p.participantId][protocolName];
+        } else {
+          var nk = normalizeInstrumentName(protocolName);
+          link = (linkMapNormalized[p.participantId] && linkMapNormalized[p.participantId][nk]) ? linkMapNormalized[p.participantId][nk] : '';
+        }
         row.push(toHyperlinkFormula(link));
       });
       return row;
