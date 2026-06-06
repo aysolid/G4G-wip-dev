@@ -2675,6 +2675,28 @@ function getSessionsByRollout(token, rolloutId) {
   }
 }
 
+function buildStudySessionRow(headers, data) {
+  const values = {
+    sessionId: data.sessionId || '',
+    rolloutId: data.rolloutId || '',
+    sessionNumber: data.sessionNumber || '',
+    sessionDate: data.sessionDate || '',
+    sessionName: data.sessionName || '',
+    status: data.status || 'scheduled',
+    createdAt: data.createdAt || '',
+    createdBy: data.createdBy || '',
+    goproLink: data.goproLink || '',
+    tascamLink: data.tascamLink || '',
+    meetingOwlLink: data.meetingOwlLink || '',
+    recordingLinksJson: data.recordingLinksJson || ''
+  };
+
+  return headers.map(header => {
+    const key = String(header || '').trim();
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
+  });
+}
+
 /**
  * Create a new study session
  */
@@ -2694,16 +2716,17 @@ function createSession(token, sessionData) {
   const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
 
   const nextRow = sessionsSheet.getLastRow() + 1;
-  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([[
-    sessionId,
-    sessionData.rolloutId,
-    sessionData.sessionNumber,
-    sessionDateText,
-    sessionData.sessionName || '',
-    'scheduled',
-    timestamp,
-    currentUser.userId
-  ]]);
+  const row = buildStudySessionRow(headers, {
+    sessionId: sessionId,
+    rolloutId: sessionData.rolloutId,
+    sessionNumber: sessionData.sessionNumber,
+    sessionDate: sessionDateText,
+    sessionName: sessionData.sessionName || '',
+    status: 'scheduled',
+    createdAt: timestamp,
+    createdBy: currentUser.userId
+  });
+  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([row]);
   if (sessionDateCol > 0) {
     setPlainTextCell(sessionsSheet, nextRow, sessionDateCol, sessionDateText);
   }
@@ -2738,16 +2761,16 @@ function batchCreateSessions(token, rolloutId, sessionsData) {
       sessionId: sessionId,
       sessionNumber: sessionData.sessionNumber
     });
-    return [
-      sessionId,
-      rolloutId,
-      sessionData.sessionNumber,
-      sessionDateText,
-      sessionData.sessionName || '',
-      'scheduled',
-      timestamp,
-      currentUser.userId
-    ];
+    return buildStudySessionRow(headers, {
+      sessionId: sessionId,
+      rolloutId: rolloutId,
+      sessionNumber: sessionData.sessionNumber,
+      sessionDate: sessionDateText,
+      sessionName: sessionData.sessionName || '',
+      status: 'scheduled',
+      createdAt: timestamp,
+      createdBy: currentUser.userId
+    });
   });
 
   if (rows.length > 0) {
