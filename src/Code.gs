@@ -2136,64 +2136,75 @@ function getAllParticipants(token, filters) {
   const headers = participantSnapshot.headers;
   const data = participantSnapshot.data;
   const participants = [];
-  const participantIds = data.slice(1).map(row => getHeaderValue(row, headers, 'participantId')).filter(Boolean);
-  const completionMap = buildLiveCompletionMap(participantIds);
+  const filteredRows = [];
 
   filters = filters || {};
 
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const siteCol = headers.indexOf('site');
+  const rolloutIdCol = headers.indexOf('rolloutId');
+  const schoolNameCol = headers.indexOf('schoolName');
+  const statusCol = headers.indexOf('status');
+
   for (let i = 1; i < data.length; i++) {
-    const participant = {
-      participantId: getHeaderValue(data[i], headers, 'participantId'),
-      fullName: getHeaderValue(data[i], headers, 'fullName'),
-      site: getHeaderValue(data[i], headers, 'site'),
-      rolloutId: getHeaderValue(data[i], headers, 'rolloutId'),
-      schoolName: getHeaderValue(data[i], headers, 'schoolName'),
-      period: getHeaderValue(data[i], headers, 'period'),
-      year: getHeaderValue(data[i], headers, 'year'),
-      enrollmentDate: getHeaderValue(data[i], headers, 'enrollmentDate'),
-      enrolledBy: getHeaderValue(data[i], headers, 'enrolledBy'),
-      status: getHeaderValue(data[i], headers, 'status'),
-      notes: getHeaderValue(data[i], headers, 'notes'),
-      completionPercentage: (completionMap[getHeaderValue(data[i], headers, 'participantId')] || {}).percentage || 0
-    };
+    const row = data[i];
+    const participantId = row[participantIdCol];
+    const fullName = row[fullNameCol] || '';
+    const site = row[siteCol];
+    const rolloutId = row[rolloutIdCol];
+    const schoolName = row[schoolNameCol] || '';
+    const status = row[statusCol];
 
-    if (currentUser.role !== 'viewer') {
-      participant.parentGuardianNames = getHeaderValue(data[i], headers, 'parent_guardian_names');
-      participant.parentGuardianPhone = getHeaderValue(data[i], headers, 'parent_guardian_phone');
-      participant.parentGuardianAddress = getHeaderValue(data[i], headers, 'parent_guardian_address');
-      participant.parentGuardianEmail = getHeaderValue(data[i], headers, 'parent_guardian_email');
-      participant.parentGuardianDob = getHeaderValue(data[i], headers, 'parent_guardian_dob');
-    }
-
-    // Apply filters
     let include = true;
-
-    if (filters.site && filters.site !== 'All' && participant.site !== filters.site) {
-      include = false;
-    }
-    if (filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
-      include = false;
-    }
-    if (filters.status && participant.status !== filters.status) {
-      include = false;
-    }
+    if (filters.site && filters.site !== 'All' && site !== filters.site) include = false;
+    if (filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) include = false;
+    if (filters.status && status !== filters.status) include = false;
     if (filters.search) {
       const searchLower = filters.search.toLowerCase();
       const matchesSearch =
-        participant.fullName.toLowerCase().includes(searchLower) ||
-        participant.participantId.toLowerCase().includes(searchLower) ||
-        participant.schoolName.toLowerCase().includes(searchLower);
+        String(fullName).toLowerCase().includes(searchLower) ||
+        String(participantId).toLowerCase().includes(searchLower) ||
+        String(schoolName).toLowerCase().includes(searchLower);
       if (!matchesSearch) include = false;
     }
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && site !== currentUser.site) include = false;
+    if (include) filteredRows.push(row);
+  }
 
-    // Facilitators see their site by default unless viewing all
-    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && participant.site !== currentUser.site) {
-      include = false;
+  if (filteredRows.length === 0) {
+    return { success: true, participants: [] };
+  }
+
+  const completionMap = buildLiveCompletionMap(filteredRows.map(row => row[participantIdCol]).filter(Boolean));
+
+  for (let i = 0; i < filteredRows.length; i++) {
+    const row = filteredRows[i];
+    const participantId = row[participantIdCol];
+    const participant = {
+      participantId: participantId,
+      fullName: row[fullNameCol],
+      site: row[siteCol],
+      rolloutId: row[rolloutIdCol],
+      schoolName: row[schoolNameCol],
+      period: getHeaderValue(row, headers, 'period'),
+      year: getHeaderValue(row, headers, 'year'),
+      enrollmentDate: getHeaderValue(row, headers, 'enrollmentDate'),
+      enrolledBy: getHeaderValue(row, headers, 'enrolledBy'),
+      status: row[statusCol],
+      notes: getHeaderValue(row, headers, 'notes'),
+      completionPercentage: (completionMap[participantId] || {}).percentage || 0
+    };
+
+    if (currentUser.role !== 'viewer') {
+      participant.parentGuardianNames = getHeaderValue(row, headers, 'parent_guardian_names');
+      participant.parentGuardianPhone = getHeaderValue(row, headers, 'parent_guardian_phone');
+      participant.parentGuardianAddress = getHeaderValue(row, headers, 'parent_guardian_address');
+      participant.parentGuardianEmail = getHeaderValue(row, headers, 'parent_guardian_email');
+      participant.parentGuardianDob = getHeaderValue(row, headers, 'parent_guardian_dob');
     }
 
-    if (include) {
-      participants.push(participant);
-    }
+    participants.push(participant);
   }
 
   return { success: true, participants: participants };
@@ -3506,24 +3517,26 @@ function updateParticipantCompletion(participantId) {
 }
 
 function buildLiveCompletionMap(participantIds) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const checklistSheet = ss.getSheetByName('Checklist');
-  const participantsSheet = ss.getSheetByName('Participants');
   const map = {};
-  if (!checklistSheet || checklistSheet.getLastRow() < 2 || !participantsSheet || participantsSheet.getLastRow() < 2) return map;
-  const set = {};
-  (participantIds || []).forEach(id => { set[String(id)] = true; });
-  const filterEnabled = participantIds && participantIds.length > 0;
-
   const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
   const pHeaders = participantSnapshot.headers;
   const pData = participantSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  if (pData.length < 2 || cData.length < 2) return map;
+
+  const requestedIds = new Set((participantIds || []).map(id => String(id)));
+  const filterEnabled = requestedIds.size > 0;
+  const participantIdCol = pHeaders.indexOf('participantId');
+  const participantRolloutCol = pHeaders.indexOf('rolloutId');
   const participantRolloutMap = {};
   const rolloutAllowedNumbersMap = {};
+
   for (let i = 1; i < pData.length; i++) {
-    const pid = String(pData[i][pHeaders.indexOf('participantId')]);
-    if (filterEnabled && !set[pid]) continue;
-    const rolloutId = String(pData[i][pHeaders.indexOf('rolloutId')] || '');
+    const pid = String(pData[i][participantIdCol] || '');
+    if (!pid || (filterEnabled && !requestedIds.has(pid))) continue;
+    const rolloutId = String(pData[i][participantRolloutCol] || '');
     participantRolloutMap[pid] = rolloutId;
     if (!rolloutAllowedNumbersMap[rolloutId]) {
       const allowed = {};
@@ -3532,14 +3545,12 @@ function buildLiveCompletionMap(participantIds) {
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
-  const participantCol = cHeaders.indexOf('participantId');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
   const statusCol = cHeaders.indexOf('status');
   const numberCol = cHeaders.indexOf('instrumentNumber');
   for (let i = 1; i < cData.length; i++) {
-    const pid = String(cData[i][participantCol]);
-    if (filterEnabled && !set[pid]) continue;
+    const pid = String(cData[i][checklistParticipantCol] || '');
+    if (!pid || (filterEnabled && !requestedIds.has(pid))) continue;
     const rolloutId = participantRolloutMap[pid] || '';
     const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
     const itemNumber = String(cData[i][numberCol]);
@@ -3595,11 +3606,16 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   let totalCompletion = 0;
   let filteredParticipantIds = [];
 
+  const dashboardSiteCol = pHeaders.indexOf('site');
+  const dashboardStatusCol = pHeaders.indexOf('status');
+  const dashboardRolloutIdCol = pHeaders.indexOf('rolloutId');
+  const dashboardParticipantIdCol = pHeaders.indexOf('participantId');
+
   for (let i = 1; i < pData.length; i++) {
-    const site = pData[i][pHeaders.indexOf('site')];
-    const status = pData[i][pHeaders.indexOf('status')];
-    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
-    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][dashboardSiteCol];
+    const status = pData[i][dashboardStatusCol];
+    const rolloutId = pData[i][dashboardRolloutIdCol];
+    const participantId = pData[i][dashboardParticipantIdCol];
 
     // Apply site filter
     if (siteFilter && siteFilter !== 'All' && site !== siteFilter) {
@@ -3622,7 +3638,10 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     if (site === 'Missouri') stats.missouriParticipants++;
   }
 
-  const liveCompletionMap = buildLiveCompletionMap(filteredParticipantIds);
+  const filteredParticipantIdSet = new Set(filteredParticipantIds.map(id => String(id)));
+  const liveCompletionMap = filteredParticipantIds.length > 0
+    ? buildLiveCompletionMap(filteredParticipantIds)
+    : {};
   filteredParticipantIds.forEach(pid => {
     totalCompletion += (liveCompletionMap[pid] || {}).percentage || 0;
   });
@@ -3674,13 +3693,17 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       instrumentCounts[inst.number] = { total: 0, completed: 0, name: inst.name };
     });
 
+    const instrumentNumberCol = cHeaders.indexOf('instrumentNumber');
+    const instrumentStatusCol = cHeaders.indexOf('status');
+    const checklistParticipantCol = cHeaders.indexOf('participantId');
+
     for (let i = 1; i < cData.length; i++) {
-      const instNum = cData[i][cHeaders.indexOf('instrumentNumber')];
-      const instStatus = cData[i][cHeaders.indexOf('status')];
-      const checklistParticipantId = cData[i][cHeaders.indexOf('participantId')];
+      const instNum = cData[i][instrumentNumberCol];
+      const instStatus = cData[i][instrumentStatusCol];
+      const checklistParticipantId = cData[i][checklistParticipantCol];
 
       // Only count checklist items for filtered participants
-      if (filteredParticipantIds.length > 0 && !filteredParticipantIds.includes(checklistParticipantId)) {
+      if (!filteredParticipantIdSet.has(String(checklistParticipantId))) {
         continue;
       }
 
@@ -3803,20 +3826,28 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const includedParticipantIds = [];
   const participantRolloutMap = {};
   const participantNameMap = {};
+  const analyticsSiteCol = pHeaders.indexOf('site');
+  const analyticsRolloutIdCol = pHeaders.indexOf('rolloutId');
+  const analyticsStatusCol = pHeaders.indexOf('status');
+  const analyticsParticipantIdCol = pHeaders.indexOf('participantId');
+  const analyticsFullNameCol = pHeaders.indexOf('fullName');
+  const analyticsSchoolNameCol = pHeaders.indexOf('schoolName');
+  const analyticsPeriodCol = pHeaders.indexOf('period');
+  const analyticsYearCol = pHeaders.indexOf('year');
   let completionSum = 0;
 
   for (let i = 1; i < pData.length; i++) {
-    const site = pData[i][pHeaders.indexOf('site')];
-    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
-    const status = pData[i][pHeaders.indexOf('status')];
-    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][analyticsSiteCol];
+    const rolloutId = pData[i][analyticsRolloutIdCol];
+    const status = pData[i][analyticsStatusCol];
+    const participantId = pData[i][analyticsParticipantIdCol];
 
     if (effectiveSite !== 'All' && site !== effectiveSite) continue;
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
     participantRolloutMap[participantId] = rolloutId || 'Unassigned';
-    participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
+    participantNameMap[participantId] = pData[i][analyticsFullNameCol] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
@@ -3827,9 +3858,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       rolloutEntries[key] = {
         rolloutId: rolloutId || 'Unassigned',
         site: site,
-        schoolName: rolloutId ? pData[i][pHeaders.indexOf('schoolName')] : 'No cohort assigned',
-        period: pData[i][pHeaders.indexOf('period')],
-        year: pData[i][pHeaders.indexOf('year')],
+        schoolName: rolloutId ? pData[i][analyticsSchoolNameCol] : 'No cohort assigned',
+        period: pData[i][analyticsPeriodCol],
+        year: pData[i][analyticsYearCol],
         status: rolloutId ? 'active' : 'unassigned',
         participantCount: 0,
         activeParticipants: 0,
@@ -3848,7 +3879,10 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     // completionSum populated from live checklist map below
   }
 
-  const liveCompletionMap = buildLiveCompletionMap(includedParticipantIds);
+  const includedParticipantIdSet = new Set(includedParticipantIds.map(id => String(id)));
+  const liveCompletionMap = includedParticipantIds.length > 0
+    ? buildLiveCompletionMap(includedParticipantIds)
+    : {};
   includedParticipantIds.forEach(participantId => {
     const livePct = (liveCompletionMap[participantId] || {}).percentage || 0;
     completionSum += livePct;
@@ -3889,12 +3923,16 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       pendingSets[inst.number] = new Set();
     });
 
-    for (let i = 1; i < cData.length; i++) {
-      const participantId = cData[i][cHeaders.indexOf('participantId')];
-      if (!includedParticipantIds.includes(participantId)) continue;
+    const checklistParticipantCol = cHeaders.indexOf('participantId');
+    const checklistInstrumentNumberCol = cHeaders.indexOf('instrumentNumber');
+    const checklistStatusCol = cHeaders.indexOf('status');
 
-      const instrumentNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
-      const status = cData[i][cHeaders.indexOf('status')];
+    for (let i = 1; i < cData.length; i++) {
+      const participantId = cData[i][checklistParticipantCol];
+      if (!includedParticipantIdSet.has(String(participantId))) continue;
+
+      const instrumentNumber = cData[i][checklistInstrumentNumberCol];
+      const status = cData[i][checklistStatusCol];
 
       if (counts[instrumentNumber]) {
         counts[instrumentNumber].total++;
