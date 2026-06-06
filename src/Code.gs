@@ -1433,137 +1433,6 @@ function saveSessionRecordingLinks(token, sessionId, links) {
   return { success: false, message: 'Session not found' };
 }
 
-/**
- * Get configuration for client-side use
- */
-function getConfig() {
-  const protocols = getGlobalProtocolItems();
-  const recordingTypes = getSessionRecordingTypes();
-  return {
-    appName: CONFIG.APP_NAME,
-    version: CONFIG.VERSION,
-    sites: CONFIG.SITES,
-    periods: CONFIG.PERIODS,
-    roles: CONFIG.ROLES,
-    instruments: protocols,
-    participantStatuses: CONFIG.PARTICIPANT_STATUSES,
-    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
-  };
-}
-
-function getSessionRecordingTypes() {
-  const map = getConfigMap();
-  const raw = map.SESSION_RECORDING_TYPES;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
-    } catch (e) {}
-  }
-  return ['GoPro', 'Tascam', 'Meeting Owl'];
-}
-
-function saveSessionRecordingTypes(token, types) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
-  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
-  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
-  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
-  return { success: true, types: normalized };
-}
-
-function getSessionRecordingsByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
-  const sessionsResult = getSessionsByRollout(token, rolloutId);
-  if (!sessionsResult.success) return sessionsResult;
-  const types = getSessionRecordingTypes();
-  const sessions = (sessionsResult.sessions || []).map(s => {
-    let jsonLinks = {};
-    if (s.recordingLinksJson) {
-      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
-    }
-    const links = Object.assign({
-      'GoPro': s.goproLink || '',
-      'Tascam': s.tascamLink || '',
-      'Meeting Owl': s.meetingOwlLink || ''
-    }, jsonLinks);
-    return Object.assign({}, s, { recordingLinks: links });
-  });
-  return { success: true, sessions: sessions, recordingTypes: types };
-}
-
-
-function getFieldNotesByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
-  const sessionsResult = getSessionsByRollout(token, rolloutId);
-  if (!sessionsResult.success) return sessionsResult;
-  const sessions = (sessionsResult.sessions || []).map(function(s) {
-    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
-  });
-  return { success: true, sessions: sessions };
-}
-
-function saveFieldNotesLink(token, sessionId, link) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('StudySessions');
-  if (!sheet) return { success: false, message: 'StudySessions not found' };
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const sessionIdIdx = headers.indexOf('sessionId');
-  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
-
-  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
-  if (fieldNotesIdx === -1) {
-    headers.push('fieldNotesLink');
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    fieldNotesIdx = headers.length - 1;
-  }
-
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
-      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
-      return { success: true, message: 'Field notes link saved' };
-    }
-  }
-  return { success: false, message: 'Session not found' };
-}
-
-function saveSessionRecordingLinks(token, sessionId, links) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('StudySessions');
-  if (!sheet) return { success: false, message: 'StudySessions not found' };
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const ensureCol = name => {
-    let idx = headers.indexOf(name);
-    if (idx === -1) {
-      headers.push(name);
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      idx = headers.length - 1;
-    }
-    return idx + 1;
-  };
-  const col = name => headers.indexOf(name) + 1;
-  const jsonCol = ensureCol('recordingLinksJson');
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
-      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
-      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
-      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
-      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
-      return { success: true, message: 'Session recording links saved' };
-    }
-  }
-  return { success: false, message: 'Session not found' };
-}
-
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
@@ -6494,7 +6363,9 @@ function exportAttendanceCSV(token, filters) {
 
 function exportLinksArtifacts(token, filters) {
   const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Invalid session' };
+  if (!currentUser) {
+    return { success: false, message: 'Invalid session' };
+  }
 
   const siteFilter = (filters && filters.site) ? filters.site : 'All';
   const rolloutFilter = (filters && filters.rolloutId) ? filters.rolloutId : 'All';
@@ -6502,9 +6373,45 @@ function exportLinksArtifacts(token, filters) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
-  const sessionsSheet = ss.getSheetByName('StudySessions');
-  if (!participantsSheet || !checklistSheet || !sessionsSheet) {
+  if (!participantsSheet || !checklistSheet) {
     return { success: false, message: 'Required sheets are missing' };
+  }
+
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantsData[0] || [];
+  const pIdx = {
+    participantId: participantHeaders.indexOf('participantId'),
+    fullName: participantHeaders.indexOf('fullName'),
+    site: participantHeaders.indexOf('site'),
+    rolloutId: participantHeaders.indexOf('rolloutId'),
+    schoolName: participantHeaders.indexOf('schoolName'),
+    period: participantHeaders.indexOf('period'),
+    year: participantHeaders.indexOf('year')
+  };
+
+  const selectedParticipants = [];
+  const selectedParticipantIds = {};
+  for (var i = 1; i < participantsData.length; i++) {
+    const row = participantsData[i];
+    const site = String(row[pIdx.site] || '');
+    const rolloutId = String(row[pIdx.rolloutId] || '');
+    if (siteFilter !== 'All' && site !== siteFilter) continue;
+    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
+    const pid = String(row[pIdx.participantId] || '');
+    if (!pid) continue;
+    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
+    selectedParticipantIds[pid] = true;
+    selectedParticipants.push({
+      participantId: pid,
+      participantName: String(row[pIdx.fullName] || ''),
+      site: site,
+      cohort: cohortLabel,
+      rolloutId: rolloutId
+    });
+  }
+
+  if (!selectedParticipants.length) {
+    return { success: false, message: 'No participants found for selected filters' };
   }
 
   function normalizeInstrumentName(name) {
@@ -6526,60 +6433,34 @@ function exportLinksArtifacts(token, filters) {
     return candidate;
   }
 
-  function toHyperlinkFormula(link) {
-    var value = String(link || '').trim();
-    if (!value) return '';
-    if (!/^https?:\/\//i.test(value)) return value;
-    var safe = value.replace(/"/g, '""');
-    return '=HYPERLINK("' + safe + '","Open")';
-  }
-
   const exclusion = {
     'consent form': true,
     'assent form / pre-test': true,
     'post-test': true,
-    'participant feedback survey': true
+    'participant feedback survey': true,
+    'parent satisfaction survey': true
   };
-
-  const participantsData = participantsSheet.getDataRange().getValues();
-  const participantHeaders = participantsData[0] || [];
-  const pIdx = {
-    participantId: participantHeaders.indexOf('participantId'),
-    fullName: participantHeaders.indexOf('fullName'),
-    site: participantHeaders.indexOf('site'),
-    rolloutId: participantHeaders.indexOf('rolloutId'),
-    schoolName: participantHeaders.indexOf('schoolName'),
-    period: participantHeaders.indexOf('period'),
-    year: participantHeaders.indexOf('year')
-  };
-
-  const selectedParticipants = [];
-  const selectedParticipantIds = {};
-  const rolloutMeta = {};
-  for (var i = 1; i < participantsData.length; i++) {
-    const row = participantsData[i];
-    const site = String(row[pIdx.site] || '');
-    const rolloutId = String(row[pIdx.rolloutId] || '');
-    if (siteFilter !== 'All' && site !== siteFilter) continue;
-    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
-    const pid = String(row[pIdx.participantId] || '');
-    if (!pid) continue;
-    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
-    selectedParticipantIds[pid] = true;
-    selectedParticipants.push({ participantId: pid, participantName: String(row[pIdx.fullName] || ''), site: site, cohort: cohortLabel, rolloutId: rolloutId });
-    if (!rolloutMeta[rolloutId]) rolloutMeta[rolloutId] = { site: site, cohort: cohortLabel };
-  }
-
-  if (!selectedParticipants.length) return { success: false, message: 'No participants found for selected filters' };
 
   const protocolByRollout = {};
-  Object.keys(rolloutMeta).forEach(function(rid){ protocolByRollout[rid] = getProtocolItemsForFilter(rid) || []; });
+  if (rolloutFilter !== 'All') {
+    protocolByRollout[String(rolloutFilter)] = getProtocolItemsForFilter(String(rolloutFilter));
+  } else {
+    const uniqueRollouts = {};
+    selectedParticipants.forEach(function(p) { if (p.rolloutId) uniqueRollouts[p.rolloutId] = true; });
+    Object.keys(uniqueRollouts).forEach(function(rid) {
+      protocolByRollout[rid] = getProtocolItemsForFilter(rid);
+    });
+  }
 
   const checklistData = checklistSheet.getDataRange().getValues();
   const checklistHeaders = checklistData[0] || [];
-  const cIdx = { participantId: checklistHeaders.indexOf('participantId'), instrumentName: checklistHeaders.indexOf('instrumentName'), dataLink: checklistHeaders.indexOf('dataLink') };
+  const cIdx = {
+    participantId: checklistHeaders.indexOf('participantId'),
+    instrumentName: checklistHeaders.indexOf('instrumentName'),
+    dataLink: checklistHeaders.indexOf('dataLink')
+  };
+
   const linkMap = {};
-  const linkMapNormalized = {};
   for (var j = 1; j < checklistData.length; j++) {
     const crow = checklistData[j];
     const pid2 = String(crow[cIdx.participantId] || '');
@@ -6589,109 +6470,66 @@ function exportLinksArtifacts(token, filters) {
     const link = String(crow[cIdx.dataLink] || '').trim();
     if (!link) continue;
     if (!linkMap[pid2]) linkMap[pid2] = {};
-    if (!linkMapNormalized[pid2]) linkMapNormalized[pid2] = {};
     linkMap[pid2][instrument] = link;
-    linkMapNormalized[pid2][normalizeInstrumentName(instrument)] = link;
   }
 
   const groups = {};
   selectedParticipants.forEach(function(p) {
-    const key = p.rolloutId || ('cohort:' + p.cohort);
-    if (!groups[key]) groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
+    var key = p.rolloutId || ('cohort:' + p.cohort);
+    if (!groups[key]) {
+      groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
+    }
     groups[key].participants.push(p);
   });
 
   const spreadsheet = SpreadsheetApp.create('Links and Artifacts Export ' + new Date().toISOString());
+  const defaultSheet = spreadsheet.getSheets()[0];
   const usedNames = {};
-
-  // Sheet 1: Sessions Recording
-  const sessionData = sessionsSheet.getDataRange().getValues();
-  const sHeaders = sessionData[0] || [];
-  const sIdx = {
-    rolloutId: sHeaders.indexOf('rolloutId'),
-    sessionName: sHeaders.indexOf('sessionName'),
-    sessionNumber: sHeaders.indexOf('sessionNumber'),
-    goproLink: sHeaders.indexOf('goproLink'),
-    tascamLink: sHeaders.indexOf('tascamLink'),
-    meetingOwlLink: sHeaders.indexOf('meetingOwlLink'),
-    fieldNotesLink: sHeaders.indexOf('fieldNotesLink'),
-    recordingLinksJson: sHeaders.indexOf('recordingLinksJson')
-  };
-  const sessionRows = [];
-  for (var sr = 1; sr < sessionData.length; sr++) {
-    const row = sessionData[sr];
-    const rid = String(row[sIdx.rolloutId] || '');
-    if (!rolloutMeta[rid]) continue;
-    let linksJson = {};
-    if (sIdx.recordingLinksJson >= 0 && row[sIdx.recordingLinksJson]) {
-      try { linksJson = JSON.parse(String(row[sIdx.recordingLinksJson])) || {}; } catch (e) {}
-    }
-    const gp = String((linksJson['GoPro'] || (sIdx.goproLink >= 0 ? row[sIdx.goproLink] : '') || '')).trim();
-    const ta = String((linksJson['Tascam'] || (sIdx.tascamLink >= 0 ? row[sIdx.tascamLink] : '') || '')).trim();
-    const mo = String((linksJson['Meeting Owl'] || (sIdx.meetingOwlLink >= 0 ? row[sIdx.meetingOwlLink] : '') || '')).trim();
-    const sessionLabel = String((sIdx.sessionName >= 0 ? row[sIdx.sessionName] : '') || '').trim() || ('Session ' + String((sIdx.sessionNumber >= 0 ? row[sIdx.sessionNumber] : '') || '').trim());
-    const fn = String((sIdx.fieldNotesLink >= 0 ? row[sIdx.fieldNotesLink] : '') || '').trim();
-    sessionRows.push([
-      rolloutMeta[rid].site,
-      rolloutMeta[rid].cohort,
-      sessionLabel,
-      toHyperlinkFormula(gp),
-      toHyperlinkFormula(ta),
-      toHyperlinkFormula(mo),
-      toHyperlinkFormula(fn)
-    ]);
-  }
-
-  const firstSheet = spreadsheet.getSheets()[0];
-  firstSheet.setName('Sessions Recording');
-  usedNames['Sessions Recording'] = true;
-  const sessHeaders = ['Site', 'Cohort', 'Sessions', 'GoPro Recording', 'Tascam Recording', 'Meeting Owl Recording', 'Field note'];
-  firstSheet.getRange(1,1,1,sessHeaders.length).setValues([sessHeaders]);
-  if (sessionRows.length) firstSheet.getRange(2,1,sessionRows.length,sessHeaders.length).setValues(sessionRows);
-  firstSheet.getRange(1,1,1,sessHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
-  firstSheet.setRowHeight(1, 70);
-  firstSheet.setColumnWidths(1, sessHeaders.length, 178);
+  var sheetCount = 0;
 
   Object.keys(groups).forEach(function(groupKey) {
-    const group = groups[groupKey];
-    const protocolItems = protocolByRollout[group.rolloutId] || [];
+    var group = groups[groupKey];
+    var protocolItems = protocolByRollout[group.rolloutId] || getProtocolItemsForFilter(group.rolloutId || 'All') || [];
 
-    const protocolNames = [];
-    const seen = {};
+    var protocolNames = [];
+    var seen = {};
     protocolItems.forEach(function(item) {
-      const nm = String(item.instrumentName || item.name || '').trim();
+      var nm = String(item.instrumentName || item.name || '').trim();
       if (!nm) return;
-      const norm = normalizeInstrumentName(nm);
+      var norm = normalizeInstrumentName(nm);
       if (exclusion[norm]) return;
-      if (!seen[nm]) { seen[nm] = true; protocolNames.push(nm); }
+      if (!seen[nm]) {
+        seen[nm] = true;
+        protocolNames.push(nm);
+      }
     });
 
-    const headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
-    const rows = group.participants.map(function(p) {
-      const row = [p.participantName, p.site, p.cohort];
+    var headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
+    var rows = group.participants.map(function(p) {
+      var row = [p.participantName, p.site, p.cohort];
       protocolNames.forEach(function(protocolName) {
-        var link = '';
-        if (linkMap[p.participantId] && linkMap[p.participantId][protocolName]) {
-          link = linkMap[p.participantId][protocolName];
-        } else {
-          var nk = normalizeInstrumentName(protocolName);
-          link = (linkMapNormalized[p.participantId] && linkMapNormalized[p.participantId][nk]) ? linkMapNormalized[p.participantId][nk] : '';
-        }
-        row.push(toHyperlinkFormula(link));
+        var link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
+        row.push(link ? '=HYPERLINK("' + link.replace(/"/g, '""') + '","Open")' : '');
       });
       return row;
     });
 
-    const sheet = spreadsheet.insertSheet();
-    const safeName = makeSafeSheetName(group.cohort, usedNames);
+    var sheet = sheetCount === 0 ? defaultSheet : spreadsheet.insertSheet();
+    var safeName = makeSafeSheetName(group.cohort, usedNames);
     sheet.setName(safeName);
 
-    sheet.getRange(1,1,1,headers.length).setValues([headers]);
-    if (rows.length) sheet.getRange(2,1,rows.length,headers.length).setValues(rows);
-    sheet.getRange(1,1,1,headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (rows.length) {
+      sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
     sheet.setRowHeight(1, 70);
-    sheet.setColumnWidths(1, headers.length, 178);
-    if (headers.length > 3) sheet.getRange(2,4,Math.max(rows.length,1),headers.length - 3).setHorizontalAlignment('center');
+    sheet.setColumnWidths(1, headers.length, 181);
+    sheet.setFrozenRows(1);
+    if (headers.length > 3) {
+      sheet.getRange(2, 4, Math.max(rows.length, 1), headers.length - 3).setHorizontalAlignment('center');
+    }
+    sheetCount++;
   });
 
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
@@ -6706,7 +6544,13 @@ function exportLinksArtifacts(token, filters) {
   const blob = response.getBlob().setName('links_artifacts_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
   const base64 = Utilities.base64Encode(blob.getBytes());
   DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
-  return { success: true, filename: blob.getName(), mimeType: blob.getContentType(), content: base64, message: 'Links and artifacts export generated' };
+  return {
+    success: true,
+    filename: blob.getName(),
+    mimeType: blob.getContentType(),
+    content: base64,
+    message: 'Links and artifacts export generated'
+  };
 }
 
 function exportSummaryReport(token, filters) {
