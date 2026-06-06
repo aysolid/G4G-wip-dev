@@ -322,6 +322,276 @@
     .stat-trend.up { color: var(--success-color); }
     .stat-trend.down { color: var(--danger-color); }
 
+
+    /* Operations Dashboard */
+    .operations-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .site-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    .site-overview-card {
+      padding: 1rem;
+      border-radius: var(--border-radius-lg);
+      border: 1px solid var(--gray-200);
+      background: linear-gradient(180deg, #fff 0%, var(--gray-50) 100%);
+    }
+
+    .site-overview-card.uga { border-top: 4px solid var(--uga-color); }
+    .site-overview-card.missouri { border-top: 4px solid var(--missouri-color); }
+
+    .site-card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .site-card-title {
+      font-weight: 700;
+      color: var(--gray-900);
+      font-size: 1rem;
+    }
+
+    .site-card-count {
+      text-align: right;
+      font-size: 0.8rem;
+      color: var(--gray-500);
+    }
+
+    .site-card-count strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--gray-900);
+    }
+
+    .site-metrics-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .mini-metric {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+      padding: 0.65rem;
+    }
+
+    .mini-metric strong {
+      display: block;
+      color: var(--gray-900);
+      font-size: 1rem;
+    }
+
+    .mini-metric span {
+      color: var(--gray-500);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .cohort-chip-list {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .cohort-chip {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.65rem;
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .cohort-chip-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--gray-800);
+    }
+
+    .cohort-chip-meta {
+      font-size: 0.72rem;
+      color: var(--gray-500);
+    }
+
+    .lifecycle-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+
+    .lifecycle-tile {
+      padding: 1rem;
+      border-radius: var(--border-radius);
+      border: 1px solid var(--gray-200);
+      background: var(--gray-50);
+    }
+
+    .lifecycle-tile strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--gray-900);
+      margin-bottom: 0.35rem;
+    }
+
+    .lifecycle-tile span {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      font-weight: 600;
+    }
+
+    .active-cohort-list {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .active-cohort-card {
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius-lg);
+      padding: 1rem;
+      background: white;
+    }
+
+    .active-cohort-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .active-cohort-title {
+      font-weight: 700;
+      color: var(--gray-900);
+      margin-bottom: 0.2rem;
+    }
+
+    .session-timeline {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 92px;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.75rem;
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .session-row.completed { border-left: 4px solid var(--success-color); }
+    .session-row.today { border-left: 4px solid var(--primary-color); }
+    .session-row.upcoming { border-left: 4px solid var(--info-color); }
+    .session-row.unscheduled { border-left: 4px solid var(--gray-400); }
+
+    .session-name {
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--gray-800);
+    }
+
+    .session-date {
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      margin-top: 0.1rem;
+    }
+
+    .session-bars {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .session-bar-label {
+      display: flex;
+      justify-content: space-between;
+      color: var(--gray-500);
+      font-size: 0.68rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .upcoming-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .upcoming-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.8rem;
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .structure-site {
+      margin-bottom: 1.25rem;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius-lg);
+      overflow: hidden;
+    }
+
+    .structure-site-header {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      gap: 1rem;
+      align-items: center;
+      padding: 0.85rem 1rem;
+      background: var(--gray-50);
+      border-bottom: 1px solid var(--gray-200);
+      font-size: 0.82rem;
+    }
+
+    .structure-cohort-row {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      gap: 1rem;
+      align-items: center;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 0.82rem;
+    }
+
+    .structure-cohort-row:last-child { border-bottom: 0; }
+
+    .metric-pill {
+      min-width: 74px;
+      text-align: right;
+      color: var(--gray-700);
+      font-weight: 600;
+    }
+
+    @media (max-width: 1024px) {
+      .operations-grid { grid-template-columns: 1fr; }
+      .structure-site-header,
+      .structure-cohort-row { grid-template-columns: 1fr 1fr; }
+      .session-row { grid-template-columns: 1fr; }
+      .metric-pill { text-align: left; }
+    }
+
+    @media (max-width: 640px) {
+      .lifecycle-grid { grid-template-columns: repeat(2, 1fr); }
+      .site-metrics-row { grid-template-columns: 1fr; }
+    }
+
     /* Section Layout */
     .section {
       margin-bottom: 2rem;
@@ -835,6 +1105,733 @@
         justify-content: center;
       }
     }
+
+
+    /* ============================================
+       PREMIUM OPERATIONS DASHBOARD THEME
+       ============================================ */
+    :root {
+      --page-bg: #eef3ff;
+      --surface: rgba(255, 255, 255, 0.9);
+      --surface-strong: #ffffff;
+      --surface-tint: rgba(248, 250, 252, 0.92);
+      --ink: #0f172a;
+      --muted-ink: #64748b;
+      --line-soft: rgba(148, 163, 184, 0.28);
+      --brand-gradient: linear-gradient(135deg, #1d4ed8 0%, #6d28d9 55%, #0f172a 100%);
+      --card-gradient: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(248,250,252,0.86));
+      --aqua-gradient: linear-gradient(135deg, #06b6d4, #2563eb);
+      --green-gradient: linear-gradient(135deg, #10b981, #14b8a6);
+      --amber-gradient: linear-gradient(135deg, #f59e0b, #f97316);
+      --rose-gradient: linear-gradient(135deg, #ef4444, #e11d48);
+      --premium-shadow: 0 20px 55px rgba(15, 23, 42, 0.11);
+      --premium-shadow-sm: 0 12px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 10% -10%, rgba(96, 165, 250, 0.36), transparent 28rem),
+        radial-gradient(circle at 92% 4%, rgba(124, 58, 237, 0.28), transparent 30rem),
+        linear-gradient(180deg, #f8fbff 0%, var(--page-bg) 44%, #f8fafc 100%);
+      color: var(--ink);
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.38;
+      background-image:
+        linear-gradient(rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black 0%, transparent 70%);
+      z-index: -1;
+    }
+
+    .header {
+      background: rgba(19, 33, 68, 0.88);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .header-content { padding: 1.15rem 2rem; }
+
+    .logo-icon {
+      background: rgba(255, 255, 255, 0.16);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.26), 0 12px 28px rgba(15,23,42,0.16);
+    }
+
+    .btn { border-radius: 999px; font-weight: 700; }
+    .btn-primary { box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2); }
+    .btn-secondary { background: rgba(255,255,255,0.12); backdrop-filter: blur(12px); }
+
+    .main-content {
+      max-width: 1480px;
+      padding: 2rem clamp(1rem, 3vw, 2.5rem) 3.5rem;
+    }
+
+    .snapshot {
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.94) 0%, rgba(239,246,255,0.9) 42%, rgba(236,233,254,0.9) 100%);
+      border: 1px solid rgba(255,255,255,0.78);
+      box-shadow: var(--premium-shadow);
+      overflow: hidden;
+      position: relative;
+      padding: clamp(1.4rem, 3vw, 2.35rem);
+    }
+
+    .snapshot::before,
+    .snapshot::after {
+      content: '';
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+      filter: blur(2px);
+    }
+
+    .snapshot::before {
+      width: 320px;
+      height: 320px;
+      right: -110px;
+      top: -120px;
+      background: radial-gradient(circle, rgba(37,99,235,0.24), transparent 68%);
+    }
+
+    .snapshot::after {
+      width: 260px;
+      height: 260px;
+      left: 36%;
+      bottom: -160px;
+      background: radial-gradient(circle, rgba(16,185,129,0.18), transparent 70%);
+    }
+
+    .snapshot-hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) 380px;
+      gap: clamp(1.2rem, 4vw, 3rem);
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.38rem 0.75rem;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.1);
+      color: #1d4ed8;
+      font-size: 0.78rem;
+      font-weight: 800;
+      margin-bottom: 0.9rem;
+      border: 1px solid rgba(37, 99, 235, 0.14);
+    }
+
+    .snapshot-title h2 {
+      color: var(--ink);
+      font-size: clamp(2rem, 4vw, 3.8rem);
+      line-height: 0.98;
+      letter-spacing: -0.075em;
+      max-width: 820px;
+    }
+
+    .snapshot-title p {
+      color: #475569;
+      font-size: clamp(0.98rem, 1.2vw, 1.08rem);
+      max-width: 760px;
+      margin-top: 0.8rem;
+      line-height: 1.7;
+    }
+
+    .snapshot-filters {
+      margin-top: 1.5rem;
+      padding: 0.85rem;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      box-shadow: 0 14px 36px rgba(15,23,42,0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .filter-group {
+      background: white;
+      border-radius: 15px;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      padding: 0.25rem 0.35rem 0.25rem 0.75rem;
+      box-shadow: 0 6px 16px rgba(15,23,42,0.04);
+    }
+
+    .filter-group label {
+      color: #334155;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .filter-group select {
+      min-width: 180px;
+      border: none;
+      background: transparent;
+      color: var(--ink);
+      font-weight: 700;
+      outline: none;
+    }
+
+    .snapshot-context {
+      margin-top: 1rem;
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .snapshot-meta {
+      color: var(--muted-ink);
+      gap: 0.65rem;
+    }
+
+    .snapshot-meta span {
+      padding: 0.28rem 0.6rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.58);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .kpi-grid {
+      grid-template-columns: repeat(5, minmax(170px, 1fr));
+      gap: 1rem;
+    }
+
+    .stat-card,
+    .card {
+      background: var(--card-gradient);
+      border: 1px solid rgba(255,255,255,0.84);
+      box-shadow: var(--premium-shadow-sm);
+      border-radius: 22px;
+    }
+
+    .stat-card {
+      padding: 1.15rem;
+      min-height: 164px;
+    }
+
+    .stat-card::before {
+      height: 100%;
+      width: 5px;
+      right: auto;
+      border-radius: 999px;
+      opacity: 0.95;
+    }
+
+    .stat-card.primary::before { background: var(--aqua-gradient); }
+    .stat-card.success::before { background: var(--green-gradient); }
+    .stat-card.warning::before { background: var(--amber-gradient); }
+    .stat-card.info::before { background: linear-gradient(135deg, #22d3ee, #6366f1); }
+    .stat-card.danger::before { background: var(--rose-gradient); }
+    .stat-card.neutral::before { background: linear-gradient(135deg, #64748b, #94a3b8); }
+
+    .stat-card-icon {
+      border-radius: 16px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.52);
+    }
+
+    .stat-value {
+      font-size: clamp(1.85rem, 3vw, 2.45rem);
+      letter-spacing: -0.06em;
+      color: var(--ink);
+    }
+
+    .stat-label {
+      color: #334155;
+      font-weight: 800;
+    }
+
+    .stat-trend { color: var(--muted-ink); font-weight: 700; }
+
+    .metric-sparkline {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 28px;
+      margin-top: 1rem;
+      opacity: 0.72;
+    }
+
+    .metric-sparkline span {
+      flex: 1;
+      min-width: 5px;
+      border-radius: 999px 999px 2px 2px;
+      background: linear-gradient(180deg, rgba(37,99,235,0.9), rgba(6,182,212,0.42));
+    }
+
+    .card { overflow: hidden; }
+
+    .card-header {
+      background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(248,250,252,0.72));
+      border-bottom: 1px solid var(--line-soft);
+      padding: 1.15rem 1.35rem;
+    }
+
+    .card-title { color: var(--ink); font-weight: 900; letter-spacing: -0.02em; }
+    .card-title .material-icons { color: #2563eb; }
+    .card-subtitle { color: var(--muted-ink); }
+    .card-body { padding: 1.25rem; }
+
+    .operations-grid {
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+      align-items: stretch;
+    }
+
+    .section-grid { align-items: start; }
+
+    .site-overview-card {
+      background: linear-gradient(145deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92));
+      border: 1px solid rgba(148,163,184,0.22);
+      box-shadow: 0 18px 34px rgba(15,23,42,0.07);
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .site-overview-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 74px;
+      opacity: 0.1;
+    }
+
+    .site-overview-card.uga::before { background: var(--uga-color); }
+    .site-overview-card.missouri::before { background: var(--missouri-color); }
+
+    .site-card-header,
+    .site-metrics-row,
+    .cohort-chip-list { position: relative; z-index: 1; }
+
+    .site-card-title {
+      font-size: 1.15rem;
+      letter-spacing: -0.04em;
+      color: var(--ink);
+    }
+
+    .site-card-count strong { font-size: 2rem; }
+
+    .site-dashboard-top {
+      display: grid;
+      grid-template-columns: 116px 1fr;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .mini-metric {
+      border-radius: 16px;
+      border: 1px solid rgba(148,163,184,0.2);
+      box-shadow: 0 8px 18px rgba(15,23,42,0.04);
+    }
+
+    .cohort-chip {
+      border-radius: 16px;
+      border: 1px solid rgba(148,163,184,0.2);
+      box-shadow: 0 8px 20px rgba(15,23,42,0.04);
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .cohort-chip:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(15,23,42,0.08); }
+
+    .cohort-chip-title { color: var(--ink); font-weight: 900; }
+
+    .lifecycle-grid { grid-template-columns: 1fr; }
+
+    .lifecycle-tile {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 0.85rem;
+      background: white;
+      border: 1px solid rgba(148,163,184,0.22);
+      border-radius: 18px;
+      box-shadow: 0 10px 22px rgba(15,23,42,0.05);
+    }
+
+    .lifecycle-dot {
+      width: 14px;
+      height: 42px;
+      border-radius: 999px;
+      background: var(--primary-color);
+    }
+
+    .lifecycle-tile.upcoming .lifecycle-dot { background: var(--info-color); }
+    .lifecycle-tile.inProgress .lifecycle-dot { background: var(--warning-color); }
+    .lifecycle-tile.completed .lifecycle-dot { background: var(--success-color); }
+    .lifecycle-tile.unscheduled .lifecycle-dot { background: var(--gray-400); }
+
+    .lifecycle-tile strong { margin: 0; font-size: 1.8rem; }
+
+    .active-cohort-card {
+      border-radius: 20px;
+      background: linear-gradient(145deg, #ffffff, #f8fbff);
+      border: 1px solid rgba(148,163,184,0.22);
+      box-shadow: 0 15px 35px rgba(15,23,42,0.06);
+    }
+
+    .session-timeline { gap: 0.85rem; position: relative; }
+
+    .session-row {
+      grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.6fr) minmax(120px, 0.45fr);
+      border-radius: 18px;
+      background: #ffffff;
+      border: 1px solid rgba(148,163,184,0.22);
+      box-shadow: 0 10px 22px rgba(15,23,42,0.045);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .session-row::before {
+      content: '';
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 5px;
+      background: var(--gray-400);
+    }
+
+    .session-row.completed::before { background: var(--green-gradient); }
+    .session-row.today::before { background: var(--aqua-gradient); }
+    .session-row.upcoming::before { background: linear-gradient(180deg, #38bdf8, #818cf8); }
+    .session-row.unscheduled::before { background: var(--gray-400); }
+
+    .session-name { color: var(--ink); font-weight: 900; }
+
+    .session-kpis {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin-top: 0.55rem;
+    }
+
+    .session-kpi {
+      border-radius: 12px;
+      background: #f8fafc;
+      padding: 0.45rem;
+      color: var(--muted-ink);
+      font-size: 0.66rem;
+      font-weight: 800;
+    }
+
+    .session-kpi strong { display: block; color: var(--ink); font-size: 0.85rem; }
+
+    .progress-bar {
+      height: 10px;
+      background: rgba(148, 163, 184, 0.18);
+      border-radius: 999px;
+    }
+
+    .progress-fill { border-radius: 999px; }
+    .progress-fill.info { background: var(--aqua-gradient); }
+
+    .protocol-metrics { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .metric-tile { border-radius: 18px; background: #fff; box-shadow: 0 10px 22px rgba(15,23,42,0.045); }
+    .protocol-item { border-radius: 16px; background: white; }
+
+    .attention-item {
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: 0 10px 24px rgba(15,23,42,0.05);
+      border-left: 5px solid var(--info-color);
+    }
+
+    .attention-item:has(.attention-badge.critical) { border-left-color: var(--danger-color); }
+    .attention-item:has(.attention-badge.warning) { border-left-color: var(--warning-color); }
+    .attention-item.critical { border-left-color: var(--danger-color); }
+    .attention-item.warning { border-left-color: var(--warning-color); }
+    .attention-item.info { border-left-color: var(--info-color); }
+
+    .structure-site {
+      border-radius: 20px;
+      background: white;
+      box-shadow: 0 14px 30px rgba(15,23,42,0.055);
+      border-color: rgba(148,163,184,0.22);
+    }
+
+    .structure-site-header {
+      background: linear-gradient(135deg, #f8fbff, #eef4ff);
+      font-weight: 800;
+    }
+
+    .structure-cohort-row {
+      grid-template-columns: minmax(220px, 1fr) minmax(90px, auto) minmax(98px, auto) minmax(92px, auto) auto;
+    }
+
+    .status-pill.info { background: rgba(6, 182, 212, 0.15); color: #0891b2; }
+    .status-pill.warning { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+    .status-pill.success { background: rgba(16, 185, 129, 0.14); color: #047857; }
+    .status-pill.neutral { background: rgba(100, 116, 139, 0.13); color: #475569; }
+
+    .upcoming-item {
+      border-radius: 18px;
+      background: white;
+      box-shadow: 0 10px 24px rgba(15,23,42,0.045);
+      border: 1px solid rgba(148,163,184,0.2);
+    }
+
+    .quick-link {
+      border-radius: 18px;
+      background: rgba(248,250,252,0.92);
+      border: 1px solid rgba(148,163,184,0.16);
+    }
+
+    @media (max-width: 1180px) {
+      .snapshot-hero-grid { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+      .operations-grid { grid-template-columns: 1fr; }
+      .lifecycle-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 760px) {
+      .snapshot-title h2 { font-size: 2rem; }
+      .filter-group { width: 100%; align-items: flex-start; flex-direction: column; }
+      .filter-group select { width: 100%; min-width: 0; }
+      .site-dashboard-top { grid-template-columns: 1fr; }
+      .session-row { grid-template-columns: 1fr; }
+      .session-kpis { grid-template-columns: 1fr; }
+      .structure-site-header,
+      .structure-cohort-row { grid-template-columns: 1fr; }
+      .metric-pill { text-align: left; }
+    }
+
+
+
+    /* ============================================
+       BI ANALYTICS REFINEMENT
+       ============================================ */
+    :root {
+      --bi-blue: #2f5bea;
+      --bi-cyan: #00a6c8;
+      --bi-violet: #6b5cff;
+      --bi-green: #16a34a;
+      --bi-amber: #d97706;
+      --bi-red: #dc2626;
+      --bi-panel: rgba(255,255,255,0.94);
+      --bi-border: rgba(100,116,139,0.16);
+    }
+
+    .snapshot {
+      padding: 1.55rem 1.75rem;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.96), rgba(244,248,255,0.94)),
+        linear-gradient(90deg, rgba(47,91,234,0.16), rgba(0,166,200,0.08));
+    }
+
+    .snapshot-hero-grid {
+      display: block;
+      max-width: 1040px;
+    }
+
+    .hero-badge {
+      margin-bottom: 0.7rem;
+      font-size: 0.72rem;
+      padding: 0.28rem 0.6rem;
+      color: #1e40af;
+    }
+
+    .snapshot-title h2 {
+      font-size: clamp(1.75rem, 2.8vw, 2.7rem);
+      line-height: 1.08;
+      letter-spacing: -0.045em;
+      max-width: 760px;
+    }
+
+    .snapshot-title p {
+      font-size: 0.92rem;
+      line-height: 1.55;
+      max-width: 780px;
+      margin-top: 0.55rem;
+    }
+
+    .snapshot-filters {
+      margin-top: 1.1rem;
+      padding: 0.55rem;
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+    }
+
+    .filter-group {
+      border-radius: 11px;
+      padding: 0.18rem 0.35rem 0.18rem 0.6rem;
+    }
+
+    .filter-group label { font-size: 0.68rem; }
+    .filter-group select { font-size: 0.8rem; min-width: 160px; }
+    .snapshot-context { font-size: 0.84rem; margin-top: 0.8rem; }
+    .snapshot-meta { font-size: 0.7rem; }
+
+    .kpi-grid {
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+    }
+
+    .stat-card {
+      min-height: 132px;
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+    }
+
+    .stat-card-header { margin-bottom: 0.55rem; }
+
+    .stat-card-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+    }
+
+    .stat-card-icon .material-icons { font-size: 20px; }
+
+    .stat-value {
+      font-size: clamp(1.45rem, 2vw, 1.9rem);
+      letter-spacing: -0.04em;
+    }
+
+    .stat-label { font-size: 0.76rem; }
+    .stat-trend { font-size: 0.68rem; margin-top: 0.35rem; }
+    .metric-sparkline { height: 20px; margin-top: 0.75rem; }
+
+    .card {
+      border-radius: 18px;
+      box-shadow: 0 12px 30px rgba(15,23,42,0.07);
+    }
+
+    .card-header { padding: 0.95rem 1.15rem; }
+    .card-title { font-size: 0.96rem; }
+    .card-subtitle { font-size: 0.71rem; }
+    .card-body { padding: 1rem; }
+
+    .operations-grid {
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      gap: 1rem;
+    }
+
+    .site-overview-grid { gap: 0.85rem; }
+
+    .site-overview-card {
+      border-radius: 18px;
+      box-shadow: 0 12px 28px rgba(15,23,42,0.055);
+      padding: 0.9rem;
+    }
+
+    .site-card-title { font-size: 1rem; letter-spacing: -0.025em; }
+    .site-card-count strong { font-size: 1.55rem; }
+
+    .site-dashboard-top {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+    }
+
+    .site-analytics-bar {
+      display: grid;
+      gap: 0.55rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .bar-metric {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr) 44px;
+      align-items: center;
+      gap: 0.65rem;
+      font-size: 0.72rem;
+      color: #475569;
+      font-weight: 800;
+    }
+
+    .bar-track {
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(148,163,184,0.18);
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--bi-blue), var(--bi-cyan));
+    }
+
+    .bar-fill.protocol { background: linear-gradient(90deg, var(--bi-violet), var(--bi-blue)); }
+    .bar-fill.cohorts { background: linear-gradient(90deg, var(--bi-amber), #fbbf24); }
+
+    .site-metrics-row { grid-template-columns: repeat(3, 1fr); gap: 0.45rem; }
+    .mini-metric { padding: 0.58rem; border-radius: 13px; }
+    .mini-metric strong { font-size: 0.92rem; }
+    .mini-metric span { font-size: 0.58rem; }
+
+    .cohort-chip {
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 0.65rem;
+      border-radius: 13px;
+    }
+
+    .cohort-chip-title { font-size: 0.77rem; }
+    .cohort-chip-meta { font-size: 0.66rem; }
+    .metric-pill { font-size: 0.72rem; min-width: 58px; }
+
+    .lifecycle-grid { gap: 0.6rem; }
+    .lifecycle-tile { border-radius: 14px; padding: 0.75rem; }
+    .lifecycle-tile strong { font-size: 1.35rem; }
+    .lifecycle-dot { width: 10px; height: 34px; }
+
+    .section-grid { gap: 1rem; }
+    .section-grid.equal { gap: 1rem; }
+    .active-cohort-card { border-radius: 16px; padding: 0.85rem; }
+    .active-cohort-title { font-size: 0.9rem; }
+
+    .session-row {
+      grid-template-columns: minmax(160px, 0.85fr) minmax(240px, 1.35fr) minmax(94px, 0.32fr);
+      padding: 0.7rem 0.8rem;
+      border-radius: 14px;
+      gap: 0.75rem;
+    }
+
+    .session-name { font-size: 0.78rem; }
+    .session-date { font-size: 0.65rem; }
+    .session-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+    .session-kpi { font-size: 0.58rem; padding: 0.34rem; }
+    .session-kpi strong { font-size: 0.72rem; }
+    .session-bar-label { font-size: 0.62rem; }
+    .progress-bar { height: 8px; }
+
+    .protocol-metrics { gap: 0.65rem; }
+    .metric-tile { padding: 0.8rem; border-radius: 14px; }
+    .metric-tile h4 { font-size: 0.98rem; }
+    .metric-tile span { font-size: 0.65rem; }
+    .protocol-item { border-radius: 12px; padding: 0.55rem; }
+
+    .attention-item { border-radius: 14px; padding: 0.7rem; }
+    .attention-badge { font-size: 0.58rem; }
+
+    .structure-site { border-radius: 16px; }
+    .structure-site-header,
+    .structure-cohort-row {
+      grid-template-columns: minmax(220px, 1fr) repeat(4, minmax(76px, auto));
+      padding: 0.72rem 0.85rem;
+      font-size: 0.73rem;
+    }
+
+    @media (max-width: 1180px) {
+      .operations-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 760px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+      .bar-metric { grid-template-columns: 72px 1fr 40px; }
+      .session-row { grid-template-columns: 1fr; }
+      .structure-site-header,
+      .structure-cohort-row { grid-template-columns: 1fr; }
+    }
+
   </style>
 </head>
 <body>
@@ -867,78 +1864,105 @@
   <main class="main-content">
     <!-- Study Snapshot -->
     <section class="snapshot" id="studySnapshot">
-      <div class="snapshot-header">
-        <div class="snapshot-title">
-          <h2>Study Snapshot</h2>
-          <p>Research-grade view of study health, enrollment, and protocol completion across active sites.</p>
+      <div class="snapshot-hero-grid">
+        <div class="snapshot-copy">
+          <div class="hero-badge">
+            <span class="material-icons" style="font-size: 16px;">auto_awesome</span>
+            Live Study Command Center
+          </div>
+          <div class="snapshot-title">
+            <h2>Study Operations Dashboard</h2>
+            <p>Real-time command center for cohorts, enrollment, session progress, protocol completion, and operational concerns across active study sites.</p>
+          </div>
+          <div class="snapshot-filters">
+            <div class="filter-group">
+              <label for="publicSiteFilter">Site</label>
+              <select id="publicSiteFilter" onchange="handlePublicSiteFilterChange()">
+                <option value="All">All Sites</option>
+                <option value="UGA">UGA</option>
+                <option value="Missouri">Missouri</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label for="publicRolloutFilter">Study Cohort</label>
+              <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()">
+                <option value="All">All Study Cohorts</option>
+              </select>
+            </div>
+          </div>
+          <div class="snapshot-context" id="snapshotContext">Loading snapshot context...</div>
+          <div class="snapshot-meta" id="snapshotMeta"></div>
         </div>
       </div>
-      <div class="snapshot-filters">
-        <div class="filter-group">
-          <label for="publicSiteFilter">Site</label>
-          <select id="publicSiteFilter" onchange="handlePublicSiteFilterChange()">
-            <option value="All">All Sites</option>
-            <option value="UGA">UGA</option>
-            <option value="Missouri">Missouri</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label for="publicRolloutFilter">Study Cohort</label>
-          <select id="publicRolloutFilter" onchange="handlePublicRolloutFilterChange()">
-            <option value="All">All Study Cohorts</option>
-          </select>
-        </div>
-      </div>
-      <div class="snapshot-context" id="snapshotContext">Loading snapshot context...</div>
-      <div class="snapshot-meta" id="snapshotMeta"></div>
     </section>
 
-    <!-- Key Health Metrics -->
+    <!-- Command Center Metrics -->
     <section class="kpi-grid" id="kpiGrid">
       <div class="loading">
         <div class="spinner"></div>
       </div>
     </section>
 
-    <!-- Attendance Insights -->
-    <section class="section">
-      <div class="section-header">
-        <h3>Attendance Insights</h3>
-        <div class="section-actions">
-          <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
-            <span class="material-icons" style="font-size: 16px;">event_available</span>
-            View Attendance Reports
-          </a>
+    <!-- Operations Overview -->
+    <section class="operations-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">hub</span>
+              Cohorts & Enrollment by Site
+            </div>
+            <div class="card-subtitle">Real-time site totals with cohort-level participant distribution</div>
+          </div>
+        </div>
+        <div class="card-body" id="siteOverview">
+          <div class="loading"><div class="spinner"></div></div>
         </div>
       </div>
-      <div class="insights-grid">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">
-                <span class="material-icons">timeline</span>
-                Session Attendance Trend
-              </div>
-              <div class="card-subtitle">Attendance by session (present vs absent/unmarked)</div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">event_note</span>
+              Cohort Lifecycle
             </div>
-          </div>
-          <div class="card-body" id="attendanceTrend">
-            <div class="loading"><div class="spinner"></div></div>
+            <div class="card-subtitle">Automatically derived from session dates</div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">
-                <span class="material-icons">stacked_bar_chart</span>
-                Attendance Distribution
-              </div>
-              <div class="card-subtitle">Participant attendance bands</div>
+        <div class="card-body" id="cohortLifecycle">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Active and Upcoming Cohorts -->
+    <section class="section-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">play_circle</span>
+              Active Cohort Session Progress
             </div>
+            <div class="card-subtitle">Running session history with attendance, marking progress, and protocol completion</div>
           </div>
-          <div class="card-body" id="attendanceDistribution">
-            <div class="loading"><div class="spinner"></div></div>
+        </div>
+        <div class="card-body" id="activeCohorts">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">upcoming</span>
+              Upcoming Rollouts
+            </div>
+            <div class="card-subtitle">Next cohorts and first scheduled sessions</div>
           </div>
+        </div>
+        <div class="card-body" id="upcomingCohorts">
+          <div class="loading"><div class="spinner"></div></div>
         </div>
       </div>
     </section>
@@ -952,7 +1976,7 @@
               <span class="material-icons">fact_check</span>
               Protocol Overview
             </div>
-            <div class="card-subtitle">Completion summary and checklist progress</div>
+            <div class="card-subtitle">Completion summary and checklist progress across the current filter</div>
           </div>
           <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
             <span class="material-icons" style="font-size: 16px;">arrow_forward</span>
@@ -979,30 +2003,27 @@
               <span class="material-icons">notification_important</span>
               Needs Attention
             </div>
-            <div class="card-subtitle">Actionable alerts for the research team</div>
+            <div class="card-subtitle">Attendance, completion, and scheduling concerns</div>
           </div>
         </div>
         <div class="card-body">
           <div class="attention-list" id="needsAttention">
             <div class="loading"><div class="spinner"></div></div>
           </div>
-          <div class="card-body" id="attendanceDistribution">
-            <div class="loading"><div class="spinner"></div></div>
-          </div>
         </div>
       </div>
     </section>
 
-    <!-- Comparison & Actions -->
+    <!-- Unified Study Structure & Actions -->
     <section class="section-grid">
       <div class="card">
         <div class="card-header">
           <div>
             <div class="card-title">
-              <span class="material-icons">compare</span>
-              <span id="comparisonTitle">Comparison</span>
+              <span class="material-icons">account_tree</span>
+              <span id="comparisonTitle">Unified Study Structure</span>
             </div>
-            <div class="card-subtitle">Site or cohort comparison based on filters</div>
+            <div class="card-subtitle">Site totals and cohort-level details in one operational view</div>
           </div>
         </div>
         <div class="card-body" id="comparisonPanel">
@@ -1178,12 +2199,10 @@
     // LOAD LANDING SNAPSHOT
     // ============================================
     function loadLandingSnapshot() {
-      document.getElementById('kpiGrid').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('attendanceTrend').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('attendanceDistribution').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('protocolSummary').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('needsAttention').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('comparisonPanel').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      ['kpiGrid', 'siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts', 'protocolSummary', 'needsAttention', 'comparisonPanel'].forEach(id => {
+        const target = document.getElementById(id);
+        if (target) target.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      });
 
       google.script.run
         .withSuccessHandler(renderLandingSnapshot)
@@ -1208,145 +2227,227 @@
         <span>Export ready: ${snapshot.meta && snapshot.meta.exportReady ? 'Yes' : 'No'}</span>
       `;
 
-      renderKpis(snapshot.kpis, snapshot.attendance);
-      renderAttendanceTrend(snapshot.attendance);
-      renderAttendanceDistribution(snapshot.attendance);
+      renderKpis(snapshot.kpis, snapshot.attendance, snapshot.operations);
+      renderOperations(snapshot.operations);
       renderProtocolSummary(snapshot.protocol);
       renderNeedsAttention(snapshot.attention);
-      renderComparison(snapshot.comparison);
+      renderUnifiedStructure(snapshot.operations);
       renderAboutSummary(snapshot.about);
     }
 
-    function renderKpis(kpis, attendance) {
+    function safePercent(value) {
+      const numeric = Number(value) || 0;
+      return Math.max(0, Math.min(100, numeric));
+    }
+
+    function renderSparkline(values) {
+      return `<div class="metric-sparkline" aria-hidden="true">${values.map(value => `<span style="height:${Math.max(8, value)}%;"></span>`).join('')}</div>`;
+    }
+
+    function renderKpis(kpis, attendance, operations) {
+      const ops = operations || { lifecycleCounts: {}, totalCohorts: 0, activeCohorts: [], upcomingCohorts: [] };
       const statusTone = attendance.participationStatus.tone || 'neutral';
+      const totalSessions = kpis.totalSessions || 0;
+      const sessionsDone = kpis.sessionsCompleted || 0;
+      const sessionPct = totalSessions > 0 ? Math.round((sessionsDone / totalSessions) * 100) : 0;
+      const protocolPct = safePercent(kpis.protocolCompletionRate);
+      const activeCount = (ops.activeCohorts || []).length;
+      const upcomingCount = (ops.upcomingCohorts || []).length;
       const statsHtml = `
-        <div class="stat-card ${statusTone}">
+        <div class="stat-card primary">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">monitor_heart</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">groups</span></div>
           </div>
-          <div class="stat-value">${attendance.participationStatus.label}</div>
-          <div class="stat-label">Participation Health</div>
-          <div class="stat-trend ${statusTone}">
-            ${attendance.participationStatus.subtitle}
-          </div>
+          <div class="stat-value">${kpis.totalEnrolled || 0}</div>
+          <div class="stat-label">Total Participants</div>
+          <div class="stat-trend">${kpis.activeEnrollments || 0} active enrollments</div>
+          ${renderSparkline([34, 48, 42, 66, 72, 84, 78])}
         </div>
         <div class="stat-card info">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">percent</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">event</span></div>
           </div>
-          <div class="stat-value">${kpis.averageAttendance || 0}%</div>
-          <div class="stat-label">Average Attendance Rate</div>
-          <div class="stat-trend">Across enrolled participants</div>
+          <div class="stat-value">${ops.totalCohorts || 0}</div>
+          <div class="stat-label">Study Cohorts</div>
+          <div class="stat-trend">${activeCount} active · ${upcomingCount} upcoming</div>
+          ${renderSparkline([22, 36, 40, 56, 68, 70, 88])}
         </div>
         <div class="stat-card warning">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">priority_high</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">play_circle</span></div>
           </div>
-          <div class="stat-value">${kpis.atRiskParticipants || 0}</div>
-          <div class="stat-label">At-Risk Participants</div>
-          <div class="stat-trend">Below 70% attendance</div>
+          <div class="stat-value">${(ops.lifecycleCounts || {}).inProgress || 0}</div>
+          <div class="stat-label">Cohorts In Progress</div>
+          <div class="stat-trend">${sessionsDone} / ${totalSessions} sessions completed</div>
+          <div class="progress-bar" style="margin-top:1rem;"><div class="progress-fill warning" style="width:${sessionPct}%;"></div></div>
+        </div>
+        <div class="stat-card ${statusTone}">
+          <div class="stat-card-header">
+            <div class="stat-card-icon"><span class="material-icons">monitor_heart</span></div>
+          </div>
+          <div class="stat-value">${attendance.participationStatus.label}</div>
+          <div class="stat-label">Attendance Health</div>
+          <div class="stat-trend ${statusTone === 'danger' ? 'down' : 'up'}">${attendance.participationStatus.subtitle}</div>
+          ${renderSparkline(statusTone === 'danger' ? [72, 60, 42, 48, 36, 30, 24] : [38, 46, 52, 60, 66, 78, 86])}
         </div>
         <div class="stat-card success">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">check_circle</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">fact_check</span></div>
           </div>
-          <div class="stat-value">${kpis.protocolCompletionRate || 0}%</div>
-          <div class="stat-label">Protocol Completion Rate</div>
-          <div class="stat-trend">Across required items</div>
-        </div>
-        <div class="stat-card primary">
-          <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">event</span>
-            </div>
-          </div>
-          <div class="stat-value">${kpis.sessionsCompleted || 0} / ${kpis.totalSessions || 0}</div>
-          <div class="stat-label">Sessions Progress</div>
-          <div class="stat-trend">Current cohort schedule</div>
-        </div>
-        <div class="stat-card info">
-          <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">groups</span>
-            </div>
-          </div>
-          <div class="stat-value">${kpis.totalEnrolled || 0}</div>
-          <div class="stat-label">Total Enrolled Participants</div>
-          <div class="stat-trend">Currently enrolled</div>
+          <div class="stat-value">${protocolPct}%</div>
+          <div class="stat-label">Protocol Completion</div>
+          <div class="stat-trend">Across selected participants</div>
+          <div class="progress-bar" style="margin-top:1rem;"><div class="progress-fill success" style="width:${protocolPct}%;"></div></div>
         </div>
       `;
-
       document.getElementById('kpiGrid').innerHTML = statsHtml;
     }
 
-    function renderAttendanceTrend(attendance) {
-      if (!attendance.trendAvailable) {
-        document.getElementById('attendanceTrend').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">Select a Study Cohort to view session attendance trends.</p>';
-        return;
-      }
-
-      if (!attendance.trend || attendance.trend.length === 0) {
-        document.getElementById('attendanceTrend').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">No attendance data available yet.</p>';
-        return;
-      }
-
-      const trendRows = attendance.trend.map(session => {
-        const total = session.present + session.absent + session.excused + session.notMarked;
-        const presentPercent = total > 0 ? Math.round((session.present / total) * 100) : 0;
-        const absentPercent = 100 - presentPercent;
-        return `
-          <div class="trend-row">
-            <div class="trend-label">${session.label}</div>
-            <div class="trend-bar">
-              <span class="trend-present" style="width: ${presentPercent}%;"></span>
-              <span class="trend-absent" style="width: ${absentPercent}%;"></span>
-            </div>
-            <div class="trend-rate">${session.attendanceRate}%</div>
-          </div>
-        `;
-      }).join('');
-
-      document.getElementById('attendanceTrend').innerHTML = `<div class="trend-list">${trendRows}</div>`;
+    function renderOperations(operations) {
+      renderSiteOverview(operations);
+      renderCohortLifecycle(operations);
+      renderActiveCohorts(operations);
+      renderUpcomingCohorts(operations);
     }
 
-    function renderAttendanceDistribution(attendance) {
-      if (!attendance.distribution || attendance.distribution.total === 0) {
-        document.getElementById('attendanceDistribution').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">No attendance distribution available yet.</p>';
+    function renderSiteOverview(operations) {
+      const sites = operations && operations.sites ? operations.sites : [];
+      if (!sites.length) {
+        document.getElementById('siteOverview').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No site or cohort data available for this filter.</p>';
         return;
       }
-
-      const total = attendance.distribution.total;
-      const rows = [
-        { label: '90–100%', value: attendance.distribution.high, className: 'high' },
-        { label: '70–89%', value: attendance.distribution.mid, className: 'mid' },
-        { label: '<70%', value: attendance.distribution.low, className: 'low' }
-      ];
-
-      const html = rows.map(row => {
-        const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
-        return `
-          <div class="band-row">
-            <div class="trend-label">${row.label}</div>
-            <div class="band-bar">
-              <div class="band-fill ${row.className}" style="width: ${percent}%;"></div>
+      const participantMax = Math.max(...sites.map(s => s.participantCount || 0), 1);
+      const cohortMax = Math.max(...sites.map(s => s.cohortCount || 0), 1);
+      const html = sites.map(site => {
+        const siteClass = site.site === 'UGA' ? 'uga' : 'missouri';
+        const cohortRows = (site.cohorts || []).map(cohort => {
+          const participantPct = Math.round(((cohort.participantCount || 0) / participantMax) * 100);
+          return `
+            <div class="cohort-chip" title="${cohort.label}: ${cohort.participantCount} participants, ${cohort.averageAttendance}% attendance, ${cohort.protocolCompletion}% protocol">
+              <div>
+                <div class="cohort-chip-title">${cohort.label}</div>
+                <div class="cohort-chip-meta">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions · ${cohort.averageAttendance}% attendance</div>
+                <div class="progress-bar" style="margin-top:0.55rem;"><div class="progress-fill primary" style="width:${participantPct}%;"></div></div>
+              </div>
+              <div class="metric-pill">${cohort.participantCount} participants</div>
             </div>
-            <div class="trend-rate">${row.value}</div>
+          `;
+        }).join('') || '<p style="color: var(--gray-500); font-size: 0.85rem;">No cohorts for this site.</p>';
+        return `
+          <div class="site-overview-card ${siteClass}">
+            <div class="site-card-header">
+              <div>
+                <div class="site-card-title">${site.site}</div>
+                <div class="card-subtitle">${site.activeCohorts} active · ${site.upcomingCohorts} upcoming · ${site.completedCohorts} completed</div>
+              </div>
+              <div class="site-card-count"><strong>${site.cohortCount}</strong> cohorts</div>
+            </div>
+            <div class="site-analytics-bar">
+              <div class="bar-metric"><span>Participants</span><div class="bar-track"><div class="bar-fill" style="width:${Math.round(((site.participantCount || 0) / participantMax) * 100)}%;"></div></div><strong>${site.participantCount}</strong></div>
+              <div class="bar-metric"><span>Attendance</span><div class="bar-track"><div class="bar-fill" style="width:${safePercent(site.averageAttendance)}%;"></div></div><strong>${site.averageAttendance}%</strong></div>
+              <div class="bar-metric"><span>Protocol</span><div class="bar-track"><div class="bar-fill protocol" style="width:${safePercent(site.protocolCompletion)}%;"></div></div><strong>${site.protocolCompletion}%</strong></div>
+              <div class="bar-metric"><span>Cohorts</span><div class="bar-track"><div class="bar-fill cohorts" style="width:${Math.round(((site.cohortCount || 0) / cohortMax) * 100)}%;"></div></div><strong>${site.cohortCount}</strong></div>
+            </div>
+            <div class="site-metrics-row">
+              <div class="mini-metric"><strong>${site.participantCount}</strong><span>Participants</span></div>
+              <div class="mini-metric"><strong>${site.averageAttendance}%</strong><span>Attendance</span></div>
+              <div class="mini-metric"><strong>${site.protocolCompletion}%</strong><span>Protocol</span></div>
+            </div>
+            <div class="cohort-chip-list">${cohortRows}</div>
           </div>
         `;
       }).join('');
+      document.getElementById('siteOverview').innerHTML = `<div class="site-overview-grid">${html}</div>`;
+    }
 
-      document.getElementById('attendanceDistribution').innerHTML = `<div class="band-list">${html}</div>`;
+    function renderCohortLifecycle(operations) {
+      const counts = operations && operations.lifecycleCounts ? operations.lifecycleCounts : {};
+      const total = Math.max(operations && operations.totalCohorts ? operations.totalCohorts : 0, 1);
+      const rows = [
+        { key: 'inProgress', label: 'In Progress', value: counts.inProgress || 0 },
+        { key: 'upcoming', label: 'Upcoming', value: counts.upcoming || 0 },
+        { key: 'completed', label: 'Completed', value: counts.completed || 0 },
+        { key: 'unscheduled', label: 'Unscheduled', value: counts.unscheduled || 0 }
+      ].map(row => `
+        <div class="lifecycle-tile ${row.key}">
+          <div class="lifecycle-dot"></div>
+          <div><span>${row.label}</span><div class="progress-bar" style="margin-top:0.45rem;"><div class="progress-fill primary" style="width:${Math.round((row.value / total) * 100)}%;"></div></div></div>
+          <strong>${row.value}</strong>
+        </div>
+      `).join('');
+      document.getElementById('cohortLifecycle').innerHTML = `<div class="lifecycle-grid">${rows}</div>`;
+    }
+
+    function renderActiveCohorts(operations) {
+      const cohorts = operations && operations.activeCohorts ? operations.activeCohorts : [];
+      if (!cohorts.length) {
+        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No cohorts are currently in progress for this filter.</p>';
+        return;
+      }
+      const html = cohorts.map(cohort => {
+        const sessions = (cohort.sessions || []).map(session => `
+          <div class="session-row ${session.timing}">
+            <div>
+              <div class="session-name">${session.sessionName}</div>
+              <div class="session-date">${formatDisplayDate(session.sessionDate)} · ${session.timing}</div>
+              <div class="session-kpis">
+                <div class="session-kpi"><strong>${session.present}/${session.participantCount}</strong>present</div>
+                <div class="session-kpi"><strong>${session.markedRate}%</strong>marked</div>
+                <div class="session-kpi"><strong>${session.notMarked}</strong>unmarked</div>
+              </div>
+            </div>
+            <div class="session-bars">
+              <div>
+                <div class="session-bar-label"><span>Attendance</span><span>${session.attendanceRate}%</span></div>
+                <div class="progress-bar"><div class="progress-fill ${session.attendanceRate >= 80 ? 'success' : session.attendanceRate >= 60 ? 'warning' : 'danger'}" style="width:${safePercent(session.attendanceRate)}%;"></div></div>
+              </div>
+              <div>
+                <div class="session-bar-label"><span>Attendance marked</span><span>${session.markedCount}/${session.participantCount}</span></div>
+                <div class="progress-bar"><div class="progress-fill info" style="width:${safePercent(session.markedRate)}%;"></div></div>
+              </div>
+            </div>
+            <div class="metric-pill">${session.protocolCompletion}% protocol</div>
+          </div>
+        `).join('') || '<p style="color: var(--gray-500);">No sessions scheduled.</p>';
+        return `
+          <div class="active-cohort-card">
+            <div class="active-cohort-header">
+              <div>
+                <div class="active-cohort-title">${cohort.label}</div>
+                <div class="card-subtitle">${cohort.site} · ${cohort.participantCount} participants · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions completed</div>
+              </div>
+              <span class="status-pill ${cohort.lifecycle.tone}">${cohort.lifecycle.label}</span>
+            </div>
+            <div class="session-timeline">${sessions}</div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('activeCohorts').innerHTML = `<div class="active-cohort-list">${html}</div>`;
+    }
+
+    function renderUpcomingCohorts(operations) {
+      const cohorts = operations && operations.upcomingCohorts ? operations.upcomingCohorts : [];
+      if (!cohorts.length) {
+        document.getElementById('upcomingCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No upcoming cohorts scheduled for this filter.</p>';
+        return;
+      }
+      const html = cohorts.map(cohort => `
+        <div class="upcoming-item">
+          <div>
+            <div class="cohort-chip-title">${cohort.label}</div>
+            <div class="cohort-chip-meta">${cohort.site} · ${cohort.participantCount} participants · ${cohort.totalSessions} sessions planned</div>
+          </div>
+          <div class="metric-pill">${cohort.nextSession ? formatDisplayDate(cohort.nextSession.sessionDate) : 'TBD'}</div>
+        </div>
+      `).join('');
+      document.getElementById('upcomingCohorts').innerHTML = `<div class="upcoming-list">${html}</div>`;
+    }
+
+    function formatDisplayDate(value) {
+      if (!value) return 'TBD';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function renderProtocolSummary(protocol) {
@@ -1408,7 +2509,7 @@
       }
 
       const html = items.map(item => `
-        <div class="attention-item">
+        <div class="attention-item ${item.severity}">
           <span class="attention-badge ${item.severity}">${item.severity}</span>
           <div>
             <div style="font-weight: 600; color: var(--gray-800);">${item.message}</div>
@@ -1420,38 +2521,40 @@
       document.getElementById('needsAttention').innerHTML = html;
     }
 
-    function renderComparison(comparison) {
-      document.getElementById('comparisonTitle').textContent = comparison.title || 'Comparison';
-      if (!comparison.entries || comparison.entries.length === 0) {
-        document.getElementById('comparisonPanel').innerHTML =
-          `<p style="color: var(--gray-500); text-align: center;">${comparison.emptyMessage || 'No comparison data available.'}</p>`;
+    function renderUnifiedStructure(operations) {
+      document.getElementById('comparisonTitle').textContent = 'Unified Study Structure';
+      const sites = operations && operations.sites ? operations.sites : [];
+      if (!sites.length) {
+        document.getElementById('comparisonPanel').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No study structure data available.</p>';
         return;
       }
-
-      const rows = comparison.entries.map(entry => `
-        <tr>
-          <td>${entry.label}</td>
-          <td>${entry.participants}</td>
-          <td>${entry.averageAttendance}%</td>
-          <td>${entry.protocolCompletion}%</td>
-        </tr>
-      `).join('');
-
-      document.getElementById('comparisonPanel').innerHTML = `
-        <table class="comparison-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Participants</th>
-              <th>Avg Attendance</th>
-              <th>Protocol Completion</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      `;
+      const html = sites.map(site => {
+        const cohortRows = (site.cohorts || []).map(cohort => `
+          <div class="structure-cohort-row">
+            <div>
+              <strong>${cohort.label}</strong>
+              <div class="card-subtitle">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions</div>
+            </div>
+            <div class="metric-pill">${cohort.participantCount} participants</div>
+            <div class="metric-pill">${cohort.averageAttendance}% attendance</div>
+            <div class="metric-pill">${cohort.protocolCompletion}% protocol</div>
+            <div><span class="status-pill ${cohort.lifecycle.tone}">${cohort.lifecycle.label}</span></div>
+          </div>
+        `).join('') || '<div class="structure-cohort-row"><div>No cohorts found for this site.</div></div>';
+        return `
+          <div class="structure-site">
+            <div class="structure-site-header">
+              <div><strong>${site.site}</strong></div>
+              <div class="metric-pill">${site.cohortCount} cohorts</div>
+              <div class="metric-pill">${site.participantCount} participants</div>
+              <div class="metric-pill">${site.averageAttendance}% attendance</div>
+              <div class="metric-pill">${site.protocolCompletion}% protocol</div>
+            </div>
+            ${cohortRows}
+          </div>
+        `;
+      }).join('');
+      document.getElementById('comparisonPanel').innerHTML = html;
     }
 
     function renderAboutSummary(about) {
@@ -1494,10 +2597,10 @@
       console.error('Error loading snapshot:', error);
       document.getElementById('kpiGrid').innerHTML =
         '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load dashboard snapshot. Please refresh the page.</p>';
-      document.getElementById('attendanceTrend').innerHTML =
-        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
-      document.getElementById('attendanceDistribution').innerHTML =
-        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
+      ['siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts'].forEach(id => {
+        const target = document.getElementById(id);
+        if (target) target.innerHTML = '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Operations data unavailable.</p>';
+      });
       document.getElementById('protocolSummary').innerHTML =
         '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Protocol insights unavailable.</p>';
       document.getElementById('needsAttention').innerHTML =
