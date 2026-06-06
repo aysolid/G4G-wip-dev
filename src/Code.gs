@@ -5392,6 +5392,17 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
     cohorts
   );
 
+  const operations = buildOperationsSummary(
+    effectiveSite,
+    effectiveCohort,
+    cohorts,
+    participantsBySite,
+    participantsByCohort,
+    sessionsByCohort,
+    attendanceMap,
+    checklistSheet
+  );
+
   const aboutSummary = buildAboutSummary(
     effectiveSite,
     effectiveCohort,
@@ -5422,9 +5433,205 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       protocol: protocolSummary,
       attention: attentionItems,
       comparison: comparison,
+      operations: operations,
       about: aboutSummary
     }
   };
+}
+
+
+function buildOperationsSummary(
+  effectiveSite,
+  effectiveCohort,
+  cohorts,
+  participantsBySite,
+  participantsByCohort,
+  sessionsByCohort,
+  attendanceMap,
+  checklistSheet
+) {
+  const today = getDateOnly(new Date());
+  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
+  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
+
+  const cohortOperations = visibleCohorts.map(cohort => {
+    const participants = participantsByCohort[cohort.rolloutId] || [];
+    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
+    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
+    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
+
+    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    const sessionProgress = sessions.map(session => buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary));
+    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
+
+    return {
+      rolloutId: cohort.rolloutId,
+      site: cohort.site,
+      label: formatCohortDisplayLabel(cohort),
+      schoolName: cohort.schoolName,
+      period: cohort.period,
+      year: cohort.year,
+      sourceStatus: cohort.status,
+      lifecycle: lifecycle,
+      participantCount: participants.length,
+      activeParticipants: participants.filter(p => p.status === 'active').length,
+      completedParticipants: participants.filter(p => p.status === 'completed').length,
+      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
+      totalSessions: sessionProgress.length,
+      nextSession: nextSession,
+      sessions: sessionProgress
+    };
+  });
+
+  const sites = ['UGA', 'Missouri'].map(site => {
+    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
+    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
+    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    return {
+      site: site,
+      cohortCount: siteCohorts.length,
+      participantCount: participants.length,
+      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
+      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
+      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      cohorts: siteCohorts
+    };
+  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
+
+  const upcomingCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'upcoming')
+    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
+    .slice(0, 6);
+
+  const activeCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'inProgress')
+    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
+
+  return {
+    sites: sites,
+    cohorts: cohortOperations,
+    lifecycleCounts: lifecycleCounts,
+    activeCohorts: activeCohorts,
+    upcomingCohorts: upcomingCohorts,
+    totalCohorts: cohortOperations.length
+  };
+}
+
+function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary) {
+  let present = 0;
+  let absent = 0;
+  let excused = 0;
+  let notMarked = 0;
+  const records = attendanceMap[session.sessionId] || {};
+
+  participants.forEach(participant => {
+    const status = records[participant.participantId];
+    if (status === 'present') present++;
+    else if (status === 'absent') absent++;
+    else if (status === 'excused') excused++;
+    else notMarked++;
+  });
+
+  const participantCount = participants.length;
+  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
+  const markedCount = present + absent + excused;
+  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
+  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+  const timing = resolveSessionTiming(session, sessionDateOnly, today);
+
+  return {
+    sessionId: session.sessionId,
+    sessionNumber: session.sessionNumber,
+    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
+    sessionDate: session.sessionDate,
+    sourceStatus: session.status,
+    timing: timing,
+    present: present,
+    absent: absent,
+    excused: excused,
+    notMarked: notMarked,
+    markedCount: markedCount,
+    participantCount: participantCount,
+    attendanceRate: attendanceRate,
+    markedRate: markedRate,
+    protocolCompletion: protocolSummary.completionRate
+  };
+}
+
+function resolveCohortLifecycle(cohort, sessions, today) {
+  if (!sessions || sessions.length === 0) {
+    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
+  }
+
+  const datedSessions = sessions
+    .map(session => getDateOnly(parseSessionDate(session.sessionDate)))
+    .filter(Boolean);
+
+  const completedByStatus = sessions.filter(session => String(session.status || '').toLowerCase() === 'completed').length;
+  if (completedByStatus === sessions.length) {
+    return { key: 'completed', label: 'Completed', tone: 'success', detail: 'All sessions marked complete' };
+  }
+
+  if (datedSessions.length === sessions.length) {
+    const firstDate = datedSessions[0];
+    const lastDate = datedSessions[datedSessions.length - 1];
+    if (firstDate > today) {
+      return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Starts ' + formatDashboardDate(firstDate) };
+    }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
+  }
+
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
+
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
+
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
+
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
+
+function compareDateStrings(a, b) {
+  const aDate = getDateOnly(parseSessionDate(a));
+  const bDate = getDateOnly(parseSessionDate(b));
+  if (!aDate && !bDate) return 0;
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  return aDate.localeCompare(bDate);
+}
+
+function getDateOnly(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function formatDashboardDate(dateString) {
+  if (!dateString) return 'TBD';
+  const parsed = parseSessionDate(dateString);
+  if (!parsed) return dateString;
+  return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'MMM d, yyyy');
 }
 
 function buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort) {

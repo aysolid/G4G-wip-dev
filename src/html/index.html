@@ -322,6 +322,276 @@
     .stat-trend.up { color: var(--success-color); }
     .stat-trend.down { color: var(--danger-color); }
 
+
+    /* Operations Dashboard */
+    .operations-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .site-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    .site-overview-card {
+      padding: 1rem;
+      border-radius: var(--border-radius-lg);
+      border: 1px solid var(--gray-200);
+      background: linear-gradient(180deg, #fff 0%, var(--gray-50) 100%);
+    }
+
+    .site-overview-card.uga { border-top: 4px solid var(--uga-color); }
+    .site-overview-card.missouri { border-top: 4px solid var(--missouri-color); }
+
+    .site-card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .site-card-title {
+      font-weight: 700;
+      color: var(--gray-900);
+      font-size: 1rem;
+    }
+
+    .site-card-count {
+      text-align: right;
+      font-size: 0.8rem;
+      color: var(--gray-500);
+    }
+
+    .site-card-count strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--gray-900);
+    }
+
+    .site-metrics-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .mini-metric {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+      padding: 0.65rem;
+    }
+
+    .mini-metric strong {
+      display: block;
+      color: var(--gray-900);
+      font-size: 1rem;
+    }
+
+    .mini-metric span {
+      color: var(--gray-500);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .cohort-chip-list {
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .cohort-chip {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.65rem;
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .cohort-chip-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--gray-800);
+    }
+
+    .cohort-chip-meta {
+      font-size: 0.72rem;
+      color: var(--gray-500);
+    }
+
+    .lifecycle-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+
+    .lifecycle-tile {
+      padding: 1rem;
+      border-radius: var(--border-radius);
+      border: 1px solid var(--gray-200);
+      background: var(--gray-50);
+    }
+
+    .lifecycle-tile strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--gray-900);
+      margin-bottom: 0.35rem;
+    }
+
+    .lifecycle-tile span {
+      font-size: 0.75rem;
+      color: var(--gray-500);
+      font-weight: 600;
+    }
+
+    .active-cohort-list {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .active-cohort-card {
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius-lg);
+      padding: 1rem;
+      background: white;
+    }
+
+    .active-cohort-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .active-cohort-title {
+      font-weight: 700;
+      color: var(--gray-900);
+      margin-bottom: 0.2rem;
+    }
+
+    .session-timeline {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: 120px 1fr 92px;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.75rem;
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .session-row.completed { border-left: 4px solid var(--success-color); }
+    .session-row.today { border-left: 4px solid var(--primary-color); }
+    .session-row.upcoming { border-left: 4px solid var(--info-color); }
+    .session-row.unscheduled { border-left: 4px solid var(--gray-400); }
+
+    .session-name {
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--gray-800);
+    }
+
+    .session-date {
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      margin-top: 0.1rem;
+    }
+
+    .session-bars {
+      display: grid;
+      gap: 0.45rem;
+    }
+
+    .session-bar-label {
+      display: flex;
+      justify-content: space-between;
+      color: var(--gray-500);
+      font-size: 0.68rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .upcoming-list {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .upcoming-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.8rem;
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius);
+    }
+
+    .structure-site {
+      margin-bottom: 1.25rem;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--border-radius-lg);
+      overflow: hidden;
+    }
+
+    .structure-site-header {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      gap: 1rem;
+      align-items: center;
+      padding: 0.85rem 1rem;
+      background: var(--gray-50);
+      border-bottom: 1px solid var(--gray-200);
+      font-size: 0.82rem;
+    }
+
+    .structure-cohort-row {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      gap: 1rem;
+      align-items: center;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 0.82rem;
+    }
+
+    .structure-cohort-row:last-child { border-bottom: 0; }
+
+    .metric-pill {
+      min-width: 74px;
+      text-align: right;
+      color: var(--gray-700);
+      font-weight: 600;
+    }
+
+    @media (max-width: 1024px) {
+      .operations-grid { grid-template-columns: 1fr; }
+      .structure-site-header,
+      .structure-cohort-row { grid-template-columns: 1fr 1fr; }
+      .session-row { grid-template-columns: 1fr; }
+      .metric-pill { text-align: left; }
+    }
+
+    @media (max-width: 640px) {
+      .lifecycle-grid { grid-template-columns: repeat(2, 1fr); }
+      .site-metrics-row { grid-template-columns: 1fr; }
+    }
+
     /* Section Layout */
     .section {
       margin-bottom: 2rem;
@@ -869,8 +1139,8 @@
     <section class="snapshot" id="studySnapshot">
       <div class="snapshot-header">
         <div class="snapshot-title">
-          <h2>Study Snapshot</h2>
-          <p>Research-grade view of study health, enrollment, and protocol completion across active sites.</p>
+          <h2>Study Operations Dashboard</h2>
+          <p>Real-time command center for cohorts, enrollment, session progress, protocol completion, and operational concerns across active study sites.</p>
         </div>
       </div>
       <div class="snapshot-filters">
@@ -893,52 +1163,73 @@
       <div class="snapshot-meta" id="snapshotMeta"></div>
     </section>
 
-    <!-- Key Health Metrics -->
+    <!-- Command Center Metrics -->
     <section class="kpi-grid" id="kpiGrid">
       <div class="loading">
         <div class="spinner"></div>
       </div>
     </section>
 
-    <!-- Attendance Insights -->
-    <section class="section">
-      <div class="section-header">
-        <h3>Attendance Insights</h3>
-        <div class="section-actions">
-          <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
-            <span class="material-icons" style="font-size: 16px;">event_available</span>
-            View Attendance Reports
-          </a>
+    <!-- Operations Overview -->
+    <section class="operations-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">hub</span>
+              Cohorts & Enrollment by Site
+            </div>
+            <div class="card-subtitle">Real-time site totals with cohort-level participant distribution</div>
+          </div>
+        </div>
+        <div class="card-body" id="siteOverview">
+          <div class="loading"><div class="spinner"></div></div>
         </div>
       </div>
-      <div class="insights-grid">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">
-                <span class="material-icons">timeline</span>
-                Session Attendance Trend
-              </div>
-              <div class="card-subtitle">Attendance by session (present vs absent/unmarked)</div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">event_note</span>
+              Cohort Lifecycle
             </div>
-          </div>
-          <div class="card-body" id="attendanceTrend">
-            <div class="loading"><div class="spinner"></div></div>
+            <div class="card-subtitle">Automatically derived from session dates</div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">
-                <span class="material-icons">stacked_bar_chart</span>
-                Attendance Distribution
-              </div>
-              <div class="card-subtitle">Participant attendance bands</div>
+        <div class="card-body" id="cohortLifecycle">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Active and Upcoming Cohorts -->
+    <section class="section-grid">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">play_circle</span>
+              Active Cohort Session Progress
             </div>
+            <div class="card-subtitle">Running session history with attendance, marking progress, and protocol completion</div>
           </div>
-          <div class="card-body" id="attendanceDistribution">
-            <div class="loading"><div class="spinner"></div></div>
+        </div>
+        <div class="card-body" id="activeCohorts">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">
+              <span class="material-icons">upcoming</span>
+              Upcoming Rollouts
+            </div>
+            <div class="card-subtitle">Next cohorts and first scheduled sessions</div>
           </div>
+        </div>
+        <div class="card-body" id="upcomingCohorts">
+          <div class="loading"><div class="spinner"></div></div>
         </div>
       </div>
     </section>
@@ -952,7 +1243,7 @@
               <span class="material-icons">fact_check</span>
               Protocol Overview
             </div>
-            <div class="card-subtitle">Completion summary and checklist progress</div>
+            <div class="card-subtitle">Completion summary and checklist progress across the current filter</div>
           </div>
           <a class="btn-outline" href="<?= ScriptApp.getService().getUrl() ?>?page=login">
             <span class="material-icons" style="font-size: 16px;">arrow_forward</span>
@@ -979,30 +1270,27 @@
               <span class="material-icons">notification_important</span>
               Needs Attention
             </div>
-            <div class="card-subtitle">Actionable alerts for the research team</div>
+            <div class="card-subtitle">Attendance, completion, and scheduling concerns</div>
           </div>
         </div>
         <div class="card-body">
           <div class="attention-list" id="needsAttention">
             <div class="loading"><div class="spinner"></div></div>
           </div>
-          <div class="card-body" id="attendanceDistribution">
-            <div class="loading"><div class="spinner"></div></div>
-          </div>
         </div>
       </div>
     </section>
 
-    <!-- Comparison & Actions -->
+    <!-- Unified Study Structure & Actions -->
     <section class="section-grid">
       <div class="card">
         <div class="card-header">
           <div>
             <div class="card-title">
-              <span class="material-icons">compare</span>
-              <span id="comparisonTitle">Comparison</span>
+              <span class="material-icons">account_tree</span>
+              <span id="comparisonTitle">Unified Study Structure</span>
             </div>
-            <div class="card-subtitle">Site or cohort comparison based on filters</div>
+            <div class="card-subtitle">Site totals and cohort-level details in one operational view</div>
           </div>
         </div>
         <div class="card-body" id="comparisonPanel">
@@ -1178,12 +1466,10 @@
     // LOAD LANDING SNAPSHOT
     // ============================================
     function loadLandingSnapshot() {
-      document.getElementById('kpiGrid').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('attendanceTrend').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('attendanceDistribution').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('protocolSummary').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('needsAttention').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-      document.getElementById('comparisonPanel').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      ['kpiGrid', 'siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts', 'protocolSummary', 'needsAttention', 'comparisonPanel'].forEach(id => {
+        const target = document.getElementById(id);
+        if (target) target.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      });
 
       google.script.run
         .withSuccessHandler(renderLandingSnapshot)
@@ -1208,145 +1494,184 @@
         <span>Export ready: ${snapshot.meta && snapshot.meta.exportReady ? 'Yes' : 'No'}</span>
       `;
 
-      renderKpis(snapshot.kpis, snapshot.attendance);
-      renderAttendanceTrend(snapshot.attendance);
-      renderAttendanceDistribution(snapshot.attendance);
+      renderKpis(snapshot.kpis, snapshot.attendance, snapshot.operations);
+      renderOperations(snapshot.operations);
       renderProtocolSummary(snapshot.protocol);
       renderNeedsAttention(snapshot.attention);
-      renderComparison(snapshot.comparison);
+      renderUnifiedStructure(snapshot.operations);
       renderAboutSummary(snapshot.about);
     }
 
-    function renderKpis(kpis, attendance) {
+    function renderKpis(kpis, attendance, operations) {
+      const ops = operations || { lifecycleCounts: {}, totalCohorts: 0, activeCohorts: [], upcomingCohorts: [] };
       const statusTone = attendance.participationStatus.tone || 'neutral';
       const statsHtml = `
-        <div class="stat-card ${statusTone}">
+        <div class="stat-card primary">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">monitor_heart</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">groups</span></div>
           </div>
-          <div class="stat-value">${attendance.participationStatus.label}</div>
-          <div class="stat-label">Participation Health</div>
-          <div class="stat-trend ${statusTone}">
-            ${attendance.participationStatus.subtitle}
-          </div>
+          <div class="stat-value">${kpis.totalEnrolled || 0}</div>
+          <div class="stat-label">Total Participants</div>
+          <div class="stat-trend">${kpis.activeEnrollments || 0} active enrollments</div>
         </div>
         <div class="stat-card info">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">percent</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">event</span></div>
           </div>
-          <div class="stat-value">${kpis.averageAttendance || 0}%</div>
-          <div class="stat-label">Average Attendance Rate</div>
-          <div class="stat-trend">Across enrolled participants</div>
+          <div class="stat-value">${ops.totalCohorts || 0}</div>
+          <div class="stat-label">Study Cohorts</div>
+          <div class="stat-trend">${(ops.activeCohorts || []).length} active · ${(ops.upcomingCohorts || []).length} upcoming</div>
         </div>
         <div class="stat-card warning">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">priority_high</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">play_circle</span></div>
           </div>
-          <div class="stat-value">${kpis.atRiskParticipants || 0}</div>
-          <div class="stat-label">At-Risk Participants</div>
-          <div class="stat-trend">Below 70% attendance</div>
+          <div class="stat-value">${(ops.lifecycleCounts || {}).inProgress || 0}</div>
+          <div class="stat-label">Cohorts In Progress</div>
+          <div class="stat-trend">${kpis.sessionsCompleted || 0} / ${kpis.totalSessions || 0} sessions completed</div>
+        </div>
+        <div class="stat-card ${statusTone}">
+          <div class="stat-card-header">
+            <div class="stat-card-icon"><span class="material-icons">monitor_heart</span></div>
+          </div>
+          <div class="stat-value">${attendance.participationStatus.label}</div>
+          <div class="stat-label">Attendance Health</div>
+          <div class="stat-trend ${statusTone === 'danger' ? 'down' : 'up'}">${attendance.participationStatus.subtitle}</div>
         </div>
         <div class="stat-card success">
           <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">check_circle</span>
-            </div>
+            <div class="stat-card-icon"><span class="material-icons">fact_check</span></div>
           </div>
           <div class="stat-value">${kpis.protocolCompletionRate || 0}%</div>
-          <div class="stat-label">Protocol Completion Rate</div>
-          <div class="stat-trend">Across required items</div>
-        </div>
-        <div class="stat-card primary">
-          <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">event</span>
-            </div>
-          </div>
-          <div class="stat-value">${kpis.sessionsCompleted || 0} / ${kpis.totalSessions || 0}</div>
-          <div class="stat-label">Sessions Progress</div>
-          <div class="stat-trend">Current cohort schedule</div>
-        </div>
-        <div class="stat-card info">
-          <div class="stat-card-header">
-            <div class="stat-card-icon">
-              <span class="material-icons">groups</span>
-            </div>
-          </div>
-          <div class="stat-value">${kpis.totalEnrolled || 0}</div>
-          <div class="stat-label">Total Enrolled Participants</div>
-          <div class="stat-trend">Currently enrolled</div>
+          <div class="stat-label">Protocol Completion</div>
+          <div class="stat-trend">Across selected participants</div>
         </div>
       `;
-
       document.getElementById('kpiGrid').innerHTML = statsHtml;
     }
 
-    function renderAttendanceTrend(attendance) {
-      if (!attendance.trendAvailable) {
-        document.getElementById('attendanceTrend').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">Select a Study Cohort to view session attendance trends.</p>';
-        return;
-      }
-
-      if (!attendance.trend || attendance.trend.length === 0) {
-        document.getElementById('attendanceTrend').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">No attendance data available yet.</p>';
-        return;
-      }
-
-      const trendRows = attendance.trend.map(session => {
-        const total = session.present + session.absent + session.excused + session.notMarked;
-        const presentPercent = total > 0 ? Math.round((session.present / total) * 100) : 0;
-        const absentPercent = 100 - presentPercent;
-        return `
-          <div class="trend-row">
-            <div class="trend-label">${session.label}</div>
-            <div class="trend-bar">
-              <span class="trend-present" style="width: ${presentPercent}%;"></span>
-              <span class="trend-absent" style="width: ${absentPercent}%;"></span>
-            </div>
-            <div class="trend-rate">${session.attendanceRate}%</div>
-          </div>
-        `;
-      }).join('');
-
-      document.getElementById('attendanceTrend').innerHTML = `<div class="trend-list">${trendRows}</div>`;
+    function renderOperations(operations) {
+      renderSiteOverview(operations);
+      renderCohortLifecycle(operations);
+      renderActiveCohorts(operations);
+      renderUpcomingCohorts(operations);
     }
 
-    function renderAttendanceDistribution(attendance) {
-      if (!attendance.distribution || attendance.distribution.total === 0) {
-        document.getElementById('attendanceDistribution').innerHTML =
-          '<p style="color: var(--gray-500); text-align: center;">No attendance distribution available yet.</p>';
+    function renderSiteOverview(operations) {
+      const sites = operations && operations.sites ? operations.sites : [];
+      if (!sites.length) {
+        document.getElementById('siteOverview').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No site or cohort data available for this filter.</p>';
         return;
       }
-
-      const total = attendance.distribution.total;
-      const rows = [
-        { label: '90–100%', value: attendance.distribution.high, className: 'high' },
-        { label: '70–89%', value: attendance.distribution.mid, className: 'mid' },
-        { label: '<70%', value: attendance.distribution.low, className: 'low' }
-      ];
-
-      const html = rows.map(row => {
-        const percent = total > 0 ? Math.round((row.value / total) * 100) : 0;
-        return `
-          <div class="band-row">
-            <div class="trend-label">${row.label}</div>
-            <div class="band-bar">
-              <div class="band-fill ${row.className}" style="width: ${percent}%;"></div>
+      const html = sites.map(site => {
+        const siteClass = site.site === 'UGA' ? 'uga' : 'missouri';
+        const cohortRows = (site.cohorts || []).map(cohort => `
+          <div class="cohort-chip">
+            <div>
+              <div class="cohort-chip-title">${cohort.label}</div>
+              <div class="cohort-chip-meta">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions · ${cohort.averageAttendance}% attendance</div>
             </div>
-            <div class="trend-rate">${row.value}</div>
+            <div class="metric-pill">${cohort.participantCount} participants</div>
+          </div>
+        `).join('') || '<p style="color: var(--gray-500); font-size: 0.85rem;">No cohorts for this site.</p>';
+        return `
+          <div class="site-overview-card ${siteClass}">
+            <div class="site-card-header">
+              <div>
+                <div class="site-card-title">${site.site}</div>
+                <div class="card-subtitle">${site.activeCohorts} active · ${site.upcomingCohorts} upcoming · ${site.completedCohorts} completed</div>
+              </div>
+              <div class="site-card-count"><strong>${site.cohortCount}</strong> cohorts</div>
+            </div>
+            <div class="site-metrics-row">
+              <div class="mini-metric"><strong>${site.participantCount}</strong><span>Participants</span></div>
+              <div class="mini-metric"><strong>${site.averageAttendance}%</strong><span>Avg Attendance</span></div>
+              <div class="mini-metric"><strong>${site.protocolCompletion}%</strong><span>Protocol</span></div>
+            </div>
+            <div class="cohort-chip-list">${cohortRows}</div>
           </div>
         `;
       }).join('');
+      document.getElementById('siteOverview').innerHTML = `<div class="site-overview-grid">${html}</div>`;
+    }
 
-      document.getElementById('attendanceDistribution').innerHTML = `<div class="band-list">${html}</div>`;
+    function renderCohortLifecycle(operations) {
+      const counts = operations && operations.lifecycleCounts ? operations.lifecycleCounts : {};
+      document.getElementById('cohortLifecycle').innerHTML = `
+        <div class="lifecycle-grid">
+          <div class="lifecycle-tile"><strong>${counts.inProgress || 0}</strong><span>In Progress</span></div>
+          <div class="lifecycle-tile"><strong>${counts.upcoming || 0}</strong><span>Upcoming</span></div>
+          <div class="lifecycle-tile"><strong>${counts.completed || 0}</strong><span>Completed</span></div>
+          <div class="lifecycle-tile"><strong>${counts.unscheduled || 0}</strong><span>Unscheduled</span></div>
+        </div>
+      `;
+    }
+
+    function renderActiveCohorts(operations) {
+      const cohorts = operations && operations.activeCohorts ? operations.activeCohorts : [];
+      if (!cohorts.length) {
+        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No cohorts are currently in progress for this filter.</p>';
+        return;
+      }
+      const html = cohorts.map(cohort => {
+        const sessions = (cohort.sessions || []).map(session => `
+          <div class="session-row ${session.timing}">
+            <div>
+              <div class="session-name">${session.sessionName}</div>
+              <div class="session-date">${formatDisplayDate(session.sessionDate)} · ${session.timing}</div>
+            </div>
+            <div class="session-bars">
+              <div>
+                <div class="session-bar-label"><span>Attendance</span><span>${session.present}/${session.participantCount} present (${session.attendanceRate}%)</span></div>
+                <div class="progress-bar"><div class="progress-fill ${session.attendanceRate >= 80 ? 'success' : session.attendanceRate >= 60 ? 'warning' : 'primary'}" style="width:${session.attendanceRate}%;"></div></div>
+              </div>
+              <div>
+                <div class="session-bar-label"><span>Attendance marked</span><span>${session.markedCount}/${session.participantCount} (${session.markedRate}%)</span></div>
+                <div class="progress-bar"><div class="progress-fill info" style="width:${session.markedRate}%;"></div></div>
+              </div>
+            </div>
+            <div class="metric-pill">${session.protocolCompletion}% protocol</div>
+          </div>
+        `).join('') || '<p style="color: var(--gray-500);">No sessions scheduled.</p>';
+        return `
+          <div class="active-cohort-card">
+            <div class="active-cohort-header">
+              <div>
+                <div class="active-cohort-title">${cohort.label}</div>
+                <div class="card-subtitle">${cohort.site} · ${cohort.participantCount} participants · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions completed</div>
+              </div>
+              <span class="status-pill ${cohort.lifecycle.tone}">${cohort.lifecycle.label}</span>
+            </div>
+            <div class="session-timeline">${sessions}</div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('activeCohorts').innerHTML = `<div class="active-cohort-list">${html}</div>`;
+    }
+
+    function renderUpcomingCohorts(operations) {
+      const cohorts = operations && operations.upcomingCohorts ? operations.upcomingCohorts : [];
+      if (!cohorts.length) {
+        document.getElementById('upcomingCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No upcoming cohorts scheduled for this filter.</p>';
+        return;
+      }
+      const html = cohorts.map(cohort => `
+        <div class="upcoming-item">
+          <div>
+            <div class="cohort-chip-title">${cohort.label}</div>
+            <div class="cohort-chip-meta">${cohort.site} · ${cohort.participantCount} participants · ${cohort.totalSessions} sessions planned</div>
+          </div>
+          <div class="metric-pill">${cohort.nextSession ? formatDisplayDate(cohort.nextSession.sessionDate) : 'TBD'}</div>
+        </div>
+      `).join('');
+      document.getElementById('upcomingCohorts').innerHTML = `<div class="upcoming-list">${html}</div>`;
+    }
+
+    function formatDisplayDate(value) {
+      if (!value) return 'TBD';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return value;
+      return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     function renderProtocolSummary(protocol) {
@@ -1420,38 +1745,40 @@
       document.getElementById('needsAttention').innerHTML = html;
     }
 
-    function renderComparison(comparison) {
-      document.getElementById('comparisonTitle').textContent = comparison.title || 'Comparison';
-      if (!comparison.entries || comparison.entries.length === 0) {
-        document.getElementById('comparisonPanel').innerHTML =
-          `<p style="color: var(--gray-500); text-align: center;">${comparison.emptyMessage || 'No comparison data available.'}</p>`;
+    function renderUnifiedStructure(operations) {
+      document.getElementById('comparisonTitle').textContent = 'Unified Study Structure';
+      const sites = operations && operations.sites ? operations.sites : [];
+      if (!sites.length) {
+        document.getElementById('comparisonPanel').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No study structure data available.</p>';
         return;
       }
-
-      const rows = comparison.entries.map(entry => `
-        <tr>
-          <td>${entry.label}</td>
-          <td>${entry.participants}</td>
-          <td>${entry.averageAttendance}%</td>
-          <td>${entry.protocolCompletion}%</td>
-        </tr>
-      `).join('');
-
-      document.getElementById('comparisonPanel').innerHTML = `
-        <table class="comparison-table">
-          <thead>
-            <tr>
-              <th>Group</th>
-              <th>Participants</th>
-              <th>Avg Attendance</th>
-              <th>Protocol Completion</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      `;
+      const html = sites.map(site => {
+        const cohortRows = (site.cohorts || []).map(cohort => `
+          <div class="structure-cohort-row">
+            <div>
+              <strong>${cohort.label}</strong>
+              <div class="card-subtitle">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions</div>
+            </div>
+            <div class="metric-pill">${cohort.participantCount} participants</div>
+            <div class="metric-pill">${cohort.averageAttendance}% attendance</div>
+            <div class="metric-pill">${cohort.protocolCompletion}% protocol</div>
+            <div><span class="status-pill ${cohort.lifecycle.tone}">${cohort.lifecycle.label}</span></div>
+          </div>
+        `).join('') || '<div class="structure-cohort-row"><div>No cohorts found for this site.</div></div>';
+        return `
+          <div class="structure-site">
+            <div class="structure-site-header">
+              <div><strong>${site.site}</strong></div>
+              <div class="metric-pill">${site.cohortCount} cohorts</div>
+              <div class="metric-pill">${site.participantCount} participants</div>
+              <div class="metric-pill">${site.averageAttendance}% attendance</div>
+              <div class="metric-pill">${site.protocolCompletion}% protocol</div>
+            </div>
+            ${cohortRows}
+          </div>
+        `;
+      }).join('');
+      document.getElementById('comparisonPanel').innerHTML = html;
     }
 
     function renderAboutSummary(about) {
@@ -1494,10 +1821,10 @@
       console.error('Error loading snapshot:', error);
       document.getElementById('kpiGrid').innerHTML =
         '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load dashboard snapshot. Please refresh the page.</p>';
-      document.getElementById('attendanceTrend').innerHTML =
-        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
-      document.getElementById('attendanceDistribution').innerHTML =
-        '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Attendance insights unavailable.</p>';
+      ['siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts'].forEach(id => {
+        const target = document.getElementById(id);
+        if (target) target.innerHTML = '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Operations data unavailable.</p>';
+      });
       document.getElementById('protocolSummary').innerHTML =
         '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Protocol insights unavailable.</p>';
       document.getElementById('needsAttention').innerHTML =
