@@ -1776,6 +1776,21 @@
 
     .cohort-chip-title { font-size: 0.77rem; }
     .cohort-chip-meta { font-size: 0.66rem; }
+    .cohort-attendance-row {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr) 38px;
+      gap: 0.45rem;
+      align-items: center;
+      margin-top: 0.55rem;
+      color: var(--muted-ink);
+      font-size: 0.62rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .cohort-attendance-row .progress-bar { height: 7px; }
+
     .metric-pill { font-size: 0.72rem; min-width: 58px; }
 
     .lifecycle-grid { gap: 0.6rem; }
@@ -2320,19 +2335,20 @@
       const cohortMax = Math.max(...sites.map(s => s.cohortCount || 0), 1);
       const html = sites.map(site => {
         const siteClass = site.site === 'UGA' ? 'uga' : 'missouri';
-        const cohortRows = (site.cohorts || []).map(cohort => {
-          const participantPct = Math.round(((cohort.participantCount || 0) / participantMax) * 100);
-          return `
-            <div class="cohort-chip" title="${cohort.label}: ${cohort.participantCount} participants, ${cohort.averageAttendance}% attendance, ${cohort.protocolCompletion}% protocol">
-              <div>
-                <div class="cohort-chip-title">${cohort.label}</div>
-                <div class="cohort-chip-meta">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions · ${cohort.averageAttendance}% attendance</div>
-                <div class="progress-bar" style="margin-top:0.55rem;"><div class="progress-fill primary" style="width:${participantPct}%;"></div></div>
+        const cohortRows = (site.cohorts || []).map(cohort => `
+          <div class="cohort-chip" title="${cohort.label}: ${cohort.participantCount} participants, ${cohort.averageAttendance}% attendance, ${cohort.protocolCompletion}% protocol">
+            <div>
+              <div class="cohort-chip-title">${cohort.label}</div>
+              <div class="cohort-chip-meta">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions · ${cohort.averageAttendance}% attendance</div>
+              <div class="cohort-attendance-row" aria-label="Average attendance ${cohort.averageAttendance}%">
+                <span>Attendance</span>
+                <div class="progress-bar"><div class="progress-fill ${cohort.averageAttendance >= 80 ? 'success' : cohort.averageAttendance >= 60 ? 'warning' : 'danger'}" style="width:${safePercent(cohort.averageAttendance)}%;"></div></div>
+                <strong>${cohort.averageAttendance}%</strong>
               </div>
-              <div class="metric-pill">${cohort.participantCount} participants</div>
             </div>
-          `;
-        }).join('') || '<p style="color: var(--gray-500); font-size: 0.85rem;">No cohorts for this site.</p>';
+            <div class="metric-pill">${cohort.participantCount} participants</div>
+          </div>
+        `).join('') || '<p style="color: var(--gray-500); font-size: 0.85rem;">No cohorts for this site.</p>';
         return `
           <div class="site-overview-card ${siteClass}">
             <div class="site-card-header">
