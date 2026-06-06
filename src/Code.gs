@@ -1433,6 +1433,137 @@ function saveSessionRecordingLinks(token, sessionId, links) {
   return { success: false, message: 'Session not found' };
 }
 
+/**
+ * Get configuration for client-side use
+ */
+function getConfig() {
+  const protocols = getGlobalProtocolItems();
+  const recordingTypes = getSessionRecordingTypes();
+  return {
+    appName: CONFIG.APP_NAME,
+    version: CONFIG.VERSION,
+    sites: CONFIG.SITES,
+    periods: CONFIG.PERIODS,
+    roles: CONFIG.ROLES,
+    instruments: protocols,
+    participantStatuses: CONFIG.PARTICIPANT_STATUSES,
+    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
+    sessionRecordingTypes: recordingTypes
+  };
+}
+
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
+    } catch (e) {}
+  }
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
+}
+
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
+}
+
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
+
+function getFieldNotesByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const sessions = (sessionsResult.sessions || []).map(function(s) {
+    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
+  });
+  return { success: true, sessions: sessions };
+}
+
+function saveFieldNotesLink(token, sessionId, link) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const sessionIdIdx = headers.indexOf('sessionId');
+  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
+
+  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
+  if (fieldNotesIdx === -1) {
+    headers.push('fieldNotesLink');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    fieldNotesIdx = headers.length - 1;
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
+      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      return { success: true, message: 'Field notes link saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function saveSessionRecordingLinks(token, sessionId, links) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const ensureCol = name => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) {
+      headers.push(name);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      idx = headers.length - 1;
+    }
+    return idx + 1;
+  };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
@@ -3248,64 +3379,75 @@ function getAllParticipants(token, filters) {
   const headers = participantSnapshot.headers;
   const data = participantSnapshot.data;
   const participants = [];
-  const participantIds = data.slice(1).map(row => getHeaderValue(row, headers, 'participantId')).filter(Boolean);
-  const completionMap = buildLiveCompletionMap(participantIds);
+  const filteredRows = [];
 
   filters = filters || {};
 
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const siteCol = headers.indexOf('site');
+  const rolloutIdCol = headers.indexOf('rolloutId');
+  const schoolNameCol = headers.indexOf('schoolName');
+  const statusCol = headers.indexOf('status');
+
   for (let i = 1; i < data.length; i++) {
-    const participant = {
-      participantId: getHeaderValue(data[i], headers, 'participantId'),
-      fullName: getHeaderValue(data[i], headers, 'fullName'),
-      site: getHeaderValue(data[i], headers, 'site'),
-      rolloutId: getHeaderValue(data[i], headers, 'rolloutId'),
-      schoolName: getHeaderValue(data[i], headers, 'schoolName'),
-      period: getHeaderValue(data[i], headers, 'period'),
-      year: getHeaderValue(data[i], headers, 'year'),
-      enrollmentDate: getHeaderValue(data[i], headers, 'enrollmentDate'),
-      enrolledBy: getHeaderValue(data[i], headers, 'enrolledBy'),
-      status: getHeaderValue(data[i], headers, 'status'),
-      notes: getHeaderValue(data[i], headers, 'notes'),
-      completionPercentage: (completionMap[getHeaderValue(data[i], headers, 'participantId')] || {}).percentage || 0
-    };
+    const row = data[i];
+    const participantId = row[participantIdCol];
+    const fullName = row[fullNameCol] || '';
+    const site = row[siteCol];
+    const rolloutId = row[rolloutIdCol];
+    const schoolName = row[schoolNameCol] || '';
+    const status = row[statusCol];
 
-    if (currentUser.role !== 'viewer') {
-      participant.parentGuardianNames = getHeaderValue(data[i], headers, 'parent_guardian_names');
-      participant.parentGuardianPhone = getHeaderValue(data[i], headers, 'parent_guardian_phone');
-      participant.parentGuardianAddress = getHeaderValue(data[i], headers, 'parent_guardian_address');
-      participant.parentGuardianEmail = getHeaderValue(data[i], headers, 'parent_guardian_email');
-      participant.parentGuardianDob = getHeaderValue(data[i], headers, 'parent_guardian_dob');
-    }
-
-    // Apply filters
     let include = true;
-
-    if (filters.site && filters.site !== 'All' && participant.site !== filters.site) {
-      include = false;
-    }
-    if (filters.rolloutId && filters.rolloutId !== 'All' && participant.rolloutId !== filters.rolloutId) {
-      include = false;
-    }
-    if (filters.status && participant.status !== filters.status) {
-      include = false;
-    }
+    if (filters.site && filters.site !== 'All' && site !== filters.site) include = false;
+    if (filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) include = false;
+    if (filters.status && status !== filters.status) include = false;
     if (filters.search) {
       const searchLower = filters.search.toLowerCase();
       const matchesSearch =
-        participant.fullName.toLowerCase().includes(searchLower) ||
-        participant.participantId.toLowerCase().includes(searchLower) ||
-        participant.schoolName.toLowerCase().includes(searchLower);
+        String(fullName).toLowerCase().includes(searchLower) ||
+        String(participantId).toLowerCase().includes(searchLower) ||
+        String(schoolName).toLowerCase().includes(searchLower);
       if (!matchesSearch) include = false;
     }
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && site !== currentUser.site) include = false;
+    if (include) filteredRows.push(row);
+  }
 
-    // Facilitators see their site by default unless viewing all
-    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && participant.site !== currentUser.site) {
-      include = false;
+  if (filteredRows.length === 0) {
+    return { success: true, participants: [] };
+  }
+
+  const completionMap = buildLiveCompletionMap(filteredRows.map(row => row[participantIdCol]).filter(Boolean));
+
+  for (let i = 0; i < filteredRows.length; i++) {
+    const row = filteredRows[i];
+    const participantId = row[participantIdCol];
+    const participant = {
+      participantId: participantId,
+      fullName: row[fullNameCol],
+      site: row[siteCol],
+      rolloutId: row[rolloutIdCol],
+      schoolName: row[schoolNameCol],
+      period: getHeaderValue(row, headers, 'period'),
+      year: getHeaderValue(row, headers, 'year'),
+      enrollmentDate: getHeaderValue(row, headers, 'enrollmentDate'),
+      enrolledBy: getHeaderValue(row, headers, 'enrolledBy'),
+      status: row[statusCol],
+      notes: getHeaderValue(row, headers, 'notes'),
+      completionPercentage: (completionMap[participantId] || {}).percentage || 0
+    };
+
+    if (currentUser.role !== 'viewer') {
+      participant.parentGuardianNames = getHeaderValue(row, headers, 'parent_guardian_names');
+      participant.parentGuardianPhone = getHeaderValue(row, headers, 'parent_guardian_phone');
+      participant.parentGuardianAddress = getHeaderValue(row, headers, 'parent_guardian_address');
+      participant.parentGuardianEmail = getHeaderValue(row, headers, 'parent_guardian_email');
+      participant.parentGuardianDob = getHeaderValue(row, headers, 'parent_guardian_dob');
     }
 
-    if (include) {
-      participants.push(participant);
-    }
+    participants.push(participant);
   }
 
   return { success: true, participants: participants };
@@ -4618,24 +4760,26 @@ function updateParticipantCompletion(participantId) {
 }
 
 function buildLiveCompletionMap(participantIds) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const checklistSheet = ss.getSheetByName('Checklist');
-  const participantsSheet = ss.getSheetByName('Participants');
   const map = {};
-  if (!checklistSheet || checklistSheet.getLastRow() < 2 || !participantsSheet || participantsSheet.getLastRow() < 2) return map;
-  const set = {};
-  (participantIds || []).forEach(id => { set[String(id)] = true; });
-  const filterEnabled = participantIds && participantIds.length > 0;
-
   const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
   const pHeaders = participantSnapshot.headers;
   const pData = participantSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  if (pData.length < 2 || cData.length < 2) return map;
+
+  const requestedIds = new Set((participantIds || []).map(id => String(id)));
+  const filterEnabled = requestedIds.size > 0;
+  const participantIdCol = pHeaders.indexOf('participantId');
+  const participantRolloutCol = pHeaders.indexOf('rolloutId');
   const participantRolloutMap = {};
   const rolloutAllowedNumbersMap = {};
+
   for (let i = 1; i < pData.length; i++) {
-    const pid = String(pData[i][pHeaders.indexOf('participantId')]);
-    if (filterEnabled && !set[pid]) continue;
-    const rolloutId = String(pData[i][pHeaders.indexOf('rolloutId')] || '');
+    const pid = String(pData[i][participantIdCol] || '');
+    if (!pid || (filterEnabled && !requestedIds.has(pid))) continue;
+    const rolloutId = String(pData[i][participantRolloutCol] || '');
     participantRolloutMap[pid] = rolloutId;
     if (!rolloutAllowedNumbersMap[rolloutId]) {
       const allowed = {};
@@ -4644,14 +4788,12 @@ function buildLiveCompletionMap(participantIds) {
     }
   }
 
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
-  const participantCol = cHeaders.indexOf('participantId');
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
   const statusCol = cHeaders.indexOf('status');
   const numberCol = cHeaders.indexOf('instrumentNumber');
   for (let i = 1; i < cData.length; i++) {
-    const pid = String(cData[i][participantCol]);
-    if (filterEnabled && !set[pid]) continue;
+    const pid = String(cData[i][checklistParticipantCol] || '');
+    if (!pid || (filterEnabled && !requestedIds.has(pid))) continue;
     const rolloutId = participantRolloutMap[pid] || '';
     const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
     const itemNumber = String(cData[i][numberCol]);
@@ -4707,11 +4849,16 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   let totalCompletion = 0;
   let filteredParticipantIds = [];
 
+  const dashboardSiteCol = pHeaders.indexOf('site');
+  const dashboardStatusCol = pHeaders.indexOf('status');
+  const dashboardRolloutIdCol = pHeaders.indexOf('rolloutId');
+  const dashboardParticipantIdCol = pHeaders.indexOf('participantId');
+
   for (let i = 1; i < pData.length; i++) {
-    const site = pData[i][pHeaders.indexOf('site')];
-    const status = pData[i][pHeaders.indexOf('status')];
-    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
-    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][dashboardSiteCol];
+    const status = pData[i][dashboardStatusCol];
+    const rolloutId = pData[i][dashboardRolloutIdCol];
+    const participantId = pData[i][dashboardParticipantIdCol];
 
     // Apply site filter
     if (siteFilter && siteFilter !== 'All' && site !== siteFilter) {
@@ -4734,7 +4881,10 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
     if (site === 'Missouri') stats.missouriParticipants++;
   }
 
-  const liveCompletionMap = buildLiveCompletionMap(filteredParticipantIds);
+  const filteredParticipantIdSet = new Set(filteredParticipantIds.map(id => String(id)));
+  const liveCompletionMap = filteredParticipantIds.length > 0
+    ? buildLiveCompletionMap(filteredParticipantIds)
+    : {};
   filteredParticipantIds.forEach(pid => {
     totalCompletion += (liveCompletionMap[pid] || {}).percentage || 0;
   });
@@ -4786,13 +4936,17 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
       instrumentCounts[inst.number] = { total: 0, completed: 0, name: inst.name };
     });
 
+    const instrumentNumberCol = cHeaders.indexOf('instrumentNumber');
+    const instrumentStatusCol = cHeaders.indexOf('status');
+    const checklistParticipantCol = cHeaders.indexOf('participantId');
+
     for (let i = 1; i < cData.length; i++) {
-      const instNum = cData[i][cHeaders.indexOf('instrumentNumber')];
-      const instStatus = cData[i][cHeaders.indexOf('status')];
-      const checklistParticipantId = cData[i][cHeaders.indexOf('participantId')];
+      const instNum = cData[i][instrumentNumberCol];
+      const instStatus = cData[i][instrumentStatusCol];
+      const checklistParticipantId = cData[i][checklistParticipantCol];
 
       // Only count checklist items for filtered participants
-      if (filteredParticipantIds.length > 0 && !filteredParticipantIds.includes(checklistParticipantId)) {
+      if (!filteredParticipantIdSet.has(String(checklistParticipantId))) {
         continue;
       }
 
@@ -4915,20 +5069,28 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
   const includedParticipantIds = [];
   const participantRolloutMap = {};
   const participantNameMap = {};
+  const analyticsSiteCol = pHeaders.indexOf('site');
+  const analyticsRolloutIdCol = pHeaders.indexOf('rolloutId');
+  const analyticsStatusCol = pHeaders.indexOf('status');
+  const analyticsParticipantIdCol = pHeaders.indexOf('participantId');
+  const analyticsFullNameCol = pHeaders.indexOf('fullName');
+  const analyticsSchoolNameCol = pHeaders.indexOf('schoolName');
+  const analyticsPeriodCol = pHeaders.indexOf('period');
+  const analyticsYearCol = pHeaders.indexOf('year');
   let completionSum = 0;
 
   for (let i = 1; i < pData.length; i++) {
-    const site = pData[i][pHeaders.indexOf('site')];
-    const rolloutId = pData[i][pHeaders.indexOf('rolloutId')];
-    const status = pData[i][pHeaders.indexOf('status')];
-    const participantId = pData[i][pHeaders.indexOf('participantId')];
+    const site = pData[i][analyticsSiteCol];
+    const rolloutId = pData[i][analyticsRolloutIdCol];
+    const status = pData[i][analyticsStatusCol];
+    const participantId = pData[i][analyticsParticipantIdCol];
 
     if (effectiveSite !== 'All' && site !== effectiveSite) continue;
     if (effectiveRollout !== 'All' && rolloutId !== effectiveRollout) continue;
 
     includedParticipantIds.push(participantId);
     participantRolloutMap[participantId] = rolloutId || 'Unassigned';
-    participantNameMap[participantId] = pData[i][pHeaders.indexOf('fullName')] || 'Unknown Participant';
+    participantNameMap[participantId] = pData[i][analyticsFullNameCol] || 'Unknown Participant';
     overview.totalParticipants++;
     overview.activeParticipants += status === 'active' ? 1 : 0;
     overview.completedParticipants += status === 'completed' ? 1 : 0;
@@ -4939,9 +5101,9 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       rolloutEntries[key] = {
         rolloutId: rolloutId || 'Unassigned',
         site: site,
-        schoolName: rolloutId ? pData[i][pHeaders.indexOf('schoolName')] : 'No cohort assigned',
-        period: pData[i][pHeaders.indexOf('period')],
-        year: pData[i][pHeaders.indexOf('year')],
+        schoolName: rolloutId ? pData[i][analyticsSchoolNameCol] : 'No cohort assigned',
+        period: pData[i][analyticsPeriodCol],
+        year: pData[i][analyticsYearCol],
         status: rolloutId ? 'active' : 'unassigned',
         participantCount: 0,
         activeParticipants: 0,
@@ -4959,6 +5121,19 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
     rolloutStats.withdrawnParticipants += status === 'withdrawn' ? 1 : 0;
     // completionSum populated from live checklist map below
   }
+
+  const includedParticipantIdSet = new Set(includedParticipantIds.map(id => String(id)));
+  const liveCompletionMap = includedParticipantIds.length > 0
+    ? buildLiveCompletionMap(includedParticipantIds)
+    : {};
+  includedParticipantIds.forEach(participantId => {
+    const livePct = (liveCompletionMap[participantId] || {}).percentage || 0;
+    completionSum += livePct;
+    const rolloutKey = participantRolloutMap[participantId] || 'Unassigned';
+    if (rolloutEntries[rolloutKey]) {
+      rolloutEntries[rolloutKey].completionSum += livePct;
+    }
+  });
 
   const liveCompletionMap = buildLiveCompletionMap(includedParticipantIds);
   includedParticipantIds.forEach(participantId => {
@@ -5001,12 +5176,16 @@ function getAnalyticsOverview(token, siteFilter, rolloutFilter) {
       pendingSets[inst.number] = new Set();
     });
 
-    for (let i = 1; i < cData.length; i++) {
-      const participantId = cData[i][cHeaders.indexOf('participantId')];
-      if (!includedParticipantIds.includes(participantId)) continue;
+    const checklistParticipantCol = cHeaders.indexOf('participantId');
+    const checklistInstrumentNumberCol = cHeaders.indexOf('instrumentNumber');
+    const checklistStatusCol = cHeaders.indexOf('status');
 
-      const instrumentNumber = cData[i][cHeaders.indexOf('instrumentNumber')];
-      const status = cData[i][cHeaders.indexOf('status')];
+    for (let i = 1; i < cData.length; i++) {
+      const participantId = cData[i][checklistParticipantCol];
+      if (!includedParticipantIdSet.has(String(participantId))) continue;
+
+      const instrumentNumber = cData[i][checklistInstrumentNumberCol];
+      const status = cData[i][checklistStatusCol];
 
       if (counts[instrumentNumber]) {
         counts[instrumentNumber].total++;
@@ -6332,6 +6511,7 @@ function exportAttendanceCSV(token, filters) {
     renderAttendanceSheet(sheet, sheetRows, sessionSummaryRows, sessionCount, rolloutLabel);
   }
 
+  SpreadsheetApp.flush();
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
@@ -6363,9 +6543,7 @@ function exportAttendanceCSV(token, filters) {
 
 function exportLinksArtifacts(token, filters) {
   const currentUser = validateSession(token);
-  if (!currentUser) {
-    return { success: false, message: 'Invalid session' };
-  }
+  if (!currentUser) return { success: false, message: 'Invalid session' };
 
   const siteFilter = (filters && filters.site) ? filters.site : 'All';
   const rolloutFilter = (filters && filters.rolloutId) ? filters.rolloutId : 'All';
@@ -6373,45 +6551,9 @@ function exportLinksArtifacts(token, filters) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
-  if (!participantsSheet || !checklistSheet) {
+  const sessionsSheet = ss.getSheetByName('StudySessions');
+  if (!participantsSheet || !checklistSheet || !sessionsSheet) {
     return { success: false, message: 'Required sheets are missing' };
-  }
-
-  const participantsData = participantsSheet.getDataRange().getValues();
-  const participantHeaders = participantsData[0] || [];
-  const pIdx = {
-    participantId: participantHeaders.indexOf('participantId'),
-    fullName: participantHeaders.indexOf('fullName'),
-    site: participantHeaders.indexOf('site'),
-    rolloutId: participantHeaders.indexOf('rolloutId'),
-    schoolName: participantHeaders.indexOf('schoolName'),
-    period: participantHeaders.indexOf('period'),
-    year: participantHeaders.indexOf('year')
-  };
-
-  const selectedParticipants = [];
-  const selectedParticipantIds = {};
-  for (var i = 1; i < participantsData.length; i++) {
-    const row = participantsData[i];
-    const site = String(row[pIdx.site] || '');
-    const rolloutId = String(row[pIdx.rolloutId] || '');
-    if (siteFilter !== 'All' && site !== siteFilter) continue;
-    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
-    const pid = String(row[pIdx.participantId] || '');
-    if (!pid) continue;
-    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
-    selectedParticipantIds[pid] = true;
-    selectedParticipants.push({
-      participantId: pid,
-      participantName: String(row[pIdx.fullName] || ''),
-      site: site,
-      cohort: cohortLabel,
-      rolloutId: rolloutId
-    });
-  }
-
-  if (!selectedParticipants.length) {
-    return { success: false, message: 'No participants found for selected filters' };
   }
 
   function normalizeInstrumentName(name) {
@@ -6433,34 +6575,60 @@ function exportLinksArtifacts(token, filters) {
     return candidate;
   }
 
+  function toHyperlinkFormula(link) {
+    var value = String(link || '').trim();
+    if (!value) return '';
+    if (!/^https?:\/\//i.test(value)) return '="' + value.replace(/"/g, '""') + '"';
+    var safe = value.replace(/"/g, '""');
+    return '=HYPERLINK("' + safe + '","Open")';
+  }
+
   const exclusion = {
     'consent form': true,
     'assent form / pre-test': true,
     'post-test': true,
-    'participant feedback survey': true,
-    'parent satisfaction survey': true
+    'participant feedback survey': true
   };
 
-  const protocolByRollout = {};
-  if (rolloutFilter !== 'All') {
-    protocolByRollout[String(rolloutFilter)] = getProtocolItemsForFilter(String(rolloutFilter));
-  } else {
-    const uniqueRollouts = {};
-    selectedParticipants.forEach(function(p) { if (p.rolloutId) uniqueRollouts[p.rolloutId] = true; });
-    Object.keys(uniqueRollouts).forEach(function(rid) {
-      protocolByRollout[rid] = getProtocolItemsForFilter(rid);
-    });
+  const participantsData = participantsSheet.getDataRange().getValues();
+  const participantHeaders = participantsData[0] || [];
+  const pIdx = {
+    participantId: participantHeaders.indexOf('participantId'),
+    fullName: participantHeaders.indexOf('fullName'),
+    site: participantHeaders.indexOf('site'),
+    rolloutId: participantHeaders.indexOf('rolloutId'),
+    schoolName: participantHeaders.indexOf('schoolName'),
+    period: participantHeaders.indexOf('period'),
+    year: participantHeaders.indexOf('year')
+  };
+
+  const selectedParticipants = [];
+  const selectedParticipantIds = {};
+  const rolloutMeta = {};
+  for (var i = 1; i < participantsData.length; i++) {
+    const row = participantsData[i];
+    const site = String(row[pIdx.site] || '');
+    const rolloutId = String(row[pIdx.rolloutId] || '');
+    if (siteFilter !== 'All' && site !== siteFilter) continue;
+    if (rolloutFilter !== 'All' && rolloutId !== String(rolloutFilter)) continue;
+    const pid = String(row[pIdx.participantId] || '');
+    if (!pid) continue;
+    const cohortLabel = String(row[pIdx.schoolName] || '') + (row[pIdx.period] ? ' (' + String(row[pIdx.period]) + ' ' + String(row[pIdx.year] || '') + ')' : '');
+    selectedParticipantIds[pid] = true;
+    selectedParticipants.push({ participantId: pid, participantName: String(row[pIdx.fullName] || ''), site: site, cohort: cohortLabel, rolloutId: rolloutId });
+    if (!rolloutMeta[rolloutId]) rolloutMeta[rolloutId] = { site: site, cohort: cohortLabel };
   }
+
+  if (!selectedParticipants.length) return { success: false, message: 'No participants found for selected filters' };
+
+  const protocolByRollout = {};
+  Object.keys(rolloutMeta).forEach(function(rid){ protocolByRollout[rid] = getProtocolItemsForFilter(rid) || []; });
 
   const checklistData = checklistSheet.getDataRange().getValues();
   const checklistHeaders = checklistData[0] || [];
-  const cIdx = {
-    participantId: checklistHeaders.indexOf('participantId'),
-    instrumentName: checklistHeaders.indexOf('instrumentName'),
-    dataLink: checklistHeaders.indexOf('dataLink')
-  };
-
+  const cIdx = { participantId: checklistHeaders.indexOf('participantId'), instrumentName: checklistHeaders.indexOf('instrumentName'), dataLink: checklistHeaders.indexOf('dataLink') };
   const linkMap = {};
+  const linkMapNormalized = {};
   for (var j = 1; j < checklistData.length; j++) {
     const crow = checklistData[j];
     const pid2 = String(crow[cIdx.participantId] || '');
@@ -6470,68 +6638,124 @@ function exportLinksArtifacts(token, filters) {
     const link = String(crow[cIdx.dataLink] || '').trim();
     if (!link) continue;
     if (!linkMap[pid2]) linkMap[pid2] = {};
+    if (!linkMapNormalized[pid2]) linkMapNormalized[pid2] = {};
     linkMap[pid2][instrument] = link;
+    linkMapNormalized[pid2][normalizeInstrumentName(instrument)] = link;
   }
 
   const groups = {};
   selectedParticipants.forEach(function(p) {
-    var key = p.rolloutId || ('cohort:' + p.cohort);
-    if (!groups[key]) {
-      groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
-    }
+    const key = p.rolloutId || ('cohort:' + p.cohort);
+    if (!groups[key]) groups[key] = { rolloutId: p.rolloutId, cohort: p.cohort, participants: [] };
     groups[key].participants.push(p);
   });
 
   const spreadsheet = SpreadsheetApp.create('Links and Artifacts Export ' + new Date().toISOString());
-  const defaultSheet = spreadsheet.getSheets()[0];
   const usedNames = {};
-  var sheetCount = 0;
+
+  // Sheet 1: Sessions Recording
+  const sessionData = sessionsSheet.getDataRange().getValues();
+  const sHeaders = sessionData[0] || [];
+  const sIdx = {
+    rolloutId: sHeaders.indexOf('rolloutId'),
+    sessionName: sHeaders.indexOf('sessionName'),
+    sessionNumber: sHeaders.indexOf('sessionNumber'),
+    goproLink: sHeaders.indexOf('goproLink'),
+    tascamLink: sHeaders.indexOf('tascamLink'),
+    meetingOwlLink: sHeaders.indexOf('meetingOwlLink'),
+    fieldNotesLink: sHeaders.indexOf('fieldNotesLink'),
+    recordingLinksJson: sHeaders.indexOf('recordingLinksJson')
+  };
+  const sessionRows = [];
+  for (var sr = 1; sr < sessionData.length; sr++) {
+    const row = sessionData[sr];
+    const rid = String(row[sIdx.rolloutId] || '');
+    if (!rolloutMeta[rid]) continue;
+    let linksJson = {};
+    if (sIdx.recordingLinksJson >= 0 && row[sIdx.recordingLinksJson]) {
+      try { linksJson = JSON.parse(String(row[sIdx.recordingLinksJson])) || {}; } catch (e) {}
+    }
+    const gp = String((linksJson['GoPro'] || (sIdx.goproLink >= 0 ? row[sIdx.goproLink] : '') || '')).trim();
+    const ta = String((linksJson['Tascam'] || (sIdx.tascamLink >= 0 ? row[sIdx.tascamLink] : '') || '')).trim();
+    const mo = String((linksJson['Meeting Owl'] || (sIdx.meetingOwlLink >= 0 ? row[sIdx.meetingOwlLink] : '') || '')).trim();
+    const sessionLabel = String((sIdx.sessionName >= 0 ? row[sIdx.sessionName] : '') || '').trim() || ('Session ' + String((sIdx.sessionNumber >= 0 ? row[sIdx.sessionNumber] : '') || '').trim());
+    const fn = String((sIdx.fieldNotesLink >= 0 ? row[sIdx.fieldNotesLink] : '') || '').trim();
+    sessionRows.push([
+      rolloutMeta[rid].site,
+      rolloutMeta[rid].cohort,
+      sessionLabel,
+      gp,
+      ta,
+      mo,
+      fn
+    ]);
+  }
+
+  const firstSheet = spreadsheet.getSheets()[0];
+  firstSheet.setName('Sessions Recording');
+  usedNames['Sessions Recording'] = true;
+  const sessHeaders = ['Site', 'Cohort', 'Sessions', 'GoPro Recording', 'Tascam Recording', 'Meeting Owl Recording', 'Field note'];
+  firstSheet.getRange(1,1,1,sessHeaders.length).setValues([sessHeaders]);
+  if (sessionRows.length) {
+    firstSheet.getRange(2,1,sessionRows.length,3).setValues(sessionRows.map(function(r){ return r.slice(0,3); }));
+    firstSheet.getRange(2,4,sessionRows.length,4).setFormulas(sessionRows.map(function(r){
+      return [toHyperlinkFormula(r[3]), toHyperlinkFormula(r[4]), toHyperlinkFormula(r[5]), toHyperlinkFormula(r[6])];
+    }));
+  }
+  firstSheet.getRange(1,1,1,sessHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+  firstSheet.setRowHeight(1, 70);
+  firstSheet.setColumnWidths(1, sessHeaders.length, 178);
 
   Object.keys(groups).forEach(function(groupKey) {
-    var group = groups[groupKey];
-    var protocolItems = protocolByRollout[group.rolloutId] || getProtocolItemsForFilter(group.rolloutId || 'All') || [];
+    const group = groups[groupKey];
+    const protocolItems = protocolByRollout[group.rolloutId] || [];
 
-    var protocolNames = [];
-    var seen = {};
+    const protocolNames = [];
+    const seen = {};
     protocolItems.forEach(function(item) {
-      var nm = String(item.instrumentName || item.name || '').trim();
+      const nm = String(item.instrumentName || item.name || '').trim();
       if (!nm) return;
-      var norm = normalizeInstrumentName(nm);
+      const norm = normalizeInstrumentName(nm);
       if (exclusion[norm]) return;
-      if (!seen[nm]) {
-        seen[nm] = true;
-        protocolNames.push(nm);
-      }
+      if (!seen[nm]) { seen[nm] = true; protocolNames.push(nm); }
     });
 
-    var headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
-    var rows = group.participants.map(function(p) {
-      var row = [p.participantName, p.site, p.cohort];
+    const headers = ['Participant Name', 'Site', 'Cohort'].concat(protocolNames);
+    const rows = group.participants.map(function(p) {
+      const row = [p.participantName, p.site, p.cohort];
       protocolNames.forEach(function(protocolName) {
-        var link = linkMap[p.participantId] && linkMap[p.participantId][protocolName] ? linkMap[p.participantId][protocolName] : '';
-        row.push(link ? '=HYPERLINK("' + link.replace(/"/g, '""') + '","Open")' : '');
+        var link = '';
+        if (linkMap[p.participantId] && linkMap[p.participantId][protocolName]) {
+          link = linkMap[p.participantId][protocolName];
+        } else {
+          var nk = normalizeInstrumentName(protocolName);
+          link = (linkMapNormalized[p.participantId] && linkMapNormalized[p.participantId][nk]) ? linkMapNormalized[p.participantId][nk] : '';
+        }
+        row.push(link);
       });
       return row;
     });
 
-    var sheet = sheetCount === 0 ? defaultSheet : spreadsheet.insertSheet();
-    var safeName = makeSafeSheetName(group.cohort, usedNames);
+    const sheet = spreadsheet.insertSheet();
+    const safeName = makeSafeSheetName(group.cohort, usedNames);
     sheet.setName(safeName);
 
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1,1,1,headers.length).setValues([headers]);
     if (rows.length) {
-      sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+      sheet.getRange(2,1,rows.length,3).setValues(rows.map(function(r){ return r.slice(0,3); }));
+      if (headers.length > 3) {
+        sheet.getRange(2,4,rows.length,headers.length - 3).setFormulas(rows.map(function(r){
+          return r.slice(3).map(function(link){ return toHyperlinkFormula(link); });
+        }));
+      }
     }
-    sheet.getRange(1, 1, 1, headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+    sheet.getRange(1,1,1,headers.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
     sheet.setRowHeight(1, 70);
-    sheet.setColumnWidths(1, headers.length, 181);
-    sheet.setFrozenRows(1);
-    if (headers.length > 3) {
-      sheet.getRange(2, 4, Math.max(rows.length, 1), headers.length - 3).setHorizontalAlignment('center');
-    }
-    sheetCount++;
+    sheet.setColumnWidths(1, headers.length, 178);
+    if (headers.length > 3) sheet.getRange(2,4,Math.max(rows.length,1),headers.length - 3).setHorizontalAlignment('center');
   });
 
+  SpreadsheetApp.flush();
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
@@ -6544,13 +6768,7 @@ function exportLinksArtifacts(token, filters) {
   const blob = response.getBlob().setName('links_artifacts_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
   const base64 = Utilities.base64Encode(blob.getBytes());
   DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
-  return {
-    success: true,
-    filename: blob.getName(),
-    mimeType: blob.getContentType(),
-    content: base64,
-    message: 'Links and artifacts export generated'
-  };
+  return { success: true, filename: blob.getName(), mimeType: blob.getContentType(), content: base64, message: 'Links and artifacts export generated' };
 }
 
 function exportSummaryReport(token, filters) {
@@ -6687,6 +6905,7 @@ function exportSummaryReport(token, filters) {
     });
   });
 
+  SpreadsheetApp.flush();
   const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
   const response = UrlFetchApp.fetch(exportUrl, {
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },

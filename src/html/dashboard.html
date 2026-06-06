@@ -6430,7 +6430,9 @@
     }
 
     function refreshDataForFilters() {
-      loadDashboardData();
+      if (isSectionVisible('dashboard')) {
+        loadDashboardData();
+      }
 
       if (isSectionVisible('participants')) {
         loadParticipants();
