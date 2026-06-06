@@ -205,7 +205,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1282,7 +1283,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1448,7 +1450,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
 }
 
@@ -3270,6 +3273,171 @@ const PARTICIPANT_PARENT_HEADERS = [
   'parent_guardian_dob'
 ];
 
+const ENROLLMENT_SYSTEM_HEADERS = [
+  'participantId', 'site', 'rolloutId', 'schoolName', 'period', 'year',
+  'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+];
+
+const DEFAULT_ENROLLMENT_FIELDS = [
+  { key: 'fullName', label: 'Participant Full Name', type: 'text', required: true, core: true, placeholder: "Enter participant's full name" },
+  { key: 'parent_guardian_names', label: 'Parent/Guardian Name(s)', type: 'text', required: false, core: true, placeholder: 'Enter parent/guardian names (comma-separated if multiple)' },
+  { key: 'parent_guardian_phone', label: 'Parent/Guardian Phone Number', type: 'phone', required: false, core: true, placeholder: '(706) 555-1234' },
+  { key: 'parent_guardian_address', label: 'Parent/Guardian Residential Address', type: 'textarea', required: false, core: true, placeholder: 'Enter parent/guardian address' },
+  { key: 'parent_guardian_email', label: 'Parent/Guardian Email Address', type: 'email', required: false, core: true, placeholder: 'parent@example.com' },
+  { key: 'parent_guardian_dob', label: 'Parent/Guardian Date of Birth', type: 'date', required: false, core: true, placeholder: '' }
+];
+
+function slugifyEnrollmentFieldKey(label) {
+  return 'custom_' + String(label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .substring(0, 50);
+}
+
+function normalizeEnrollmentField(field, index, usedKeys) {
+  const typeWhitelist = ['text', 'textarea', 'number', 'date', 'email', 'phone', 'select'];
+  const label = String((field && field.label) || '').trim();
+  if (!label) return null;
+
+  let key = String((field && field.key) || '').trim();
+  if (!key) key = slugifyEnrollmentFieldKey(label);
+  key = key.replace(/[^a-zA-Z0-9_]/g, '_');
+  if (!key) key = 'custom_field_' + (index + 1);
+  if (ENROLLMENT_SYSTEM_HEADERS.indexOf(key) !== -1 || key === 'cohortName' || key === 'rolloutName') {
+    key = 'custom_' + key;
+  }
+
+  const lowerUsed = usedKeys || {};
+  const baseKey = key;
+  let suffix = 2;
+  while (lowerUsed[key.toLowerCase()]) {
+    key = baseKey + '_' + suffix;
+    suffix++;
+  }
+  lowerUsed[key.toLowerCase()] = true;
+
+  const type = typeWhitelist.indexOf(String((field && field.type) || 'text')) !== -1
+    ? String(field.type)
+    : 'text';
+
+  return {
+    key: key,
+    label: label,
+    type: type,
+    required: !!(field && field.required),
+    core: !!(field && field.core),
+    placeholder: String((field && field.placeholder) || ''),
+    options: Array.isArray(field && field.options)
+      ? field.options.map(option => String(option || '').trim()).filter(Boolean)
+      : []
+  };
+}
+
+function getEnrollmentFieldsInternal() {
+  const used = {};
+  const defaults = DEFAULT_ENROLLMENT_FIELDS.map((field, idx) => normalizeEnrollmentField(field, idx, used)).filter(Boolean);
+  const defaultByKey = {};
+  defaults.forEach(field => defaultByKey[field.key] = field);
+
+  const configMap = getConfigMap();
+  const raw = configMap.ENROLLMENT_FIELDS;
+  if (!raw) return defaults;
+
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) return defaults;
+
+    const normalizedUsed = {};
+    const normalized = [];
+    parsed.forEach((field, idx) => {
+      const merged = defaultByKey[field && field.key]
+        ? Object.assign({}, defaultByKey[field.key], field, { key: field.key, core: true })
+        : field;
+      const normalizedField = normalizeEnrollmentField(merged, idx, normalizedUsed);
+      if (normalizedField) normalized.push(normalizedField);
+    });
+
+    if (!normalized.some(field => field.key === 'fullName')) {
+      normalized.unshift(Object.assign({}, defaultByKey.fullName));
+    }
+    normalized.forEach(field => {
+      if (field.key === 'fullName') {
+        field.required = true;
+        field.core = true;
+        field.type = 'text';
+      }
+    });
+    return normalized;
+  } catch (e) {
+    return defaults;
+  }
+}
+
+function getEnrollmentFields(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  return { success: true, fields: getEnrollmentFieldsInternal() };
+}
+
+function saveEnrollmentFields(token, fields) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!Array.isArray(fields) || fields.length === 0) return { success: false, message: 'At least one enrollment field is required' };
+
+  const used = {};
+  const normalized = fields.map((field, idx) => normalizeEnrollmentField(field, idx, used)).filter(Boolean);
+  if (!normalized.some(field => field.key === 'fullName')) {
+    normalized.unshift(Object.assign({}, DEFAULT_ENROLLMENT_FIELDS[0]));
+  }
+  normalized.forEach(field => {
+    if (field.key === 'fullName') {
+      field.required = true;
+      field.core = true;
+      field.type = 'text';
+    }
+  });
+  if (normalized.length === 0) return { success: false, message: 'At least one valid enrollment field is required' };
+
+  upsertConfigValue('ENROLLMENT_FIELDS', JSON.stringify(normalized), 'Participant enrollment form fields');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (participantsSheet) ensureParticipantColumns(participantsSheet);
+
+  return { success: true, fields: normalized, message: 'Enrollment fields saved' };
+}
+
+function getEnrollmentFieldValueMapFromData(data) {
+  const values = Object.assign({}, (data && data.enrollmentFields) || {});
+  if (data && data.fullName !== undefined) values.fullName = data.fullName;
+  if (data && data.parentGuardianNames !== undefined) values.parent_guardian_names = data.parentGuardianNames;
+  if (data && data.parentGuardianPhone !== undefined) values.parent_guardian_phone = data.parentGuardianPhone;
+  if (data && data.parentGuardianAddress !== undefined) values.parent_guardian_address = data.parentGuardianAddress;
+  if (data && data.parentGuardianEmail !== undefined) values.parent_guardian_email = data.parentGuardianEmail;
+  if (data && data.parentGuardianDob !== undefined) values.parent_guardian_dob = data.parentGuardianDob;
+  return values;
+}
+
+function validateEnrollmentFieldValues(fields, values) {
+  const errors = [];
+  fields.forEach(field => {
+    const value = String(values[field.key] || '').trim();
+    if (field.required && !value) {
+      errors.push(field.label + ' is required');
+      return;
+    }
+    if (!value) return;
+    if (field.type === 'email' && !isValidEmail(value)) errors.push(field.label + ' is invalid');
+    if (field.type === 'date' && !isValidDateValue(value)) errors.push(field.label + ' is invalid');
+    if (field.type === 'phone') {
+      const digits = normalizePhoneDigits(value);
+      if (digits.length < 10 || digits.length > 15) errors.push(field.label + ' must include 10 to 15 digits');
+    }
+  });
+  return errors;
+}
+
 function ensureParticipantColumns(participantsSheet) {
   const requiredHeaders = [
     'participantId', 'fullName',
@@ -3278,6 +3446,12 @@ function ensureParticipantColumns(participantsSheet) {
     'site', 'rolloutId', 'schoolName', 'period', 'year',
     'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
   ];
+
+  getEnrollmentFieldsInternal().forEach(field => {
+    if (requiredHeaders.indexOf(field.key) === -1 && ENROLLMENT_SYSTEM_HEADERS.indexOf(field.key) === -1) {
+      requiredHeaders.push(field.key);
+    }
+  });
 
   const headerRange = participantsSheet.getRange(1, 1, 1, participantsSheet.getLastColumn() || 1);
   const headers = headerRange.getValues()[0].filter(Boolean);
@@ -3381,6 +3555,13 @@ function buildParticipantRow(headers, data) {
   setValue('notes', data.notes || '');
   setValue('completionPercentage', data.completionPercentage || 0);
 
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(data);
+  getEnrollmentFieldsInternal().forEach(field => {
+    if (enrollmentValues[field.key] !== undefined) {
+      setValue(field.key, enrollmentValues[field.key]);
+    }
+  });
+
   return row;
 }
 
@@ -3468,6 +3649,10 @@ function getAllParticipants(token, filters) {
       participant.parentGuardianAddress = getHeaderValue(row, headers, 'parent_guardian_address');
       participant.parentGuardianEmail = getHeaderValue(row, headers, 'parent_guardian_email');
       participant.parentGuardianDob = getHeaderValue(row, headers, 'parent_guardian_dob');
+      participant.enrollmentFields = {};
+      getEnrollmentFieldsInternal().forEach(field => {
+        participant.enrollmentFields[field.key] = getHeaderValue(row, headers, field.key);
+      });
     }
 
     participants.push(participant);
@@ -3522,6 +3707,10 @@ function getParticipantById(token, participantId) {
         participant.parentGuardianAddress = getHeaderValue(pData[i], pHeaders, 'parent_guardian_address');
         participant.parentGuardianEmail = getHeaderValue(pData[i], pHeaders, 'parent_guardian_email');
         participant.parentGuardianDob = getHeaderValue(pData[i], pHeaders, 'parent_guardian_dob');
+        participant.enrollmentFields = {};
+        getEnrollmentFieldsInternal().forEach(field => {
+          participant.enrollmentFields[field.key] = getHeaderValue(pData[i], pHeaders, field.key);
+        });
       }
       break;
     }
@@ -3573,29 +3762,24 @@ function enrollParticipant(token, participantData) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  if (!participantData || !participantData.fullName || !participantData.fullName.trim()) {
-    return { success: false, message: 'Participant full name is required' };
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
+  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
+  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
+  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  if (enrollmentErrors.length) {
+    return { success: false, message: enrollmentErrors.join('; ') };
   }
-  if (!participantData.rolloutId) {
+  if (!participantData || !participantData.rolloutId) {
     return { success: false, message: 'Study cohort is required' };
   }
 
-  const parentEmail = (participantData.parentGuardianEmail || '').trim();
-  const parentDob = (participantData.parentGuardianDob || '').trim();
-  const parentPhone = (participantData.parentGuardianPhone || '').trim();
-
-  if (parentEmail && !isValidEmail(parentEmail)) {
-    return { success: false, message: 'Parent/guardian email is invalid' };
-  }
-  if (parentDob && !isValidDateValue(parentDob)) {
-    return { success: false, message: 'Parent/guardian date of birth is invalid' };
-  }
-  if (parentPhone) {
-    const digits = normalizePhoneDigits(parentPhone);
-    if (digits.length < 10 || digits.length > 15) {
-      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
-    }
-  }
+  const parentEmail = enrollmentValues.parent_guardian_email;
+  const parentDob = enrollmentValues.parent_guardian_dob;
+  const parentPhone = enrollmentValues.parent_guardian_phone;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
@@ -3626,10 +3810,11 @@ function enrollParticipant(token, participantData) {
   // Add participant
   const row = buildParticipantRow(participantHeaders, {
     participantId: participantId,
-    fullName: participantData.fullName,
-    parentGuardianNames: participantData.parentGuardianNames,
+    fullName: enrollmentValues.fullName,
+    enrollmentFields: enrollmentValues,
+    parentGuardianNames: enrollmentValues.parent_guardian_names,
     parentGuardianPhone: parentPhone,
-    parentGuardianAddress: participantData.parentGuardianAddress,
+    parentGuardianAddress: enrollmentValues.parent_guardian_address,
     parentGuardianEmail: parentEmail,
     parentGuardianDob: parentDob,
     site: cohort.site,
@@ -3663,7 +3848,7 @@ function enrollParticipant(token, participantData) {
   });
 
   logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT', 'participant', participantId,
-    'Enrolled: ' + participantData.fullName);
+    'Enrolled: ' + enrollmentValues.fullName);
 
   return {
     success: true,
@@ -3697,22 +3882,21 @@ function updateParticipant(token, participantId, participantData) {
   const headers = participantSnapshot.headers;
   const data = participantSnapshot.data;
 
-  const parentEmail = (participantData.parentGuardianEmail || '').trim();
-  const parentDob = (participantData.parentGuardianDob || '').trim();
-  const parentPhone = (participantData.parentGuardianPhone || '').trim();
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
+  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
+  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
+  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
 
-  if (parentEmail && !isValidEmail(parentEmail)) {
-    return { success: false, message: 'Parent/guardian email is invalid' };
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  if (enrollmentErrors.length) {
+    return { success: false, message: enrollmentErrors.join('; ') };
   }
-  if (parentDob && !isValidDateValue(parentDob)) {
-    return { success: false, message: 'Parent/guardian date of birth is invalid' };
-  }
-  if (parentPhone) {
-    const digits = normalizePhoneDigits(parentPhone);
-    if (digits.length < 10 || digits.length > 15) {
-      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
-    }
-  }
+
+  const parentEmail = enrollmentValues.parent_guardian_email;
+  const parentDob = enrollmentValues.parent_guardian_dob;
+  const parentPhone = enrollmentValues.parent_guardian_phone;
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
@@ -3754,6 +3938,14 @@ function updateParticipant(token, participantId, participantData) {
           setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
         }
       }
+      enrollmentFields.forEach(field => {
+        if (enrollmentValues[field.key] !== undefined) {
+          const idx = headers.indexOf(field.key);
+          if (idx !== -1) {
+            setCellAsPlainText(participantsSheet, i + 1, idx + 1, enrollmentValues[field.key]);
+          }
+        }
+      });
       if (participantData.status) {
         setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
       }
@@ -3878,36 +4070,41 @@ function generateEnrollmentTemplate(token) {
   const templateSheet = tempSs.getSheets()[0];
   templateSheet.setName('Template');
 
-  // Headers
-  const headerValues = [
-    'fullName',
-    'parent_guardian_names',
-    'parent_guardian_phone',
-    'parent_guardian_address',
-    'parent_guardian_email',
-    'parent_guardian_dob',
-    'cohortName'
-  ];
+  // Headers are generated from the live enrollment-field configuration.
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const headerValues = enrollmentFields.map(field => field.key).concat(['cohortName']);
   templateSheet.getRange(1, 1, 1, headerValues.length).setValues([headerValues]);
   templateSheet.getRange(1, 1, 1, headerValues.length)
     .setFontWeight('bold')
     .setBackground('#f1f5f9');
+  enrollmentFields.forEach((field, index) => {
+    templateSheet.getRange(1, index + 1).setNote(
+      field.label + (field.required ? ' (required)' : ' (optional)') +
+      (field.type ? ' — ' + field.type : '')
+    );
+  });
+  templateSheet.getRange(1, headerValues.length).setNote('Choose the cohort/rollout for each participant (required).');
 
   // Helper sheet with cohort list
   const helperSheet = tempSs.insertSheet('Cohorts');
-  helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
-    cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
-  );
+  if (cohorts.length > 0) {
+    helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
+      cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+    );
+  }
   helperSheet.hideSheet();
 
   // Data validation for cohort dropdown (apply to reasonable range)
   const lastRow = Math.max(2, cohorts.length + 5);
-  const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
-  const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInRange(validationRange, true)
-    .setAllowInvalid(false)
-    .build();
-  templateSheet.getRange(2, 7, lastRow, 1).setDataValidation(rule);
+  const cohortColumnIndex = headerValues.indexOf('cohortName') + 1;
+  if (cohorts.length > 0) {
+    const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(validationRange, true)
+      .setAllowInvalid(false)
+      .build();
+    templateSheet.getRange(2, cohortColumnIndex, lastRow, 1).setDataValidation(rule);
+  }
 
   // Auto-size
   templateSheet.autoResizeColumns(1, headerValues.length);
@@ -3965,12 +4162,15 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const headers = rows[0].map(h => h.trim());
+  const enrollmentFields = getEnrollmentFieldsInternal();
   const hasCohortName = headers.indexOf('cohortName') !== -1;
   const hasRolloutName = headers.indexOf('rolloutName') !== -1;
   const missing = [];
-  if (headers.indexOf('fullName') === -1) {
-    missing.push('fullName');
-  }
+  enrollmentFields.forEach(field => {
+    if (field.required && headers.indexOf(field.key) === -1) {
+      missing.push(field.key);
+    }
+  });
   if (!hasCohortName && !hasRolloutName) {
     missing.push('cohortName');
   }
@@ -3978,7 +4178,6 @@ function importParticipantsCSV(token, fileData) {
     return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
   }
 
-  const idx = name => headers.indexOf(name);
   const getValue = (row, name) => {
     const index = headers.indexOf(name);
     return index === -1 ? '' : (row[index] || '');
@@ -4034,13 +4233,17 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const fullName = (getValue(row, 'fullName') || '').trim();
+    const enrollmentValues = {};
+    enrollmentFields.forEach(field => {
+      enrollmentValues[field.key] = (getValue(row, field.key) || '').trim();
+    });
+    const fullName = String(enrollmentValues.fullName || '').trim();
     const rolloutName = (getValue(row, cohortColumn) || '').trim();
-    const parentGuardianNames = (getValue(row, 'parent_guardian_names') || '').trim();
-    const parentGuardianPhone = (getValue(row, 'parent_guardian_phone') || '').trim();
-    const parentGuardianAddress = (getValue(row, 'parent_guardian_address') || '').trim();
-    const parentGuardianEmail = (getValue(row, 'parent_guardian_email') || '').trim();
-    const parentGuardianDob = (getValue(row, 'parent_guardian_dob') || '').trim();
+    const parentGuardianNames = String(enrollmentValues.parent_guardian_names || '').trim();
+    const parentGuardianPhone = String(enrollmentValues.parent_guardian_phone || '').trim();
+    const parentGuardianAddress = String(enrollmentValues.parent_guardian_address || '').trim();
+    const parentGuardianEmail = String(enrollmentValues.parent_guardian_email || '').trim();
+    const parentGuardianDob = String(enrollmentValues.parent_guardian_dob || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -4049,13 +4252,12 @@ function importParticipantsCSV(token, fileData) {
 
     summary.processed++;
 
-    if (!fullName) {
-      summary.errors.push({ row: rowNumber, message: 'Full name is required' });
-      summary.skipped++;
-      continue;
-    }
+    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
     if (!rolloutName) {
-      summary.errors.push({ row: rowNumber, message: 'cohortName is required' });
+      rowErrors.push('cohortName is required');
+    }
+    if (rowErrors.length) {
+      summary.errors.push({ row: rowNumber, message: rowErrors.join('; ') });
       summary.skipped++;
       continue;
     }
@@ -4064,25 +4266,6 @@ function importParticipantsCSV(token, fileData) {
       summary.errors.push({ row: rowNumber, message: 'Cohort not found or not accessible: ' + rolloutName });
       summary.skipped++;
       continue;
-    }
-
-    if (parentGuardianEmail && !isValidEmail(parentGuardianEmail)) {
-      summary.errors.push({ row: rowNumber, message: 'Parent/guardian email is invalid' });
-      summary.skipped++;
-      continue;
-    }
-    if (parentGuardianDob && !isValidDateValue(parentGuardianDob)) {
-      summary.errors.push({ row: rowNumber, message: 'Parent/guardian date of birth is invalid' });
-      summary.skipped++;
-      continue;
-    }
-    if (parentGuardianPhone) {
-      const digits = normalizePhoneDigits(parentGuardianPhone);
-      if (digits.length < 10 || digits.length > 15) {
-        summary.errors.push({ row: rowNumber, message: 'Parent/guardian phone must include 10 to 15 digits' });
-        summary.skipped++;
-        continue;
-      }
     }
 
     // Create new participant (participantId auto-generated)
@@ -4098,6 +4281,7 @@ function importParticipantsCSV(token, fileData) {
     const rowValues = buildParticipantRow(participantHeaders, {
       participantId: newParticipantId,
       fullName: fullName,
+      enrollmentFields: enrollmentValues,
       parentGuardianNames: parentGuardianNames,
       parentGuardianPhone: parentGuardianPhone,
       parentGuardianAddress: parentGuardianAddress,
@@ -6198,17 +6382,12 @@ function exportParticipantsCSV(token, filters) {
   const participants = result.participants;
 
   // Create CSV content
-  const includeParentFields = currentUser.role !== 'viewer';
+  const includeEnrollmentFields = currentUser.role !== 'viewer';
+  const enrollmentFields = getEnrollmentFieldsInternal().filter(field => field.key !== 'fullName');
   const headers = ['Participant ID', 'Full Name'];
 
-  if (includeParentFields) {
-    headers.push(
-      'Parent/Guardian Name(s)',
-      'Parent/Guardian Phone',
-      'Parent/Guardian Address',
-      'Parent/Guardian Email',
-      'Parent/Guardian DOB'
-    );
+  if (includeEnrollmentFields) {
+    enrollmentFields.forEach(field => headers.push(field.label));
   }
 
   headers.push('Site', 'School', 'Period', 'Year', 'Enrollment Date', 'Status', 'Completion %', 'Notes');
@@ -6221,14 +6400,11 @@ function exportParticipantsCSV(token, filters) {
       '"' + (p.fullName || '').replace(/"/g, '""') + '"'
     ];
 
-    if (includeParentFields) {
-      row.push(
-        '"' + (p.parentGuardianNames || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianPhone || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianAddress || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianEmail || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianDob || '').replace(/"/g, '""') + '"'
-      );
+    if (includeEnrollmentFields) {
+      enrollmentFields.forEach(field => {
+        const value = p.enrollmentFields && p.enrollmentFields[field.key] !== undefined ? p.enrollmentFields[field.key] : '';
+        row.push('"' + String(value || '').replace(/"/g, '""') + '"');
+      });
     }
 
     row.push(
