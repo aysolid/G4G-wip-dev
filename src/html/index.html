@@ -1299,84 +1299,6 @@
       border: 1px solid rgba(148, 163, 184, 0.2);
     }
 
-    .hero-visual {
-      min-height: 278px;
-      display: grid;
-      place-items: center;
-      position: relative;
-    }
-
-    .hero-orbit {
-      width: 278px;
-      height: 278px;
-      border-radius: 50%;
-      position: relative;
-      background:
-        radial-gradient(circle at center, rgba(255,255,255,0.98) 0 31%, transparent 32%),
-        conic-gradient(from 220deg, #2563eb 0 30%, #10b981 30% 57%, #f59e0b 57% 76%, #7c3aed 76% 100%);
-      box-shadow: 0 30px 70px rgba(37,99,235,0.2), inset 0 0 0 16px rgba(255,255,255,0.35);
-    }
-
-    .hero-orbit::before,
-    .hero-orbit::after {
-      content: '';
-      position: absolute;
-      inset: 30px;
-      border-radius: 50%;
-      border: 1px dashed rgba(15,23,42,0.12);
-    }
-
-    .hero-orbit::after {
-      inset: 68px;
-      border-style: solid;
-      background: linear-gradient(145deg, #fff, #eef6ff);
-      box-shadow: inset 0 2px 12px rgba(15,23,42,0.06);
-    }
-
-    .hero-orbit-center {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      text-align: center;
-      z-index: 2;
-      color: var(--ink);
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      font-size: 2rem;
-    }
-
-    .hero-orbit-center span {
-      display: block;
-      color: var(--muted-ink);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-size: 0.64rem;
-      margin-top: 0.25rem;
-    }
-
-    .orbit-node {
-      position: absolute;
-      display: flex;
-      align-items: center;
-      gap: 0.38rem;
-      padding: 0.55rem 0.7rem;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.88);
-      border: 1px solid rgba(255,255,255,0.78);
-      box-shadow: 0 14px 34px rgba(15,23,42,0.12);
-      color: #334155;
-      font-size: 0.74rem;
-      font-weight: 800;
-      z-index: 3;
-      white-space: nowrap;
-    }
-
-    .orbit-node .material-icons { font-size: 16px; }
-    .orbit-node.cohorts { top: 8px; left: 0; color: #2563eb; }
-    .orbit-node.sessions { right: -20px; top: 86px; color: #10b981; }
-    .orbit-node.protocol { bottom: 20px; left: 16px; color: #7c3aed; }
-
     .kpi-grid {
       grid-template-columns: repeat(5, minmax(170px, 1fr));
       gap: 1rem;
@@ -1504,44 +1426,6 @@
       margin-bottom: 1rem;
       position: relative;
       z-index: 1;
-    }
-
-    .donut-chart {
-      width: 108px;
-      height: 108px;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      box-shadow: inset 0 0 0 10px rgba(255,255,255,0.72), 0 12px 28px rgba(15,23,42,0.08);
-      position: relative;
-    }
-
-    .donut-chart::after {
-      content: '';
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      background: #fff;
-      position: absolute;
-      box-shadow: inset 0 1px 8px rgba(15,23,42,0.06);
-    }
-
-    .donut-label {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-      font-weight: 900;
-      color: var(--ink);
-      line-height: 1;
-    }
-
-    .donut-label span {
-      display: block;
-      color: var(--muted-ink);
-      font-size: 0.58rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      margin-top: 0.2rem;
     }
 
     .mini-metric {
@@ -1702,7 +1586,6 @@
 
     @media (max-width: 1180px) {
       .snapshot-hero-grid { grid-template-columns: 1fr; }
-      .hero-visual { display: none; }
       .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
       .operations-grid { grid-template-columns: 1fr; }
       .lifecycle-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1713,12 +1596,308 @@
       .filter-group { width: 100%; align-items: flex-start; flex-direction: column; }
       .filter-group select { width: 100%; min-width: 0; }
       .site-dashboard-top { grid-template-columns: 1fr; }
-      .donut-chart { margin: 0 auto; }
       .session-row { grid-template-columns: 1fr; }
       .session-kpis { grid-template-columns: 1fr; }
       .structure-site-header,
       .structure-cohort-row { grid-template-columns: 1fr; }
       .metric-pill { text-align: left; }
+    }
+
+
+
+    /* ============================================
+       BI ANALYTICS REFINEMENT
+       ============================================ */
+    :root {
+      --bi-blue: #2f5bea;
+      --bi-cyan: #00a6c8;
+      --bi-violet: #6b5cff;
+      --bi-green: #16a34a;
+      --bi-amber: #d97706;
+      --bi-red: #dc2626;
+      --bi-panel: rgba(255,255,255,0.94);
+      --bi-border: rgba(100,116,139,0.16);
+    }
+
+    .snapshot {
+      padding: 1.55rem 1.75rem;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.96), rgba(244,248,255,0.94)),
+        linear-gradient(90deg, rgba(47,91,234,0.16), rgba(0,166,200,0.08));
+    }
+
+    .snapshot-hero-grid {
+      display: block;
+      max-width: 1040px;
+    }
+
+    .hero-badge {
+      margin-bottom: 0.7rem;
+      font-size: 0.72rem;
+      padding: 0.28rem 0.6rem;
+      color: #1e40af;
+    }
+
+    .snapshot-title h2 {
+      font-size: clamp(1.75rem, 2.8vw, 2.7rem);
+      line-height: 1.08;
+      letter-spacing: -0.045em;
+      max-width: 760px;
+    }
+
+    .snapshot-title p {
+      font-size: 0.92rem;
+      line-height: 1.55;
+      max-width: 780px;
+      margin-top: 0.55rem;
+    }
+
+    .snapshot-filters {
+      margin-top: 1.1rem;
+      padding: 0.55rem;
+      border-radius: 14px;
+      box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+    }
+
+    .filter-group {
+      border-radius: 11px;
+      padding: 0.18rem 0.35rem 0.18rem 0.6rem;
+    }
+
+    .filter-group label { font-size: 0.68rem; }
+    .filter-group select { font-size: 0.8rem; min-width: 160px; }
+    .snapshot-context { font-size: 0.84rem; margin-top: 0.8rem; }
+    .snapshot-meta { font-size: 0.7rem; }
+
+    .kpi-grid {
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+    }
+
+    .stat-card {
+      min-height: 132px;
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+    }
+
+    .stat-card-header { margin-bottom: 0.55rem; }
+
+    .stat-card-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+    }
+
+    .stat-card-icon .material-icons { font-size: 20px; }
+
+    .stat-value {
+      font-size: clamp(1.45rem, 2vw, 1.9rem);
+      letter-spacing: -0.04em;
+    }
+
+    .stat-label { font-size: 0.76rem; }
+    .stat-trend { font-size: 0.68rem; margin-top: 0.35rem; }
+    .metric-sparkline { height: 20px; margin-top: 0.75rem; }
+
+    .data-story-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .story-card {
+      background: var(--bi-panel);
+      border: 1px solid var(--bi-border);
+      box-shadow: 0 10px 26px rgba(15,23,42,0.055);
+      border-radius: 18px;
+      padding: 0.95rem;
+      min-height: 118px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .story-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--bi-blue), var(--bi-cyan));
+    }
+
+    .story-label {
+      color: var(--muted-ink);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.62rem;
+      font-weight: 900;
+      margin-bottom: 0.35rem;
+    }
+
+    .story-value {
+      color: var(--ink);
+      font-size: 1.25rem;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      margin-bottom: 0.2rem;
+    }
+
+    .story-copy {
+      color: #475569;
+      font-size: 0.76rem;
+      line-height: 1.45;
+    }
+
+    .story-scale {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 3px;
+      margin-top: 0.75rem;
+    }
+
+    .story-scale span {
+      height: 9px;
+      border-radius: 99px;
+      background: rgba(148,163,184,0.18);
+    }
+
+    .story-scale span.active { background: linear-gradient(90deg, var(--bi-blue), var(--bi-cyan)); }
+
+    .card {
+      border-radius: 18px;
+      box-shadow: 0 12px 30px rgba(15,23,42,0.07);
+    }
+
+    .card-header { padding: 0.95rem 1.15rem; }
+    .card-title { font-size: 0.96rem; }
+    .card-subtitle { font-size: 0.71rem; }
+    .card-body { padding: 1rem; }
+
+    .operations-grid {
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      gap: 1rem;
+    }
+
+    .site-overview-grid { gap: 0.85rem; }
+
+    .site-overview-card {
+      border-radius: 18px;
+      box-shadow: 0 12px 28px rgba(15,23,42,0.055);
+      padding: 0.9rem;
+    }
+
+    .site-card-title { font-size: 1rem; letter-spacing: -0.025em; }
+    .site-card-count strong { font-size: 1.55rem; }
+
+    .site-dashboard-top {
+      grid-template-columns: 1fr;
+      gap: 0.7rem;
+    }
+
+    .site-analytics-bar {
+      display: grid;
+      gap: 0.55rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .bar-metric {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr) 44px;
+      align-items: center;
+      gap: 0.65rem;
+      font-size: 0.72rem;
+      color: #475569;
+      font-weight: 800;
+    }
+
+    .bar-track {
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(148,163,184,0.18);
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--bi-blue), var(--bi-cyan));
+    }
+
+    .bar-fill.protocol { background: linear-gradient(90deg, var(--bi-violet), var(--bi-blue)); }
+    .bar-fill.cohorts { background: linear-gradient(90deg, var(--bi-amber), #fbbf24); }
+
+    .site-metrics-row { grid-template-columns: repeat(3, 1fr); gap: 0.45rem; }
+    .mini-metric { padding: 0.58rem; border-radius: 13px; }
+    .mini-metric strong { font-size: 0.92rem; }
+    .mini-metric span { font-size: 0.58rem; }
+
+    .cohort-chip {
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 0.65rem;
+      border-radius: 13px;
+    }
+
+    .cohort-chip-title { font-size: 0.77rem; }
+    .cohort-chip-meta { font-size: 0.66rem; }
+    .metric-pill { font-size: 0.72rem; min-width: 58px; }
+
+    .lifecycle-grid { gap: 0.6rem; }
+    .lifecycle-tile { border-radius: 14px; padding: 0.75rem; }
+    .lifecycle-tile strong { font-size: 1.35rem; }
+    .lifecycle-dot { width: 10px; height: 34px; }
+
+    .section-grid { gap: 1rem; }
+    .section-grid.equal { gap: 1rem; }
+    .active-cohort-card { border-radius: 16px; padding: 0.85rem; }
+    .active-cohort-title { font-size: 0.9rem; }
+
+    .session-row {
+      grid-template-columns: minmax(160px, 0.85fr) minmax(240px, 1.35fr) minmax(94px, 0.32fr);
+      padding: 0.7rem 0.8rem;
+      border-radius: 14px;
+      gap: 0.75rem;
+    }
+
+    .session-name { font-size: 0.78rem; }
+    .session-date { font-size: 0.65rem; }
+    .session-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+    .session-kpi { font-size: 0.58rem; padding: 0.34rem; }
+    .session-kpi strong { font-size: 0.72rem; }
+    .session-bar-label { font-size: 0.62rem; }
+    .progress-bar { height: 8px; }
+
+    .protocol-metrics { gap: 0.65rem; }
+    .metric-tile { padding: 0.8rem; border-radius: 14px; }
+    .metric-tile h4 { font-size: 0.98rem; }
+    .metric-tile span { font-size: 0.65rem; }
+    .protocol-item { border-radius: 12px; padding: 0.55rem; }
+
+    .attention-item { border-radius: 14px; padding: 0.7rem; }
+    .attention-badge { font-size: 0.58rem; }
+
+    .structure-site { border-radius: 16px; }
+    .structure-site-header,
+    .structure-cohort-row {
+      grid-template-columns: minmax(220px, 1fr) repeat(4, minmax(76px, auto));
+      padding: 0.72rem 0.85rem;
+      font-size: 0.73rem;
+    }
+
+    @media (max-width: 1180px) {
+      .data-story-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .operations-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 760px) {
+      .data-story-grid { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: 1fr; }
+      .bar-metric { grid-template-columns: 72px 1fr 40px; }
+      .session-row { grid-template-columns: 1fr; }
+      .structure-site-header,
+      .structure-cohort-row { grid-template-columns: 1fr; }
     }
 
   </style>
@@ -1782,17 +1961,6 @@
           <div class="snapshot-context" id="snapshotContext">Loading snapshot context...</div>
           <div class="snapshot-meta" id="snapshotMeta"></div>
         </div>
-        <div class="hero-visual" aria-hidden="true">
-          <div class="hero-orbit">
-            <div class="hero-orbit-center">
-              G4G
-              <span>operations</span>
-            </div>
-            <div class="orbit-node cohorts"><span class="material-icons">hub</span>Cohorts</div>
-            <div class="orbit-node sessions"><span class="material-icons">timeline</span>Sessions</div>
-            <div class="orbit-node protocol"><span class="material-icons">fact_check</span>Protocol</div>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -1801,6 +1969,11 @@
       <div class="loading">
         <div class="spinner"></div>
       </div>
+    </section>
+
+    <!-- Data Story Signals -->
+    <section class="data-story-grid" id="dataStoryGrid">
+      <div class="loading"><div class="spinner"></div></div>
     </section>
 
     <!-- Operations Overview -->
@@ -2099,7 +2272,7 @@
     // LOAD LANDING SNAPSHOT
     // ============================================
     function loadLandingSnapshot() {
-      ['kpiGrid', 'siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts', 'protocolSummary', 'needsAttention', 'comparisonPanel'].forEach(id => {
+      ['kpiGrid', 'dataStoryGrid', 'siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts', 'protocolSummary', 'needsAttention', 'comparisonPanel'].forEach(id => {
         const target = document.getElementById(id);
         if (target) target.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
       });
@@ -2128,6 +2301,7 @@
       `;
 
       renderKpis(snapshot.kpis, snapshot.attendance, snapshot.operations);
+      renderDataStory(snapshot.kpis, snapshot.attendance, snapshot.protocol, snapshot.operations, snapshot.attention);
       renderOperations(snapshot.operations);
       renderProtocolSummary(snapshot.protocol);
       renderNeedsAttention(snapshot.attention);
@@ -2142,6 +2316,60 @@
 
     function renderSparkline(values) {
       return `<div class="metric-sparkline" aria-hidden="true">${values.map(value => `<span style="height:${Math.max(8, value)}%;"></span>`).join('')}</div>`;
+    }
+
+    function renderScale(activeCount) {
+      const active = Math.max(0, Math.min(12, Math.round(activeCount)));
+      return `<div class="story-scale" aria-hidden="true">${Array.from({ length: 12 }, (_, index) => `<span class="${index < active ? 'active' : ''}"></span>`).join('')}</div>`;
+    }
+
+    function renderDataStory(kpis, attendance, protocol, operations, attention) {
+      const target = document.getElementById('dataStoryGrid');
+      if (!target) return;
+      const sites = operations && operations.sites ? operations.sites : [];
+      const sortedByEnrollment = sites.slice().sort((a, b) => (b.participantCount || 0) - (a.participantCount || 0));
+      const leadingSite = sortedByEnrollment[0];
+      const enrollmentGap = sortedByEnrollment.length > 1 ? Math.abs((sortedByEnrollment[0].participantCount || 0) - (sortedByEnrollment[1].participantCount || 0)) : 0;
+      const activeCohorts = operations && operations.activeCohorts ? operations.activeCohorts : [];
+      const activeSessionCount = activeCohorts.reduce((sum, cohort) => sum + (cohort.totalSessions || 0), 0);
+      const criticalItems = (attention || []).filter(item => item.severity === 'critical').length;
+      const warningItems = (attention || []).filter(item => item.severity === 'warning').length;
+      const protocolRate = protocol ? safePercent(protocol.completionRate) : 0;
+      const attendanceRate = attendance ? safePercent(attendance.averageAttendance) : 0;
+      const cards = [
+        {
+          label: 'Enrollment concentration',
+          value: leadingSite ? `${leadingSite.site} leads by ${enrollmentGap}` : 'No enrollment',
+          copy: leadingSite ? `${leadingSite.participantCount} participants at ${leadingSite.site}; use the site bars below to compare cohort density.` : 'No participant distribution is available for this filter.',
+          scale: leadingSite ? Math.round((leadingSite.participantCount / Math.max(kpis.totalEnrolled || 1, 1)) * 12) : 0
+        },
+        {
+          label: 'Active rollout load',
+          value: `${activeCohorts.length} active cohorts`,
+          copy: `${activeSessionCount} scheduled session checkpoints are visible in the active cohort timeline.`,
+          scale: Math.min(12, activeCohorts.length * 3)
+        },
+        {
+          label: 'Protocol momentum',
+          value: `${protocolRate}% complete`,
+          copy: protocol && protocol.needsReviewCount ? `${protocol.needsReviewCount} protocol items are below the review threshold.` : 'Protocol completion is tracking without low-item alerts for this filter.',
+          scale: Math.round(protocolRate / 8.33)
+        },
+        {
+          label: 'Early warning signal',
+          value: `${criticalItems} critical · ${warningItems} warnings`,
+          copy: `Average attendance is ${attendanceRate}%; review flagged attendance and completion concerns before the next rollout.`,
+          scale: Math.min(12, criticalItems * 4 + warningItems * 2)
+        }
+      ];
+      target.innerHTML = cards.map(card => `
+        <article class="story-card">
+          <div class="story-label">${card.label}</div>
+          <div class="story-value">${card.value}</div>
+          <div class="story-copy">${card.copy}</div>
+          ${renderScale(card.scale)}
+        </article>
+      `).join('');
     }
 
     function renderKpis(kpis, attendance, operations) {
@@ -2216,14 +2444,14 @@
         document.getElementById('siteOverview').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No site or cohort data available for this filter.</p>';
         return;
       }
+      const participantMax = Math.max(...sites.map(s => s.participantCount || 0), 1);
+      const cohortMax = Math.max(...sites.map(s => s.cohortCount || 0), 1);
       const html = sites.map(site => {
         const siteClass = site.site === 'UGA' ? 'uga' : 'missouri';
-        const siteColor = site.site === 'UGA' ? 'var(--uga-color)' : '#d69e00';
-        const participantMax = Math.max(...sites.map(s => s.participantCount || 0), 1);
         const cohortRows = (site.cohorts || []).map(cohort => {
           const participantPct = Math.round(((cohort.participantCount || 0) / participantMax) * 100);
           return `
-            <div class="cohort-chip">
+            <div class="cohort-chip" title="${cohort.label}: ${cohort.participantCount} participants, ${cohort.averageAttendance}% attendance, ${cohort.protocolCompletion}% protocol">
               <div>
                 <div class="cohort-chip-title">${cohort.label}</div>
                 <div class="cohort-chip-meta">${cohort.lifecycle.label} · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions · ${cohort.averageAttendance}% attendance</div>
@@ -2242,15 +2470,16 @@
               </div>
               <div class="site-card-count"><strong>${site.cohortCount}</strong> cohorts</div>
             </div>
-            <div class="site-dashboard-top">
-              <div class="donut-chart" style="background: conic-gradient(${siteColor} 0 ${safePercent(site.averageAttendance)}%, rgba(226,232,240,0.9) ${safePercent(site.averageAttendance)}% 100%);">
-                <div class="donut-label">${site.averageAttendance}%<span>attendance</span></div>
-              </div>
-              <div class="site-metrics-row">
-                <div class="mini-metric"><strong>${site.participantCount}</strong><span>Participants</span></div>
-                <div class="mini-metric"><strong>${site.protocolCompletion}%</strong><span>Protocol</span></div>
-                <div class="mini-metric"><strong>${site.cohortCount}</strong><span>Cohorts</span></div>
-              </div>
+            <div class="site-analytics-bar">
+              <div class="bar-metric"><span>Participants</span><div class="bar-track"><div class="bar-fill" style="width:${Math.round(((site.participantCount || 0) / participantMax) * 100)}%;"></div></div><strong>${site.participantCount}</strong></div>
+              <div class="bar-metric"><span>Attendance</span><div class="bar-track"><div class="bar-fill" style="width:${safePercent(site.averageAttendance)}%;"></div></div><strong>${site.averageAttendance}%</strong></div>
+              <div class="bar-metric"><span>Protocol</span><div class="bar-track"><div class="bar-fill protocol" style="width:${safePercent(site.protocolCompletion)}%;"></div></div><strong>${site.protocolCompletion}%</strong></div>
+              <div class="bar-metric"><span>Cohorts</span><div class="bar-track"><div class="bar-fill cohorts" style="width:${Math.round(((site.cohortCount || 0) / cohortMax) * 100)}%;"></div></div><strong>${site.cohortCount}</strong></div>
+            </div>
+            <div class="site-metrics-row">
+              <div class="mini-metric"><strong>${site.participantCount}</strong><span>Participants</span></div>
+              <div class="mini-metric"><strong>${site.averageAttendance}%</strong><span>Attendance</span></div>
+              <div class="mini-metric"><strong>${site.protocolCompletion}%</strong><span>Protocol</span></div>
             </div>
             <div class="cohort-chip-list">${cohortRows}</div>
           </div>
@@ -2496,7 +2725,7 @@
       console.error('Error loading snapshot:', error);
       document.getElementById('kpiGrid').innerHTML =
         '<p style="text-align: center; color: var(--danger-color); grid-column: 1/-1; padding: 2rem;">Unable to load dashboard snapshot. Please refresh the page.</p>';
-      ['siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts'].forEach(id => {
+      ['dataStoryGrid', 'siteOverview', 'cohortLifecycle', 'activeCohorts', 'upcomingCohorts'].forEach(id => {
         const target = document.getElementById(id);
         if (target) target.innerHTML = '<p style="text-align: center; color: var(--danger-color); padding: 2rem;">Operations data unavailable.</p>';
       });
