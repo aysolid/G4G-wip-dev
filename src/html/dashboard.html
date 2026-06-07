@@ -1142,6 +1142,7 @@
     let logoutRefreshTimer = null;
     let enrollSubmitting = false;
     let sessionRecordingTypesCurrent = [];
+    let participantCountRequestId = 0;
 
     // ============================================
     // INITIALIZATION
@@ -1386,7 +1387,7 @@
     function renderDashboard(stats) {
       document.getElementById('dashboardLoading').classList.add('hidden');
       document.getElementById('dashboardContent').classList.remove('hidden');
-      document.getElementById('participantCount').textContent = stats.totalParticipants;
+      updateParticipantCountBadge(stats.totalParticipants);
 
       const dashboardHtml = `
         <!-- Quick Actions (for Admin/Facilitator) -->
@@ -1557,6 +1558,32 @@
         return currentUser.site;
       }
       return currentSiteFilter;
+    }
+
+    function updateParticipantCountBadge(count) {
+      const badge = document.getElementById('participantCount');
+      if (!badge) return;
+      const numericCount = Number(count);
+      badge.textContent = Number.isFinite(numericCount) ? numericCount : 0;
+    }
+
+    function refreshParticipantCountForFilters() {
+      if (!sessionToken) return;
+      const requestId = ++participantCountRequestId;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (requestId !== participantCountRequestId) return;
+          if (result && result.success && Array.isArray(result.participants)) {
+            updateParticipantCountBadge(result.participants.length);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error refreshing participant count:', error);
+        })
+        .getAllParticipants(sessionToken, {
+          site: getParticipantSiteFilter(),
+          rolloutId: currentRolloutFilter
+        });
     }
 
     function loadParticipants() {
@@ -1735,6 +1762,7 @@
       google.script.run
         .withSuccessHandler(function(result) {
           renderBatchEnrollmentResult(result);
+          if (result && result.success) refreshParticipantCountForFilters();
           if (uploadBtn) uploadBtn.disabled = false;
         })
         .withFailureHandler(function(error) {
@@ -1823,6 +1851,7 @@
       }
 
       const participants = result.participants;
+      updateParticipantCountBadge(participants.length);
 
       if (participants.length === 0) {
         document.getElementById('participantsList').innerHTML = `
@@ -3205,6 +3234,7 @@
           if (result.success) {
             showToast('Participant enrolled successfully! ID: ' + result.participantId, 'success');
             resetEnrollForm();
+            refreshParticipantCountForFilters();
             enrollSubmitting = false;
             btn.disabled = false;
             btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
@@ -6584,6 +6614,10 @@
 
       if (isSectionVisible('fieldNotes')) {
         loadFieldNotesSection();
+      }
+
+      if (!isSectionVisible('dashboard') && !isSectionVisible('participants')) {
+        refreshParticipantCountForFilters();
       }
     }
 
