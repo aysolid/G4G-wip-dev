@@ -1524,6 +1524,46 @@
 
     .session-kpi strong { display: block; color: var(--ink); font-size: 0.85rem; }
 
+    .session-protocol-day {
+      grid-column: 1 / -1;
+      margin-top: 0.35rem;
+      padding-top: 0.65rem;
+      border-top: 1px dashed rgba(148,163,184,0.35);
+    }
+
+    .session-protocol-label {
+      font-size: 0.68rem;
+      color: var(--muted-ink);
+      font-weight: 900;
+      letter-spacing: 0.045em;
+      text-transform: uppercase;
+      margin-bottom: 0.45rem;
+    }
+
+    .session-protocol-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .session-protocol-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.55rem;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(139,92,246,0.11), rgba(37,99,235,0.10));
+      border: 1px solid rgba(99,102,241,0.18);
+      color: #334155;
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+
+    .session-protocol-chip strong {
+      color: var(--bi-blue);
+      font-weight: 950;
+    }
+
     .progress-bar {
       height: 10px;
       background: rgba(148, 163, 184, 0.18);
@@ -2401,7 +2441,21 @@
         return;
       }
       const html = cohorts.map(cohort => {
-        const sessions = (cohort.sessions || []).map(session => `
+        const sessions = (cohort.sessions || []).map(session => {
+          const protocolItems = session.protocolDayItems || [];
+          const protocolHtml = protocolItems.length ? `
+            <div class="session-protocol-day">
+              <div class="session-protocol-label">Protocol completed this session</div>
+              <div class="session-protocol-items">
+                ${protocolItems.map(item => `
+                  <span class="session-protocol-chip" title="${item.percentage}% completed for this protocol item">
+                    ${item.name} <strong>${item.completed}/${item.total}</strong>
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          ` : '';
+          return `
           <div class="session-row ${session.timing}">
             <div>
               <div class="session-name">${session.sessionName}</div>
@@ -2421,14 +2475,12 @@
                 <div class="session-bar-label"><span>Attendance marked</span><span>${session.markedCount}/${session.participantCount}</span></div>
                 <div class="progress-bar"><div class="progress-fill info" style="width:${safePercent(session.markedRate)}%;"></div></div>
               </div>
-              <div>
-                <div class="session-bar-label"><span>Protocol completed that day</span><span>${session.protocolDayCompleted || 0}/${session.protocolDayTotal || 0} (${safePercent(session.protocolDayCompletionRate)}%)</span></div>
-                <div class="progress-bar"><div class="progress-fill protocol" style="width:${safePercent(session.protocolDayCompletionRate)}%;"></div></div>
-              </div>
             </div>
             <div class="metric-pill">${session.protocolCompletion}% protocol overall</div>
+            ${protocolHtml}
           </div>
-        `).join('') || '<p style="color: var(--gray-500);">No sessions scheduled.</p>';
+        `;
+        }).join('') || '<p style="color: var(--gray-500);">No sessions scheduled.</p>';
         return `
           <div class="active-cohort-card">
             <div class="active-cohort-header">

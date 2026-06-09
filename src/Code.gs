@@ -5781,14 +5781,15 @@ function buildSessionOperationsRow(session, participants, attendanceMap, today, 
     protocolCompletion: protocolSummary.completionRate,
     protocolDayCompleted: protocolDaySummary.completed || 0,
     protocolDayTotal: protocolDaySummary.total || 0,
-    protocolDayCompletionRate: protocolDaySummary.completionRate || 0
+    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
+    protocolDayItems: protocolDaySummary.items || []
   };
 }
 
 function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
   const summaries = {};
   (sessions || []).forEach(session => {
-    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0 };
+    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
   });
 
   if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
@@ -5824,9 +5825,16 @@ function buildSessionProtocolCompletionMap(sessions, participants, checklistShee
   const cHeaders = checklistSnapshot.headers;
   const participantCol = cHeaders.indexOf('participantId');
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const instrumentNameCol = cHeaders.indexOf('instrumentName');
   const statusCol = cHeaders.indexOf('status');
   const completedDateCol = cHeaders.indexOf('completedDate');
-  let totalRequired = 0;
+  const totalsByInstrument = {};
+  const namesByInstrument = {};
+  const completedBySession = {};
+
+  Object.keys(summaries).forEach(sessionId => {
+    completedBySession[sessionId] = {};
+  });
 
   for (let i = 1; i < cData.length; i++) {
     const participantId = String(cData[i][participantCol]);
@@ -5837,7 +5845,9 @@ function buildSessionProtocolCompletionMap(sessions, participants, checklistShee
     const instrumentNumber = String(cData[i][instrumentCol]);
     if (!allowedMap[instrumentNumber]) continue;
 
-    totalRequired++;
+    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
+    namesByInstrument[instrumentNumber] = instrumentName;
+    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
 
     const status = cData[i][statusCol];
     if (status !== 'completed') continue;
@@ -5845,14 +5855,33 @@ function buildSessionProtocolCompletionMap(sessions, participants, checklistShee
     const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
     const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
     matchingSessionIds.forEach(sessionId => {
-      if (summaries[sessionId]) summaries[sessionId].completed++;
+      if (!completedBySession[sessionId]) return;
+      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
     });
   }
 
   Object.keys(summaries).forEach(sessionId => {
-    summaries[sessionId].total = totalRequired;
-    summaries[sessionId].completionRate = totalRequired > 0
-      ? Math.round((summaries[sessionId].completed / totalRequired) * 100)
+    const completedMap = completedBySession[sessionId] || {};
+    const items = Object.keys(completedMap)
+      .map(instrumentNumber => {
+        const total = totalsByInstrument[instrumentNumber] || participants.length;
+        const completed = completedMap[instrumentNumber] || 0;
+        return {
+          number: Number(instrumentNumber),
+          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
+          completed: completed,
+          total: total,
+          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
+        };
+      })
+      .filter(item => item.completed > 0)
+      .sort((a, b) => a.number - b.number);
+
+    summaries[sessionId].items = items;
+    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
+    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
+    summaries[sessionId].completionRate = summaries[sessionId].total > 0
+      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
       : 0;
   });
 
