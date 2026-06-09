@@ -2421,8 +2421,12 @@
                 <div class="session-bar-label"><span>Attendance marked</span><span>${session.markedCount}/${session.participantCount}</span></div>
                 <div class="progress-bar"><div class="progress-fill info" style="width:${safePercent(session.markedRate)}%;"></div></div>
               </div>
+              <div>
+                <div class="session-bar-label"><span>Protocol completed that day</span><span>${session.protocolDayCompleted || 0}/${session.protocolDayTotal || 0} (${safePercent(session.protocolDayCompletionRate)}%)</span></div>
+                <div class="progress-bar"><div class="progress-fill protocol" style="width:${safePercent(session.protocolDayCompletionRate)}%;"></div></div>
+              </div>
             </div>
-            <div class="metric-pill">${session.protocolCompletion}% protocol</div>
+            <div class="metric-pill">${session.protocolCompletion}% protocol overall</div>
           </div>
         `).join('') || '<p style="color: var(--gray-500);">No sessions scheduled.</p>';
         return `

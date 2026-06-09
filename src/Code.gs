@@ -5669,7 +5669,15 @@ function buildOperationsSummary(
 
     const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
     const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    const sessionProgress = sessions.map(session => buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary));
+    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
+    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
+      session,
+      participants,
+      attendanceMap,
+      today,
+      protocolSummary,
+      sessionProtocolMap[session.sessionId]
+    ));
     const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
 
     return {
@@ -5731,7 +5739,7 @@ function buildOperationsSummary(
   };
 }
 
-function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary) {
+function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
   let present = 0;
   let absent = 0;
   let excused = 0;
@@ -5753,6 +5761,8 @@ function buildSessionOperationsRow(session, participants, attendanceMap, today, 
   const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
   const timing = resolveSessionTiming(session, sessionDateOnly, today);
 
+  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
+
   return {
     sessionId: session.sessionId,
     sessionNumber: session.sessionNumber,
@@ -5768,8 +5778,85 @@ function buildSessionOperationsRow(session, participants, attendanceMap, today, 
     participantCount: participantCount,
     attendanceRate: attendanceRate,
     markedRate: markedRate,
-    protocolCompletion: protocolSummary.completionRate
+    protocolCompletion: protocolSummary.completionRate,
+    protocolDayCompleted: protocolDaySummary.completed || 0,
+    protocolDayTotal: protocolDaySummary.total || 0,
+    protocolDayCompletionRate: protocolDaySummary.completionRate || 0
   };
+}
+
+function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
+  const summaries = {};
+  (sessions || []).forEach(session => {
+    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0 };
+  });
+
+  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
+    return summaries;
+  }
+
+  const participantIds = new Set(participants.map(p => String(p.participantId)));
+  const participantRolloutMap = {};
+  const rolloutAllowedNumbersMap = {};
+  participants.forEach(participant => {
+    const participantId = String(participant.participantId);
+    const rolloutId = String(participant.rolloutId || '');
+    participantRolloutMap[participantId] = rolloutId;
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
+        allowed[String(item.number)] = true;
+      });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
+  });
+
+  const sessionIdsByDate = {};
+  sessions.forEach(session => {
+    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!sessionDateOnly) return;
+    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
+    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
+  });
+
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const participantCol = cHeaders.indexOf('participantId');
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  let totalRequired = 0;
+
+  for (let i = 1; i < cData.length; i++) {
+    const participantId = String(cData[i][participantCol]);
+    if (!participantIds.has(participantId)) continue;
+
+    const rolloutId = participantRolloutMap[participantId] || '';
+    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+    const instrumentNumber = String(cData[i][instrumentCol]);
+    if (!allowedMap[instrumentNumber]) continue;
+
+    totalRequired++;
+
+    const status = cData[i][statusCol];
+    if (status !== 'completed') continue;
+
+    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
+    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
+    matchingSessionIds.forEach(sessionId => {
+      if (summaries[sessionId]) summaries[sessionId].completed++;
+    });
+  }
+
+  Object.keys(summaries).forEach(sessionId => {
+    summaries[sessionId].total = totalRequired;
+    summaries[sessionId].completionRate = totalRequired > 0
+      ? Math.round((summaries[sessionId].completed / totalRequired) * 100)
+      : 0;
+  });
+
+  return summaries;
 }
 
 function resolveCohortLifecycle(cohort, sessions, today) {
