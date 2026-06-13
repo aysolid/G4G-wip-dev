@@ -6127,10 +6127,18 @@ function countCompletedSessions(sessionsByCohort) {
   return completed;
 }
 
+function parseDateOnlyString(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+}
+
 function parseSessionDate(dateValue) {
   if (!dateValue) return null;
   const normalized = normalizeSessionDateValue(dateValue);
   if (!normalized) return null;
+  const dateOnly = parseDateOnlyString(normalized);
+  if (dateOnly) return dateOnly;
   const parsed = new Date(normalized);
   return isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -7503,7 +7511,9 @@ function normalizeSessionDateValue(value) {
     if (isNaN(value.getTime())) return '';
     return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
-  return String(value);
+  const text = String(value).trim();
+  const dateOnlyMatch = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return dateOnlyMatch ? dateOnlyMatch[1] : text;
 }
 
 /**
@@ -7538,7 +7548,7 @@ function verifyPassword(password, storedPassword) {
  */
 function formatDate(dateString) {
   if (!dateString) return '';
-  const date = new Date(dateString);
+  const date = parseDateOnlyString(dateString) || new Date(dateString);
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',

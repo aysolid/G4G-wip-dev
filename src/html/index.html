@@ -2531,10 +2531,20 @@
       document.getElementById('upcomingCohorts').innerHTML = `<div class="upcoming-list">${html}</div>`;
     }
 
+    function parseDateForDisplay(value) {
+      if (!value) return null;
+      const dateOnlyMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateOnlyMatch) {
+        return new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]), 12, 0, 0);
+      }
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
     function formatDisplayDate(value) {
       if (!value) return 'TBD';
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return value;
+      const parsed = parseDateForDisplay(value);
+      if (!parsed) return value;
       return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
