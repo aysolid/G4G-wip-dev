@@ -1995,11 +1995,11 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">
+            <div class="card-title" id="activeCohortPanelTitle">
               <span class="material-icons">play_circle</span>
               Active Cohort Session Progress
             </div>
-            <div class="card-subtitle">Running session history with attendance, marking progress, and protocol completion</div>
+            <div class="card-subtitle" id="activeCohortPanelSubtitle">Running session history with attendance, marking progress, and protocol completion</div>
           </div>
         </div>
         <div class="card-body" id="activeCohorts">
@@ -2435,9 +2435,25 @@
     }
 
     function renderActiveCohorts(operations) {
-      const cohorts = operations && operations.activeCohorts ? operations.activeCohorts : [];
+      const active = operations && operations.activeCohorts ? operations.activeCohorts : [];
+      const recentCompleted = operations && operations.recentCompletedCohorts ? operations.recentCompletedCohorts : [];
+      const showingRecentCompleted = active.length === 0 && recentCompleted.length > 0;
+      const cohorts = active.length ? active : recentCompleted;
+      const titleEl = document.getElementById('activeCohortPanelTitle');
+      const subtitleEl = document.getElementById('activeCohortPanelSubtitle');
+
+      if (titleEl && subtitleEl) {
+        if (showingRecentCompleted) {
+          titleEl.innerHTML = '<span class="material-icons">history</span> Most Recent Concluded Cohort';
+          subtitleEl.textContent = 'Latest completed rollout retained until the next cohort becomes active';
+        } else {
+          titleEl.innerHTML = '<span class="material-icons">play_circle</span> Active Cohort Session Progress';
+          subtitleEl.textContent = 'Running session history with attendance, marking progress, and protocol completion';
+        }
+      }
+
       if (!cohorts.length) {
-        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No cohorts are currently in progress for this filter.</p>';
+        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No active or recently concluded cohorts are available for this filter.</p>';
         return;
       }
       const html = cohorts.map(cohort => {

@@ -5679,6 +5679,11 @@ function buildOperationsSummary(
       sessionProtocolMap[session.sessionId]
     ));
     const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
+    const completedOrLastSessions = sessionProgress
+      .filter(session => session.sessionDate)
+      .slice()
+      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
+    const lastSession = completedOrLastSessions[0] || null;
 
     return {
       rolloutId: cohort.rolloutId,
@@ -5698,6 +5703,8 @@ function buildOperationsSummary(
       sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
       totalSessions: sessionProgress.length,
       nextSession: nextSession,
+      lastSession: lastSession,
+      lastSessionDate: lastSession ? lastSession.sessionDate : '',
       sessions: sessionProgress
     };
   });
@@ -5729,11 +5736,17 @@ function buildOperationsSummary(
     .filter(cohort => cohort.lifecycle.key === 'inProgress')
     .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
 
+  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'completed')
+    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
+    .slice(0, 1);
+
   return {
     sites: sites,
     cohorts: cohortOperations,
     lifecycleCounts: lifecycleCounts,
     activeCohorts: activeCohorts,
+    recentCompletedCohorts: recentCompletedCohorts,
     upcomingCohorts: upcomingCohorts,
     totalCohorts: cohortOperations.length
   };
