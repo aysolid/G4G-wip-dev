@@ -72,6 +72,21 @@ function getSheetSnapshot(sheetName, options) {
   return snapshot;
 }
 
+function invalidateSheetSnapshot(sheetName) {
+  Object.keys(RUNTIME_CACHE.sheetSnapshots).forEach(key => {
+    if (key === sheetName || key.indexOf(sheetName + '::') === 0) {
+      delete RUNTIME_CACHE.sheetSnapshots[key];
+    }
+  });
+}
+
+function invalidateConfigRuntimeCache() {
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
+  invalidateSheetSnapshot('Config');
+}
+
 function getGlobalProtocolItems() {
   if (RUNTIME_CACHE.globalProtocolItems) return RUNTIME_CACHE.globalProtocolItems;
   const configMap = getConfigMap();
@@ -231,18 +246,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -327,18 +344,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -423,18 +442,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -519,18 +540,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -615,18 +638,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -711,18 +736,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -807,153 +834,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
-}
-
-function getSessionRecordingTypes() {
-  const map = getConfigMap();
-  const raw = map.SESSION_RECORDING_TYPES;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
-    } catch (e) {}
-  }
-  return ['GoPro', 'Tascam', 'Meeting Owl'];
-}
-
-function saveSessionRecordingTypes(token, types) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
-  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
-  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
-  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
-  return { success: true, types: normalized };
-}
-
-function getSessionRecordingsByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
-  const sessionsResult = getSessionsByRollout(token, rolloutId);
-  if (!sessionsResult.success) return sessionsResult;
-  const types = getSessionRecordingTypes();
-  const sessions = (sessionsResult.sessions || []).map(s => {
-    let jsonLinks = {};
-    if (s.recordingLinksJson) {
-      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
-    }
-    const links = Object.assign({
-      'GoPro': s.goproLink || '',
-      'Tascam': s.tascamLink || '',
-      'Meeting Owl': s.meetingOwlLink || ''
-    }, jsonLinks);
-    return Object.assign({}, s, { recordingLinks: links });
-  });
-  return { success: true, sessions: sessions, recordingTypes: types };
-}
-
-
-function getFieldNotesByRollout(token, rolloutId) {
-  const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
-  const sessionsResult = getSessionsByRollout(token, rolloutId);
-  if (!sessionsResult.success) return sessionsResult;
-  const sessions = (sessionsResult.sessions || []).map(function(s) {
-    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
-  });
-  return { success: true, sessions: sessions };
-}
-
-function saveFieldNotesLink(token, sessionId, link) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('StudySessions');
-  if (!sheet) return { success: false, message: 'StudySessions not found' };
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const sessionIdIdx = headers.indexOf('sessionId');
-  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
-
-  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
-  if (fieldNotesIdx === -1) {
-    headers.push('fieldNotesLink');
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    fieldNotesIdx = headers.length - 1;
-  }
-
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
-      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
-      return { success: true, message: 'Field notes link saved' };
-    }
-  }
-  return { success: false, message: 'Session not found' };
-}
-
-function saveSessionRecordingLinks(token, sessionId, links) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('StudySessions');
-  if (!sheet) return { success: false, message: 'StudySessions not found' };
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const ensureCol = name => {
-    let idx = headers.indexOf(name);
-    if (idx === -1) {
-      headers.push(name);
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      idx = headers.length - 1;
-    }
-    return idx + 1;
-  };
-  const col = name => headers.indexOf(name) + 1;
-  const jsonCol = ensureCol('recordingLinksJson');
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
-      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
-      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
-      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
-      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
-      return { success: true, message: 'Session recording links saved' };
-    }
-  }
-  return { success: false, message: 'Session not found' };
-}
-
-function upsertConfigValue(key, value, description) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const configSheet = ss.getSheetByName('Config');
-  const data = configSheet.getDataRange().getValues();
-  const headers = data[0];
-  const keyCol = headers.indexOf('key');
-  const valueCol = headers.indexOf('value');
-  const descCol = headers.indexOf('description');
-  const updatedAtCol = headers.indexOf('updatedAt');
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
-      return;
-    }
-  }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1077,18 +971,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1212,18 +1108,157 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
+}
+
+function getSessionRecordingTypes() {
+  const map = getConfigMap();
+  const raw = map.SESSION_RECORDING_TYPES;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
+    } catch (e) {}
+  }
+  return ['GoPro', 'Tascam', 'Meeting Owl'];
+}
+
+function saveSessionRecordingTypes(token, types) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
+  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
+  return { success: true, types: normalized };
+}
+
+function getSessionRecordingsByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const types = getSessionRecordingTypes();
+  const sessions = (sessionsResult.sessions || []).map(s => {
+    let jsonLinks = {};
+    if (s.recordingLinksJson) {
+      try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
+    }
+    const links = Object.assign({
+      'GoPro': s.goproLink || '',
+      'Tascam': s.tascamLink || '',
+      'Meeting Owl': s.meetingOwlLink || ''
+    }, jsonLinks);
+    return Object.assign({}, s, { recordingLinks: links });
+  });
+  return { success: true, sessions: sessions, recordingTypes: types };
+}
+
+
+function getFieldNotesByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  const sessionsResult = getSessionsByRollout(token, rolloutId);
+  if (!sessionsResult.success) return sessionsResult;
+  const sessions = (sessionsResult.sessions || []).map(function(s) {
+    return Object.assign({}, s, { fieldNotesLink: s.fieldNotesLink || '' });
+  });
+  return { success: true, sessions: sessions };
+}
+
+function saveFieldNotesLink(token, sessionId, link) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const sessionIdIdx = headers.indexOf('sessionId');
+  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
+
+  let fieldNotesIdx = headers.indexOf('fieldNotesLink');
+  if (fieldNotesIdx === -1) {
+    headers.push('fieldNotesLink');
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    fieldNotesIdx = headers.length - 1;
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
+      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      return { success: true, message: 'Field notes link saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function saveSessionRecordingLinks(token, sessionId, links) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('StudySessions');
+  if (!sheet) return { success: false, message: 'StudySessions not found' };
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const ensureCol = name => {
+    let idx = headers.indexOf(name);
+    if (idx === -1) {
+      headers.push(name);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      idx = headers.length - 1;
+    }
+    return idx + 1;
+  };
+  const col = name => headers.indexOf(name) + 1;
+  const jsonCol = ensureCol('recordingLinksJson');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+      if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
+      if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
+      if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
+      sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      return { success: true, message: 'Session recording links saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1309,18 +1344,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1576,18 +1613,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 // ============================================
@@ -2443,6 +2482,7 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
     const number = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
     if (!enabledMap[number]) {
       checklistSheet.deleteRow(i + 1);
+      invalidateSheetSnapshot('Checklist');
       deleted++;
     }
   }
@@ -2456,16 +2496,29 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
   }
 
   let added = 0;
+  const rowsToAppend = [];
   Object.keys(rolloutParticipantIds).forEach(participantId => {
     enabledItems.forEach(item => {
       const key = participantId + '|' + String(item.number);
       if (!existing[key]) {
-        checklistSheet.appendRow([generateUUID(), participantId, item.number, item.name, item.category, 'not_started', '', '', '', '']);
+        const row = new Array(cHeaders.length).fill('');
+        const setChecklistValue = (header, value) => {
+          const idx = cHeaders.indexOf(header);
+          if (idx !== -1) row[idx] = value;
+        };
+        setChecklistValue('checklistId', generateUUID());
+        setChecklistValue('participantId', participantId);
+        setChecklistValue('instrumentNumber', item.number);
+        setChecklistValue('instrumentName', item.name);
+        setChecklistValue('category', item.category);
+        setChecklistValue('status', 'not_started');
+        rowsToAppend.push(row);
         added++;
       }
     });
-    updateParticipantCompletion(participantId);
   });
+  appendRowsAsPlainText(checklistSheet, rowsToAppend);
+  Object.keys(rolloutParticipantIds).forEach(participantId => updateParticipantCompletion(participantId));
 
   return { added: added, deleted: deleted };
 }
@@ -3504,14 +3557,22 @@ function setCellAsPlainText(sheet, rowIndex, columnIndex, value) {
   const range = sheet.getRange(rowIndex, columnIndex, 1, 1);
   range.setNumberFormat('@');
   range.setValue(value);
+  invalidateSheetSnapshot(sheet.getName());
+}
+
+function appendRowsAsPlainText(sheet, rows) {
+  if (!sheet || !Array.isArray(rows) || rows.length === 0) return 0;
+  const startRow = sheet.getLastRow() + 1;
+  const columnCount = rows[0].length;
+  const range = sheet.getRange(startRow, 1, rows.length, columnCount);
+  range.setNumberFormat('@');
+  range.setValues(rows);
+  invalidateSheetSnapshot(sheet.getName());
+  return startRow;
 }
 
 function appendParticipantRowAsText(participantsSheet, rowValues) {
-  const rowIndex = participantsSheet.getLastRow() + 1;
-  const range = participantsSheet.getRange(rowIndex, 1, 1, rowValues.length);
-  range.setNumberFormat('@');
-  range.setValues([rowValues]);
-  return rowIndex;
+  return appendRowsAsPlainText(participantsSheet, [rowValues]);
 }
 
 function normalizePhoneDigits(phone) {
@@ -3785,7 +3846,7 @@ function enrollParticipant(token, participantData) {
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
   const participantHeaders = ensureParticipantColumns(participantsSheet);
-  ensureChecklistColumns(checklistSheet);
+  const checklistHeaders = ensureChecklistColumns(checklistSheet);
 
   // Get cohort info
   const cohort = getRolloutById(participantData.rolloutId);
@@ -3830,22 +3891,23 @@ function enrollParticipant(token, participantData) {
   });
   appendParticipantRowAsText(participantsSheet, row);
 
-  // Create checklist items for rollout-configured protocol items
-  getRolloutProtocolItemsInternal(participantData.rolloutId).forEach(instrument => {
+  // Create checklist items for rollout-configured protocol items in one bulk write.
+  const checklistRows = getRolloutProtocolItemsInternal(participantData.rolloutId).map(instrument => {
     const checklistId = generateUUID();
-    checklistSheet.appendRow([
-      checklistId,
-      participantId,
-      instrument.number,
-      instrument.name,
-      instrument.category,
-      'not_started',
-      '',
-      '',
-      '',
-      ''
-    ]);
+    const checklistRow = new Array(checklistHeaders.length).fill('');
+    const setChecklistValue = (header, value) => {
+      const idx = checklistHeaders.indexOf(header);
+      if (idx !== -1) checklistRow[idx] = value;
+    };
+    setChecklistValue('checklistId', checklistId);
+    setChecklistValue('participantId', participantId);
+    setChecklistValue('instrumentNumber', instrument.number);
+    setChecklistValue('instrumentName', instrument.name);
+    setChecklistValue('category', instrument.category);
+    setChecklistValue('status', 'not_started');
+    return checklistRow;
   });
+  appendRowsAsPlainText(checklistSheet, checklistRows);
 
   logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT', 'participant', participantId,
     'Enrolled: ' + enrollmentValues.fullName);
@@ -3905,53 +3967,29 @@ function updateParticipant(token, participantId, participantData) {
         return { success: false, message: 'Unauthorized for this site' };
       }
 
-      if (participantData.fullName) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('fullName') + 1, participantData.fullName);
-      }
-      if (participantData.parentGuardianNames !== undefined) {
-        const idx = headers.indexOf('parent_guardian_names');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianNames);
-        }
-      }
-      if (participantData.parentGuardianPhone !== undefined) {
-        const idx = headers.indexOf('parent_guardian_phone');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentPhone);
-        }
-      }
-      if (participantData.parentGuardianAddress !== undefined) {
-        const idx = headers.indexOf('parent_guardian_address');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianAddress);
-        }
-      }
-      if (participantData.parentGuardianEmail !== undefined) {
-        const idx = headers.indexOf('parent_guardian_email');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentEmail);
-        }
-      }
-      if (participantData.parentGuardianDob !== undefined) {
-        const idx = headers.indexOf('parent_guardian_dob');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
-        }
-      }
+      const rowValues = data[i].slice(0, headers.length);
+      while (rowValues.length < headers.length) rowValues.push('');
+      const setRowValue = (header, value) => {
+        const idx = headers.indexOf(header);
+        if (idx !== -1) rowValues[idx] = value;
+      };
+
+      if (participantData.fullName) setRowValue('fullName', participantData.fullName);
+      if (participantData.parentGuardianNames !== undefined) setRowValue('parent_guardian_names', participantData.parentGuardianNames);
+      if (participantData.parentGuardianPhone !== undefined) setRowValue('parent_guardian_phone', parentPhone);
+      if (participantData.parentGuardianAddress !== undefined) setRowValue('parent_guardian_address', participantData.parentGuardianAddress);
+      if (participantData.parentGuardianEmail !== undefined) setRowValue('parent_guardian_email', parentEmail);
+      if (participantData.parentGuardianDob !== undefined) setRowValue('parent_guardian_dob', parentDob);
       enrollmentFields.forEach(field => {
-        if (enrollmentValues[field.key] !== undefined) {
-          const idx = headers.indexOf(field.key);
-          if (idx !== -1) {
-            setCellAsPlainText(participantsSheet, i + 1, idx + 1, enrollmentValues[field.key]);
-          }
-        }
+        if (enrollmentValues[field.key] !== undefined) setRowValue(field.key, enrollmentValues[field.key]);
       });
-      if (participantData.status) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
-      }
-      if (participantData.notes !== undefined) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('notes') + 1, participantData.notes);
-      }
+      if (participantData.status) setRowValue('status', participantData.status);
+      if (participantData.notes !== undefined) setRowValue('notes', participantData.notes);
+
+      const targetRange = participantsSheet.getRange(i + 1, 1, 1, headers.length);
+      targetRange.setNumberFormat('@');
+      targetRange.setValues([rowValues]);
+      invalidateSheetSnapshot('Participants');
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT', 'participant', participantId,
         'Updated participant info');
@@ -4002,6 +4040,7 @@ function deleteParticipant(token, participantId) {
   }
 
   participantsSheet.deleteRow(rowIndex);
+  invalidateSheetSnapshot('Participants');
 
   if (checklistSheet) {
     const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
@@ -4220,6 +4259,9 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const participantHeaders = ensureParticipantColumns(participantsSheet);
+  const checklistHeaders = ensureChecklistColumns(checklistSheet);
+  const participantRowsToAppend = [];
+  const checklistRowsToAppend = [];
 
   const summary = {
     processed: 0,
@@ -4298,22 +4340,22 @@ function importParticipantsCSV(token, fileData) {
       notes: '',
       completionPercentage: 0
     });
-    appendParticipantRowAsText(participantsSheet, rowValues);
+    participantRowsToAppend.push(rowValues);
 
     getRolloutProtocolItemsInternal(cohort.rolloutId).forEach(instrument => {
       const checklistId = generateUUID();
-      checklistSheet.appendRow([
-        checklistId,
-        newParticipantId,
-        instrument.number,
-        instrument.name,
-        instrument.category,
-        'not_started',
-        '',
-        '',
-        '',
-        ''
-      ]);
+      const checklistRow = new Array(checklistHeaders.length).fill('');
+      const setChecklistValue = (header, value) => {
+        const idx = checklistHeaders.indexOf(header);
+        if (idx !== -1) checklistRow[idx] = value;
+      };
+      setChecklistValue('checklistId', checklistId);
+      setChecklistValue('participantId', newParticipantId);
+      setChecklistValue('instrumentNumber', instrument.number);
+      setChecklistValue('instrumentName', instrument.name);
+      setChecklistValue('category', instrument.category);
+      setChecklistValue('status', 'not_started');
+      checklistRowsToAppend.push(checklistRow);
     });
 
     logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
@@ -4321,6 +4363,9 @@ function importParticipantsCSV(token, fileData) {
 
     summary.created++;
   }
+
+  appendRowsAsPlainText(participantsSheet, participantRowsToAppend);
+  appendRowsAsPlainText(checklistSheet, checklistRowsToAppend);
 
   return {
     success: true,
@@ -4349,23 +4394,30 @@ function updateChecklistItem(token, checklistId, updateData) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const headers = ensureChecklistColumns(checklistSheet);
-  const data = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), headers.length).getValues();
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const headers = checklistSnapshot.headers;
+  const data = checklistSnapshot.data;
 
-  // Build participant site map for authorization checks
+  // Build participant site map for authorization checks from the cached participant snapshot.
   const participantSiteMap = {};
-  if (participantsSheet) {
-    const pData = participantsSheet.getDataRange().getValues();
-    const pHeaders = pData[0];
-    for (let i = 1; i < pData.length; i++) {
-      participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
-    }
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
+  for (let i = 1; i < pData.length; i++) {
+    participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
   }
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('checklistId')] === checklistId) {
-      const participantId = data[i][headers.indexOf('participantId')];
-      const instrumentName = data[i][headers.indexOf('instrumentName')];
+      const rowValues = data[i].slice(0, headers.length);
+      while (rowValues.length < headers.length) rowValues.push('');
+      const getRowValue = header => rowValues[headers.indexOf(header)];
+      const setRowValue = (header, value) => {
+        const idx = headers.indexOf(header);
+        if (idx !== -1) rowValues[idx] = value;
+      };
+      const participantId = getRowValue('participantId');
+      const instrumentName = getRowValue('instrumentName');
       const participantSite = participantSiteMap[participantId];
 
       if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
@@ -4381,30 +4433,33 @@ function updateChecklistItem(token, checklistId, updateData) {
 
       // Update status
       if (updateData.status) {
-        checklistSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(updateData.status);
+        setRowValue('status', updateData.status);
         updateDetails.push('status -> ' + updateData.status);
 
         // If marking as completed, set the date and user
         if (updateData.status === 'completed') {
-          checklistSheet.getRange(i + 1, headers.indexOf('completedDate') + 1).setValue(new Date().toISOString());
-          checklistSheet.getRange(i + 1, headers.indexOf('completedBy') + 1).setValue(currentUser.fullName);
+          setRowValue('completedDate', new Date().toISOString());
+          setRowValue('completedBy', currentUser.fullName);
         } else {
           // Clear completion info if status changed to not_started or missing
-          checklistSheet.getRange(i + 1, headers.indexOf('completedDate') + 1).setValue('');
-          checklistSheet.getRange(i + 1, headers.indexOf('completedBy') + 1).setValue('');
+          setRowValue('completedDate', '');
+          setRowValue('completedBy', '');
         }
       }
 
       // Update notes
       if (updateData.notes !== undefined) {
-        checklistSheet.getRange(i + 1, headers.indexOf('notes') + 1).setValue(updateData.notes);
+        setRowValue('notes', updateData.notes);
         updateDetails.push('notes updated');
       }
 
       if (updateData.dataLink !== undefined) {
-        checklistSheet.getRange(i + 1, headers.indexOf('dataLink') + 1).setValue(updateData.dataLink);
+        setRowValue('dataLink', updateData.dataLink);
         updateDetails.push(updateData.dataLink ? 'data link saved' : 'data link removed');
       }
+
+      checklistSheet.getRange(i + 1, 1, 1, headers.length).setValues([rowValues]);
+      invalidateSheetSnapshot('Checklist');
 
       // Update participant's completion percentage
       updateParticipantCompletion(participantId);
@@ -4503,6 +4558,7 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
   });
   if (hasChanges) {
     participantSnapshot.sheet.getRange(1, 1, pData.length, pHeaders.length).setValues(pData);
+    invalidateSheetSnapshot('Participants');
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
@@ -4806,6 +4862,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
 
   if (hasChanges) {
     checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    invalidateSheetSnapshot('Checklist');
   }
 
   Object.keys(touchedParticipants).forEach(pid => {
