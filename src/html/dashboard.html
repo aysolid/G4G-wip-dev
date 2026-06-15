@@ -1142,6 +1142,7 @@
     let logoutRefreshTimer = null;
     let enrollSubmitting = false;
     let sessionRecordingTypesCurrent = [];
+    let participantCountRequestId = 0;
 
     // ============================================
     // INITIALIZATION
@@ -1386,7 +1387,7 @@
     function renderDashboard(stats) {
       document.getElementById('dashboardLoading').classList.add('hidden');
       document.getElementById('dashboardContent').classList.remove('hidden');
-      document.getElementById('participantCount').textContent = stats.totalParticipants;
+      updateParticipantCountBadge(stats.totalParticipants);
 
       const dashboardHtml = `
         <!-- Quick Actions (for Admin/Facilitator) -->
@@ -1559,6 +1560,32 @@
       return currentSiteFilter;
     }
 
+    function updateParticipantCountBadge(count) {
+      const badge = document.getElementById('participantCount');
+      if (!badge) return;
+      const numericCount = Number(count);
+      badge.textContent = Number.isFinite(numericCount) ? numericCount : 0;
+    }
+
+    function refreshParticipantCountForFilters() {
+      if (!sessionToken) return;
+      const requestId = ++participantCountRequestId;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (requestId !== participantCountRequestId) return;
+          if (result && result.success && Array.isArray(result.participants)) {
+            updateParticipantCountBadge(result.participants.length);
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error refreshing participant count:', error);
+        })
+        .getAllParticipants(sessionToken, {
+          site: getParticipantSiteFilter(),
+          rolloutId: currentRolloutFilter
+        });
+    }
+
     function loadParticipants() {
       const section = document.getElementById('participantsSection');
       section.innerHTML = `
@@ -1644,7 +1671,7 @@
         <div class="alert alert-neutral" style="display: flex; gap: 8px; align-items: center;">
           <span class="material-icons" style="font-size: 18px;">info</span>
           <div>
-            Use the download template to fill participant details. Required columns: <strong>fullName</strong> and <strong>cohortName</strong>. Optional columns include parent/guardian fields. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
+            Use the download template to fill participant details. The template is generated from the current Enrollment Field Manager configuration, so required and optional columns update automatically. Cohort names must match the dropdown values from the template (e.g., &ldquo;School Name (Period Year)&rdquo;).
           </div>
         </div>
         <div class="form-group">
@@ -1735,6 +1762,7 @@
       google.script.run
         .withSuccessHandler(function(result) {
           renderBatchEnrollmentResult(result);
+          if (result && result.success) refreshParticipantCountForFilters();
           if (uploadBtn) uploadBtn.disabled = false;
         })
         .withFailureHandler(function(error) {
@@ -1823,6 +1851,7 @@
       }
 
       const participants = result.participants;
+      updateParticipantCountBadge(participants.length);
 
       if (participants.length === 0) {
         document.getElementById('participantsList').innerHTML = `
@@ -1988,28 +2017,7 @@
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Full Name</div>
                   <div style="font-weight: 600; font-size: 1.125rem;">${p.fullName}</div>
                 </div>
-                ${currentUser.role !== 'viewer' ? `
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Name(s)</div>
-                  <div>${p.parentGuardianNames || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
-                </div>
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Phone</div>
-                  <div>${p.parentGuardianPhone || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
-                </div>
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Address</div>
-                  <div>${p.parentGuardianAddress || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
-                </div>
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian Email</div>
-                  <div>${p.parentGuardianEmail || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
-                </div>
-                <div>
-                  <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Parent/Guardian DOB</div>
-                  <div>${p.parentGuardianDob || '<span style="color: var(--gray-400);">Not provided</span>'}</div>
-                </div>
-                ` : ''}
+                ${currentUser.role !== 'viewer' ? renderParticipantEnrollmentDetails(p) : ''}
                 <div>
                   <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Site</div>
                   <div><span class="badge ${p.site === 'UGA' ? 'badge-danger' : 'badge-warning'}">${p.site}</span></div>
@@ -2222,45 +2230,25 @@
     }
 
     function showEditParticipantModal(participant) {
+      const enrollmentFieldHtml = getEnrollmentFieldsConfig().map(field =>
+        renderEnrollmentFieldInput(field, 'editField_', getParticipantEnrollmentValue(participant, field))
+      ).join('');
       document.getElementById('modalTitle').textContent = 'Edit Participant';
       document.getElementById('modalBody').innerHTML = `
         <div id="editParticipantForm">
           <div class="form-group">
             <label class="form-label">Participant ID</label>
-            <input type="text" class="form-input" value="${participant.participantId}" disabled>
+            <input type="text" class="form-input" value="${escapeHtml(participant.participantId)}" disabled>
           </div>
-          <div class="form-group">
-            <label class="form-label">Full Name *</label>
-            <input type="text" class="form-input" id="editParticipantName" value="${participant.fullName}" placeholder="Enter full name">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Parent/Guardian Name(s)</label>
-            <input type="text" class="form-input" id="editParentNames" value="${participant.parentGuardianNames || ''}" placeholder="Enter parent/guardian names (comma-separated if multiple)">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Parent/Guardian Phone Number</label>
-            <input type="text" class="form-input" id="editParentPhone" value="${participant.parentGuardianPhone || ''}" placeholder="(706) 555-1234">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Parent/Guardian Residential Address</label>
-            <textarea class="form-textarea" id="editParentAddress" rows="3" placeholder="Enter parent/guardian address">${participant.parentGuardianAddress || ''}</textarea>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Parent/Guardian Email Address</label>
-            <input type="email" class="form-input" id="editParentEmail" value="${participant.parentGuardianEmail || ''}" placeholder="parent@example.com">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Parent/Guardian Date of Birth</label>
-            <input type="date" class="form-input" id="editParentDob" value="${participant.parentGuardianDob || ''}">
-          </div>
+          ${enrollmentFieldHtml}
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Site</label>
-              <input type="text" class="form-input" value="${participant.site}" disabled>
+              <input type="text" class="form-input" value="${escapeHtml(participant.site)}" disabled>
             </div>
             <div class="form-group">
               <label class="form-label">Cohort</label>
-              <input type="text" class="form-input" value="${participant.period} ${participant.year}" disabled>
+              <input type="text" class="form-input" value="${escapeHtml(participant.period)} ${escapeHtml(participant.year)}" disabled>
             </div>
           </div>
           ${currentUser.role === 'admin' ? `
@@ -2275,13 +2263,13 @@
           ` : `
           <div class="form-group">
             <label class="form-label">Status</label>
-            <input type="text" class="form-input" value="${participant.status}" disabled>
+            <input type="text" class="form-input" value="${escapeHtml(participant.status)}" disabled>
             <p style="font-size: 0.8rem; color: var(--gray-500); margin-top: 0.25rem;">Only administrators can change participant status.</p>
           </div>
           `}
           <div class="form-group">
             <label class="form-label">Notes</label>
-            <textarea class="form-textarea" id="editParticipantNotes" rows="3" placeholder="Any notes about this participant...">${participant.notes || ''}</textarea>
+            <textarea class="form-textarea" id="editParticipantNotes" rows="3" placeholder="Any notes about this participant...">${escapeHtml(participant.notes || '')}</textarea>
           </div>
         </div>
       `;
@@ -2296,44 +2284,19 @@
     }
 
     function saveParticipantEdit(participantId) {
-      const parentEmail = document.getElementById('editParentEmail').value.trim();
-      const parentDob = document.getElementById('editParentDob').value;
-      const parentPhone = document.getElementById('editParentPhone').value.trim();
-
-      const data = {
-        fullName: document.getElementById('editParticipantName').value.trim(),
-        parentGuardianNames: document.getElementById('editParentNames').value.trim(),
-        parentGuardianPhone: parentPhone,
-        parentGuardianAddress: document.getElementById('editParentAddress').value.trim(),
-        parentGuardianEmail: parentEmail,
-        parentGuardianDob: parentDob,
+      const collected = collectEnrollmentFieldValues('editField_', false);
+      const data = Object.assign(enrollmentValuesToParticipantPayload(collected.values), {
         notes: document.getElementById('editParticipantNotes').value.trim()
-      };
+      });
 
       if (currentUser.role === 'admin') {
         const statusEl = document.getElementById('editParticipantStatus');
         data.status = statusEl ? statusEl.value : '';
       }
 
-      if (!data.fullName) {
-        showToast('Please enter a name', 'error');
+      if (collected.hasError) {
+        showToast('Please review enrollment field values before saving', 'error');
         return;
-      }
-
-      if (parentEmail && !isValidEmail(parentEmail)) {
-        showToast('Please enter a valid parent/guardian email address', 'error');
-        return;
-      }
-      if (parentDob && !isValidDate(parentDob)) {
-        showToast('Please enter a valid parent/guardian date of birth', 'error');
-        return;
-      }
-      if (parentPhone) {
-        const digits = normalizePhoneDigits(parentPhone);
-        if (digits.length < 10 || digits.length > 15) {
-          showToast('Parent/guardian phone number must include 10 to 15 digits', 'error');
-          return;
-        }
       }
 
       google.script.run
@@ -3130,51 +3093,24 @@
     // ============================================
     function loadEnrollForm() {
       const section = document.getElementById('enrollSection');
+      const enrollmentFieldHtml = getEnrollmentFieldsConfig().map(field => renderEnrollmentFieldInput(field, 'enrollField_', '')).join('');
       section.innerHTML = `
-        <div class="card" style="max-width: 600px;">
+        <div class="card" style="max-width: 640px;">
           <div class="card-header">
             <h3 class="card-title">
               <span class="material-icons">person_add</span>
               Enroll New Participant
             </h3>
+            ${currentUser.role === 'admin' ? `
+            <button type="button" class="btn btn-sm btn-secondary" onclick="showSection('settings')">
+              <span class="material-icons">dynamic_form</span>
+              Manage Fields
+            </button>
+            ` : ''}
           </div>
           <div class="card-body">
             <form id="enrollForm" onsubmit="handleEnroll(event)">
-              <div class="form-group">
-                <label class="form-label">Participant Full Name *</label>
-                <input type="text" class="form-input" id="enrollName" required placeholder="Enter participant's full name">
-                <div class="form-error" id="enrollNameError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Parent/Guardian Name(s)</label>
-                <input type="text" class="form-input" id="enrollParentNames" placeholder="Enter parent/guardian names (comma-separated if multiple)">
-                <div class="form-error" id="enrollParentNamesError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Parent/Guardian Phone Number</label>
-                <input type="text" class="form-input" id="enrollParentPhone" placeholder="(706) 555-1234">
-                <div class="form-error" id="enrollParentPhoneError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Parent/Guardian Residential Address</label>
-                <textarea class="form-textarea" id="enrollParentAddress" rows="3" placeholder="Enter parent/guardian address"></textarea>
-                <div class="form-error" id="enrollParentAddressError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Parent/Guardian Email Address</label>
-                <input type="email" class="form-input" id="enrollParentEmail" placeholder="parent@example.com">
-                <div class="form-error" id="enrollParentEmailError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label">Parent/Guardian Date of Birth</label>
-                <input type="date" class="form-input" id="enrollParentDob">
-                <div class="form-error" id="enrollParentDobError" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
-              </div>
+              ${enrollmentFieldHtml}
 
               <div class="form-row">
                 <div class="form-group">
@@ -3267,26 +3203,13 @@
 
       clearEnrollErrors();
 
-      const parentEmail = document.getElementById('enrollParentEmail').value.trim();
-      const parentDob = document.getElementById('enrollParentDob').value;
-      const parentPhone = document.getElementById('enrollParentPhone').value.trim();
-
-      const data = {
-        fullName: document.getElementById('enrollName').value.trim(),
-        parentGuardianNames: document.getElementById('enrollParentNames').value.trim(),
-        parentGuardianPhone: parentPhone,
-        parentGuardianAddress: document.getElementById('enrollParentAddress').value.trim(),
-        parentGuardianEmail: parentEmail,
-        parentGuardianDob: parentDob,
+      const collected = collectEnrollmentFieldValues('enrollField_', true);
+      const data = Object.assign(enrollmentValuesToParticipantPayload(collected.values), {
         rolloutId: document.getElementById('enrollRollout').value,
         notes: document.getElementById('enrollNotes').value.trim()
-      };
+      });
 
-      let hasError = false;
-      if (!data.fullName) {
-        setEnrollError('enrollNameError', 'Participant full name is required.');
-        hasError = true;
-      }
+      let hasError = collected.hasError;
       if (!document.getElementById('enrollSite').value) {
         setEnrollError('enrollSiteError', 'Site is required.');
         hasError = true;
@@ -3294,22 +3217,6 @@
       if (!data.rolloutId) {
         setEnrollError('enrollRolloutError', 'Study cohort is required.');
         hasError = true;
-      }
-
-      if (parentEmail && !isValidEmail(parentEmail)) {
-        setEnrollError('enrollParentEmailError', 'Please enter a valid email address.');
-        hasError = true;
-      }
-      if (parentDob && !isValidDate(parentDob)) {
-        setEnrollError('enrollParentDobError', 'Please enter a valid date of birth.');
-        hasError = true;
-      }
-      if (parentPhone) {
-        const digits = normalizePhoneDigits(parentPhone);
-        if (digits.length < 10 || digits.length > 15) {
-          setEnrollError('enrollParentPhoneError', 'Phone number must include 10 to 15 digits.');
-          hasError = true;
-        }
       }
 
       if (hasError) {
@@ -3327,6 +3234,7 @@
           if (result.success) {
             showToast('Participant enrolled successfully! ID: ' + result.participantId, 'success');
             resetEnrollForm();
+            refreshParticipantCountForFilters();
             enrollSubmitting = false;
             btn.disabled = false;
             btn.innerHTML = '<span class="material-icons">person_add</span> Enroll Participant';
@@ -3347,12 +3255,10 @@
     }
 
     function resetEnrollForm() {
-      document.getElementById('enrollName').value = '';
-      document.getElementById('enrollParentNames').value = '';
-      document.getElementById('enrollParentPhone').value = '';
-      document.getElementById('enrollParentAddress').value = '';
-      document.getElementById('enrollParentEmail').value = '';
-      document.getElementById('enrollParentDob').value = '';
+      getEnrollmentFieldsConfig().forEach(field => {
+        const el = document.getElementById('enrollField_' + field.key);
+        if (el) el.value = '';
+      });
       document.getElementById('enrollNotes').value = '';
       clearEnrollErrors();
 
@@ -3372,16 +3278,8 @@
     }
 
     function clearEnrollErrors() {
-      [
-        'enrollNameError',
-        'enrollParentNamesError',
-        'enrollParentPhoneError',
-        'enrollParentAddressError',
-        'enrollParentEmailError',
-        'enrollParentDobError',
-        'enrollSiteError',
-        'enrollRolloutError'
-      ].forEach(id => setEnrollError(id, ''));
+      document.querySelectorAll('.form-error').forEach(el => setEnrollError(el.id, ''));
+      ['enrollSiteError', 'enrollRolloutError'].forEach(id => setEnrollError(id, ''));
     }
 
     function setEnrollError(id, message) {
@@ -3407,6 +3305,257 @@
 
     function normalizePhoneDigits(phone) {
       return (phone || '').replace(/\D/g, '');
+    }
+
+    const DEFAULT_ENROLLMENT_FIELDS_CLIENT = [
+      { key: 'fullName', label: 'Participant Full Name', type: 'text', required: true, core: true, placeholder: "Enter participant's full name" },
+      { key: 'parent_guardian_names', label: 'Parent/Guardian Name(s)', type: 'text', required: false, core: true, placeholder: 'Enter parent/guardian names (comma-separated if multiple)' },
+      { key: 'parent_guardian_phone', label: 'Parent/Guardian Phone Number', type: 'phone', required: false, core: true, placeholder: '(706) 555-1234' },
+      { key: 'parent_guardian_address', label: 'Parent/Guardian Residential Address', type: 'textarea', required: false, core: true, placeholder: 'Enter parent/guardian address' },
+      { key: 'parent_guardian_email', label: 'Parent/Guardian Email Address', type: 'email', required: false, core: true, placeholder: 'parent@example.com' },
+      { key: 'parent_guardian_dob', label: 'Parent/Guardian Date of Birth', type: 'date', required: false, core: true, placeholder: '' }
+    ];
+
+    function getEnrollmentFieldsConfig() {
+      const configured = appConfig && Array.isArray(appConfig.enrollmentFields) ? appConfig.enrollmentFields : [];
+      return configured.length ? configured : DEFAULT_ENROLLMENT_FIELDS_CLIENT;
+    }
+
+    function getParticipantEnrollmentValue(participant, field) {
+      const values = participant && participant.enrollmentFields ? participant.enrollmentFields : {};
+      if (values[field.key] !== undefined && values[field.key] !== null) return values[field.key];
+      const legacyMap = {
+        fullName: 'fullName',
+        parent_guardian_names: 'parentGuardianNames',
+        parent_guardian_phone: 'parentGuardianPhone',
+        parent_guardian_address: 'parentGuardianAddress',
+        parent_guardian_email: 'parentGuardianEmail',
+        parent_guardian_dob: 'parentGuardianDob'
+      };
+      const legacyKey = legacyMap[field.key];
+      return legacyKey && participant ? (participant[legacyKey] || '') : '';
+    }
+
+    function enrollmentFieldInputType(field) {
+      if (field.type === 'email') return 'email';
+      if (field.type === 'number') return 'number';
+      if (field.type === 'date') return 'date';
+      return 'text';
+    }
+
+    function renderEnrollmentFieldInput(field, prefix, value) {
+      const id = prefix + field.key;
+      const safeValue = escapeHtml(value || '');
+      const requiredMark = field.required ? ' *' : '';
+      const requiredAttr = field.required ? ' required' : '';
+      const placeholder = escapeHtml(field.placeholder || '');
+      const errorId = id + 'Error';
+      let inputHtml = '';
+
+      if (field.type === 'textarea') {
+        inputHtml = `<textarea class="form-textarea" id="${id}" rows="3" placeholder="${placeholder}"${requiredAttr}>${safeValue}</textarea>`;
+      } else if (field.type === 'select') {
+        const options = Array.isArray(field.options) ? field.options : [];
+        inputHtml = `<select class="form-select" id="${id}"${requiredAttr}>
+          <option value="">Select ${escapeHtml(field.label)}...</option>
+          ${options.map(option => `<option value="${escapeHtml(option)}" ${String(option) === String(value || '') ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+        </select>`;
+      } else {
+        inputHtml = `<input type="${enrollmentFieldInputType(field)}" class="form-input" id="${id}" value="${safeValue}" placeholder="${placeholder}"${requiredAttr}>`;
+      }
+
+      return `
+        <div class="form-group">
+          <label class="form-label">${escapeHtml(field.label)}${requiredMark}</label>
+          ${inputHtml}
+          <div class="form-error" id="${errorId}" style="display:none; color: var(--danger-color); font-size: 0.75rem; margin-top: 0.35rem;"></div>
+        </div>
+      `;
+    }
+
+    function collectEnrollmentFieldValues(prefix, showInlineErrors) {
+      const fields = getEnrollmentFieldsConfig();
+      const values = {};
+      let hasError = false;
+      fields.forEach(field => {
+        const el = document.getElementById(prefix + field.key);
+        const value = el ? (el.value || '').trim() : '';
+        values[field.key] = value;
+        const errorId = prefix + field.key + 'Error';
+        if (showInlineErrors) setEnrollError(errorId, '');
+        if (field.required && !value) {
+          const message = field.label + ' is required.';
+          if (showInlineErrors) setEnrollError(errorId, message);
+          hasError = true;
+        }
+        if (value && field.type === 'email' && !isValidEmail(value)) {
+          if (showInlineErrors) setEnrollError(errorId, 'Please enter a valid email address.');
+          hasError = true;
+        }
+        if (value && field.type === 'date' && !isValidDate(value)) {
+          if (showInlineErrors) setEnrollError(errorId, 'Please enter a valid date.');
+          hasError = true;
+        }
+        if (value && field.type === 'phone') {
+          const digits = normalizePhoneDigits(value);
+          if (digits.length < 10 || digits.length > 15) {
+            if (showInlineErrors) setEnrollError(errorId, 'Phone number must include 10 to 15 digits.');
+            hasError = true;
+          }
+        }
+      });
+      return { values, hasError };
+    }
+
+    function enrollmentValuesToParticipantPayload(values) {
+      return {
+        fullName: values.fullName || '',
+        enrollmentFields: values,
+        parentGuardianNames: values.parent_guardian_names || '',
+        parentGuardianPhone: values.parent_guardian_phone || '',
+        parentGuardianAddress: values.parent_guardian_address || '',
+        parentGuardianEmail: values.parent_guardian_email || '',
+        parentGuardianDob: values.parent_guardian_dob || ''
+      };
+    }
+
+    function renderParticipantEnrollmentDetails(participant) {
+      return getEnrollmentFieldsConfig()
+        .filter(field => field.key !== 'fullName')
+        .map(field => {
+          const rawValue = getParticipantEnrollmentValue(participant, field);
+          const display = rawValue ? escapeHtml(rawValue) : '<span style="color: var(--gray-400);">Not provided</span>';
+          return `
+            <div>
+              <div style="font-size: 0.75rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">${escapeHtml(field.label)}</div>
+              <div>${display}</div>
+            </div>
+          `;
+        }).join('');
+    }
+
+    function renderEnrollmentSettingsManager() {
+      if (!currentUser || currentUser.role !== 'admin') return '';
+      const fields = getEnrollmentFieldsConfig();
+      return `
+        <div class="card" style="max-width: 980px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title">
+              <span class="material-icons">dynamic_form</span>
+              Enrollment Field Manager
+            </h3>
+            <button class="btn btn-sm btn-secondary" type="button" onclick="addEnrollmentFieldRow()">
+              <span class="material-icons">add</span>
+              Add Field
+            </button>
+          </div>
+          <div class="card-body">
+            <p style="color: var(--gray-600); margin-bottom: 1rem;">Configure the information collected during single enrollment and batch CSV enrollment. Saving adds new columns to the Participants sheet so existing participants can receive the new fields without hard-coding.</p>
+            <div id="enrollmentFieldRows" style="display: grid; gap: 0.75rem;">
+              ${fields.map((field, index) => renderEnrollmentFieldConfigRow(field, index)).join('')}
+            </div>
+            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem;">
+              <button class="btn btn-primary" type="button" onclick="saveEnrollmentFieldConfig()">
+                <span class="material-icons">save</span>
+                Save Enrollment Fields
+              </button>
+              <span style="font-size: 0.85rem; color: var(--gray-500);">Batch templates and CSV uploads will follow this current field list.</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEnrollmentFieldConfigRow(field, index) {
+      const locked = field.core ? 'disabled' : '';
+      return `
+        <div class="enrollment-field-row" data-index="${index}" style="display: grid; grid-template-columns: 1.4fr 1.1fr 0.9fr 0.7fr 1.4fr auto; gap: 0.75rem; align-items: end; padding: 0.9rem; border: 1px solid var(--gray-200); border-radius: 12px; background: var(--gray-50);">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Label</label>
+            <input class="form-input enrollment-field-label" value="${escapeHtml(field.label || '')}" placeholder="Participant Age">
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Column Key</label>
+            <input class="form-input enrollment-field-key" value="${escapeHtml(field.key || '')}" placeholder="custom_age" ${locked}>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Type</label>
+            <select class="form-select enrollment-field-type">
+              ${['text','textarea','number','date','email','phone','select'].map(type => `<option value="${type}" ${field.type === type ? 'selected' : ''}>${type}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Required</label>
+            <select class="form-select enrollment-field-required">
+              <option value="false" ${field.required ? '' : 'selected'}>No</option>
+              <option value="true" ${field.required ? 'selected' : ''}>Yes</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Placeholder / Options</label>
+            <input class="form-input enrollment-field-placeholder" value="${escapeHtml(field.type === 'select' && field.options ? field.options.join(', ') : (field.placeholder || ''))}" placeholder="Placeholder, or comma-separated options for select">
+          </div>
+          <button class="btn btn-sm btn-danger" type="button" onclick="removeEnrollmentFieldRow(this)" ${field.core ? 'disabled title="Core fields cannot be removed"' : ''}>
+            <span class="material-icons">delete</span>
+          </button>
+          <input type="hidden" class="enrollment-field-core" value="${field.core ? 'true' : 'false'}">
+        </div>
+      `;
+    }
+
+    function addEnrollmentFieldRow() {
+      const rows = document.getElementById('enrollmentFieldRows');
+      if (!rows) return;
+      rows.insertAdjacentHTML('beforeend', renderEnrollmentFieldConfigRow({ key: '', label: '', type: 'text', required: false, core: false, placeholder: '' }, rows.children.length));
+    }
+
+    function removeEnrollmentFieldRow(button) {
+      const row = button.closest('.enrollment-field-row');
+      if (row) row.remove();
+    }
+
+    function slugifyFieldKeyClient(label) {
+      return 'custom_' + String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').substring(0, 50);
+    }
+
+    function collectEnrollmentFieldConfigRows() {
+      return Array.from(document.querySelectorAll('.enrollment-field-row')).map(row => {
+        const type = row.querySelector('.enrollment-field-type').value;
+        const placeholderValue = row.querySelector('.enrollment-field-placeholder').value.trim();
+        const label = row.querySelector('.enrollment-field-label').value.trim();
+        const keyInput = row.querySelector('.enrollment-field-key');
+        const key = (keyInput.value.trim() || slugifyFieldKeyClient(label));
+        return {
+          label,
+          key,
+          type,
+          required: row.querySelector('.enrollment-field-required').value === 'true',
+          core: row.querySelector('.enrollment-field-core').value === 'true',
+          placeholder: type === 'select' ? '' : placeholderValue,
+          options: type === 'select' ? placeholderValue.split(',').map(v => v.trim()).filter(Boolean) : []
+        };
+      }).filter(field => field.label);
+    }
+
+    function saveEnrollmentFieldConfig() {
+      const fields = collectEnrollmentFieldConfigRows();
+      if (!fields.length) {
+        showToast('Please add at least one enrollment field', 'error');
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            appConfig = appConfig || {};
+            appConfig.enrollmentFields = result.fields;
+            showToast('Enrollment fields saved successfully', 'success');
+            loadSettings();
+          } else {
+            showToast(result.message || 'Unable to save enrollment fields', 'error');
+          }
+        })
+        .withFailureHandler(handleError)
+        .saveEnrollmentFields(sessionToken, fields);
     }
 
     // ============================================
@@ -4759,9 +4908,20 @@
         .bulkMarkAttendance(sessionToken, sessionId, attendanceRecords);
     }
 
+    function parseDateForDisplay(value) {
+      if (!value) return null;
+      const dateOnlyMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateOnlyMatch) {
+        return new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]), 12, 0, 0);
+      }
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
     function formatDate(dateStr) {
       if (!dateStr) return '';
-      const date = new Date(dateStr);
+      const date = parseDateForDisplay(dateStr);
+      if (!date) return dateStr;
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
@@ -6339,6 +6499,326 @@
       showToast('Nothing to download', 'error');
     }
 
+
+    // ============================================
+    // DIGITAL FORMS SYNC SETTINGS
+    // ============================================
+    function renderDigitalFormSyncLoading() {
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">sync_alt</span> Digital Forms Sync</h3>
+          </div>
+          <div class="card-body"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+      `;
+    }
+
+    function loadDigitalFormSyncSettings() {
+      const target = document.getElementById('digitalFormSyncSettings');
+      if (!target || !currentUser || currentUser.role !== 'admin') return;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result || !result.success) {
+            target.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Unable to load Digital Forms Sync settings')}</div>`;
+            return;
+          }
+          if (result.restricted) {
+            target.innerHTML = renderDigitalFormSyncRestricted(result);
+            return;
+          }
+          target.innerHTML = renderDigitalFormSyncSettings(result);
+        })
+        .withFailureHandler(function(error) {
+          target.innerHTML = `<div class="alert alert-error">${escapeHtml(error && error.message ? error.message : error)}</div>`;
+        })
+        .getDigitalFormSyncAdminData(sessionToken);
+    }
+
+    function renderDigitalFormSyncRestricted(data) {
+      return `
+        <div class="card" style="max-width: 900px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title"><span class="material-icons">lock</span> Digital Forms Sync</h3>
+              <div style="font-size:0.85rem; color:var(--gray-500);">This integration updates protocol checklists from Google Forms responses, so access is restricted.</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="alert alert-warning">${escapeHtml(data.message || 'Ask the primary administrator to grant access to Digital Forms Sync.')}</div>
+            <p style="color:var(--gray-600); margin:0.75rem 0 0;">Only the primary administrator, david, or admins he explicitly authorizes can configure mappings, run sync jobs, schedule sync triggers, or review uncertain matches.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDigitalFormSyncAccessManager(data) {
+      const access = data.accessControl || {};
+      if (!access.isSuperAdmin) return '';
+      const adminUsers = data.adminUsers || [];
+      const rows = adminUsers.length ? adminUsers.map(user => `
+        <label class="digital-sync-access-row" style="display:grid; grid-template-columns:auto 1fr auto; gap:0.75rem; align-items:center; padding:0.75rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+          <input type="checkbox" class="digital-sync-access-user" value="${escapeHtml(user.userId || '')}" ${user.hasAccess ? 'checked' : ''} ${user.isSuperAdmin ? 'disabled' : ''}>
+          <span>
+            <strong>${escapeHtml(user.fullName || user.username || user.userId)}</strong>
+            <span style="display:block; font-size:0.75rem; color:var(--gray-500);">${escapeHtml(user.username || '')} · ${escapeHtml(user.site || 'All sites')} · ${escapeHtml(user.userId || '')}</span>
+          </span>
+          ${user.isSuperAdmin ? '<span class="badge badge-success">Primary admin</span>' : (user.hasAccess ? '<span class="badge badge-info">Allowed</span>' : '<span class="badge">No access</span>')}
+        </label>
+      `).join('') : '<p style="color: var(--gray-500);">No active admin users found.</p>';
+      return `
+        <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--gray-200);">
+          <h4 style="margin:0 0 0.35rem;">Digital Forms Sync Access</h4>
+          <p style="color:var(--gray-500); margin:0 0 0.85rem;">Primary admin david can grant or revoke this sensitive integration for other admin users. David always keeps access.</p>
+          <div id="digitalSyncAccessUsers" style="display:grid; gap:0.55rem;">${rows}</div>
+          <button class="btn btn-primary" style="margin-top:0.85rem;" onclick="saveDigitalFormSyncAccessConfig()"><span class="material-icons">admin_panel_settings</span> Save Access</button>
+        </div>
+      `;
+    }
+
+    function renderDigitalFormSyncSettings(data) {
+      const config = data.config || {};
+      const tabs = data.tabs || [];
+      const tabNames = tabs.map(tab => tab.name);
+      const protocols = data.protocolItems || [];
+      const mappingsByNumber = {};
+      (config.mappings || []).forEach(mapping => mappingsByNumber[String(mapping.instrumentNumber)] = mapping);
+      const workbookMessage = data.workbookError
+        ? `<div class="alert alert-warning" style="margin-top: 0.75rem;">Workbook connection warning: ${escapeHtml(data.workbookError)}</div>`
+        : (config.masterWorkbookId ? `<div class="alert alert-success" style="margin-top: 0.75rem;">Workbook connected. ${tabs.length} tabs available.</div>` : '');
+      const mappingRows = protocols.map(item => {
+        const mapping = mappingsByNumber[String(item.number)] || { enabled: false, instrumentNumber: item.number, instrumentName: item.name, sheetName: '', timestampColumn: 'Timestamp', nameColumn: '' };
+        const selectedSheet = mapping.sheetName || '';
+        const selectedTab = tabs.find(tab => tab.name === selectedSheet);
+        const headers = selectedTab ? selectedTab.headers : [];
+        const columnOptions = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+        const tabOptions = [''].concat(tabNames).map(name => `<option value="${escapeHtml(name)}" ${name === selectedSheet ? 'selected' : ''}>${name ? escapeHtml(name) : 'Select response tab...'}</option>`).join('');
+        const timestampOptions = mapping.timestampColumn && headers.indexOf(mapping.timestampColumn) === -1
+          ? `<option value="${escapeHtml(mapping.timestampColumn)}" selected>${escapeHtml(mapping.timestampColumn)}</option>` + columnOptions
+          : columnOptions;
+        const nameOptions = mapping.nameColumn && headers.indexOf(mapping.nameColumn) === -1
+          ? `<option value="${escapeHtml(mapping.nameColumn)}" selected>${escapeHtml(mapping.nameColumn)}</option>` + columnOptions
+          : columnOptions;
+        return `
+          <div class="digital-sync-row" data-instrument-number="${escapeHtml(item.number)}" data-instrument-name="${escapeHtml(item.name)}" style="display:grid; grid-template-columns: 0.55fr 1.4fr 1.25fr 1.15fr 1.15fr; gap:0.75rem; align-items:end; padding:0.85rem; border:1px solid var(--gray-200); border-radius:12px; background:var(--gray-50);">
+            <label class="form-label" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
+              <input type="checkbox" class="digital-sync-enabled" ${mapping.enabled ? 'checked' : ''}> Enabled
+            </label>
+            <div>
+              <div style="font-weight:700;">${escapeHtml(item.name)}</div>
+              <div style="font-size:0.75rem; color:var(--gray-500);">Protocol #${escapeHtml(item.number)}</div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Response Tab</label>
+              <select class="form-select digital-sync-sheet">${tabOptions}</select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Timestamp Column</label>
+              <select class="form-select digital-sync-timestamp"><option value="Timestamp">Timestamp</option>${timestampOptions}</select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Name Column</label>
+              <select class="form-select digital-sync-name"><option value="">Select name column...</option>${nameOptions}</select>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const queue = data.queue || [];
+      const queueHtml = queue.length ? queue.map(item => `
+        <div class="digital-review-row" data-queue-id="${escapeHtml(item.queueId)}" style="display:grid; grid-template-columns: 1.4fr 1fr 1fr 0.7fr 1.1fr auto auto; gap:0.75rem; align-items:center; padding:0.75rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+          <div>
+            <strong>${escapeHtml(item.rawName || '(blank name)')}</strong>
+            <div style="font-size:0.75rem; color:var(--gray-500);">${escapeHtml(item.sourceSheetName)} row ${escapeHtml(item.sourceRowNumber)} · ${escapeHtml(item.sourceTimestamp || '')}</div>
+          </div>
+          <div>${escapeHtml(item.instrumentName || '')}</div>
+          <div>${escapeHtml(item.suggestedParticipantName || item.suggestedParticipantId || 'No suggestion')}</div>
+          <div><span class="badge badge-info">${escapeHtml(item.confidenceScore || 0)}%</span></div>
+          <input class="form-input digital-review-participant" placeholder="Participant ID" value="${escapeHtml(item.suggestedParticipantId || '')}">
+          <button class="btn btn-sm btn-primary" onclick="confirmDigitalFormMatch('${escapeHtml(item.queueId)}')">Confirm</button>
+          <button class="btn btn-sm btn-secondary" onclick="ignoreDigitalFormMatch('${escapeHtml(item.queueId)}')">Ignore</button>
+        </div>
+      `).join('') : '<p style="color: var(--gray-500);">No pending form-response matches need review.</p>';
+
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title"><span class="material-icons">sync_alt</span> Digital Forms Sync</h3>
+              <div style="font-size:0.85rem; color:var(--gray-500);">Connect the G4G master Google Forms workbook and automatically complete checklist items from digital responses.</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:grid; grid-template-columns: 1.5fr 0.6fr 0.6fr 0.6fr; gap:0.75rem; align-items:end;">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Master Workbook URL or ID</label>
+                <input class="form-input" id="digitalSyncWorkbookId" value="${escapeHtml(config.masterWorkbookId || '')}" placeholder="Paste the G4G Master Form Response workbook URL or ID">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Auto-match %</label>
+                <input type="number" min="0" max="100" class="form-input" id="digitalSyncAutoThreshold" value="${escapeHtml(config.autoMatchThreshold || 90)}">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Review %</label>
+                <input type="number" min="0" max="100" class="form-input" id="digitalSyncReviewThreshold" value="${escapeHtml(config.reviewMatchThreshold || 70)}">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Late window days</label>
+                <input type="number" min="0" max="14" class="form-input" id="digitalSyncLateDays" value="${escapeHtml(config.lateResponseWindowDays || 0)}">
+              </div>
+            </div>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.85rem;">
+              <label><input type="checkbox" id="digitalSyncEnabled" ${config.enabled ? 'checked' : ''}> Enable scheduled syncing</label>
+              <label><input type="checkbox" id="digitalSyncPreferAttendance" ${config.preferPresentAttendance !== false ? 'checked' : ''}> Prefer participants marked present</label>
+              <label><input type="checkbox" id="digitalSyncSaveAliases" ${config.saveAliasesOnReview !== false ? 'checked' : ''}> Save aliases after review</label>
+            </div>
+            ${workbookMessage}
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin:1rem 0;">
+              <button class="btn btn-secondary" onclick="testDigitalFormWorkbookConnection()"><span class="material-icons">wifi_tethering</span> Test Connection</button>
+              <button class="btn btn-primary" onclick="saveDigitalFormSyncConfig()"><span class="material-icons">save</span> Save Sync Settings</button>
+              <button class="btn btn-secondary" onclick="previewDigitalFormSync()"><span class="material-icons">visibility</span> Preview Sync</button>
+              <button class="btn btn-warning" onclick="runDigitalFormSyncNow()"><span class="material-icons">sync</span> Run Sync Now</button>
+              <button class="btn btn-secondary" onclick="toggleDigitalFormSchedule(${data.triggers && data.triggers.enabled ? 'false' : 'true'})"><span class="material-icons">schedule</span> ${data.triggers && data.triggers.enabled ? 'Disable Schedule' : 'Enable 10-min Schedule'}</button>
+            </div>
+            <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
+            <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
+            <div id="digitalSyncPreview" style="margin-top:1rem;"></div>
+            <h4 style="margin:1.5rem 0 0.75rem;">Match Review Queue</h4>
+            <div id="digitalSyncReviewQueue" style="display:grid; gap:0.65rem;">${queueHtml}</div>
+            ${renderDigitalFormSyncAccessManager(data)}
+          </div>
+        </div>
+      `;
+    }
+
+    function collectDigitalFormSyncAccessIds() {
+      return Array.from(document.querySelectorAll('.digital-sync-access-user'))
+        .filter(input => input.checked || input.disabled)
+        .map(input => input.value)
+        .filter(Boolean);
+    }
+
+    function saveDigitalFormSyncAccessConfig() {
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Digital Forms Sync access updated' : 'Unable to update access'), result.success ? 'success' : 'error');
+        if (result.success) loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).saveDigitalFormSyncAccess(sessionToken, collectDigitalFormSyncAccessIds());
+    }
+
+    function collectDigitalFormSyncConfig() {
+      const mappings = Array.from(document.querySelectorAll('.digital-sync-row')).map(row => ({
+        enabled: row.querySelector('.digital-sync-enabled').checked,
+        instrumentNumber: row.dataset.instrumentNumber,
+        instrumentName: row.dataset.instrumentName,
+        sheetName: row.querySelector('.digital-sync-sheet').value,
+        timestampColumn: row.querySelector('.digital-sync-timestamp').value || 'Timestamp',
+        nameColumn: row.querySelector('.digital-sync-name').value,
+        allowLateResponses: true
+      })).filter(mapping => mapping.sheetName || mapping.enabled);
+      return {
+        enabled: document.getElementById('digitalSyncEnabled').checked,
+        masterWorkbookId: document.getElementById('digitalSyncWorkbookId').value.trim(),
+        autoMatchThreshold: Number(document.getElementById('digitalSyncAutoThreshold').value) || 90,
+        reviewMatchThreshold: Number(document.getElementById('digitalSyncReviewThreshold').value) || 70,
+        lateResponseWindowDays: Number(document.getElementById('digitalSyncLateDays').value) || 0,
+        preferPresentAttendance: document.getElementById('digitalSyncPreferAttendance').checked,
+        saveAliasesOnReview: document.getElementById('digitalSyncSaveAliases').checked,
+        mappings
+      };
+    }
+
+    function testDigitalFormWorkbookConnection() {
+      const workbookId = document.getElementById('digitalSyncWorkbookId').value.trim();
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Workbook connected' : 'Unable to connect'), result.success ? 'success' : 'error');
+        if (result.success) loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).testDigitalFormWorkbook(sessionToken, workbookId);
+    }
+
+    function saveDigitalFormSyncConfig() {
+      google.script.run.withSuccessHandler(function(result) {
+        if (result.success) {
+          showToast('Digital Forms Sync settings saved', 'success');
+          appConfig = appConfig || {};
+          appConfig.digitalFormSync = result.config;
+          loadDigitalFormSyncSettings();
+        } else {
+          showToast(result.message || 'Unable to save Digital Forms Sync settings', 'error');
+        }
+      }).withFailureHandler(handleError).saveDigitalFormSyncConfig(sessionToken, collectDigitalFormSyncConfig());
+    }
+
+    function renderDigitalSyncResult(result) {
+      const target = document.getElementById('digitalSyncPreview');
+      if (!target) return;
+      if (!result || !result.success) {
+        target.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Sync failed')}</div>`;
+        return;
+      }
+      const previewRows = (result.preview || []).slice(0, 20).map(match => `
+        <tr>
+          <td>${escapeHtml(match.sourceSheetName)} #${escapeHtml(match.sourceRowNumber)}</td>
+          <td>${escapeHtml(match.rawName)}</td>
+          <td>${escapeHtml(match.instrumentName)}</td>
+          <td>${escapeHtml(match.participantName || match.participantId || '-')}</td>
+          <td>${escapeHtml(match.confidenceScore)}%</td>
+          <td>${escapeHtml(match.matchStatus)}</td>
+          <td>${escapeHtml(match.notes || '')}</td>
+        </tr>
+      `).join('');
+      target.innerHTML = `
+        <div class="alert alert-info">Processed ${result.processed} responses · ${result.autoMatched} auto-matched · ${result.needsReview} review · ${result.unmatched} unmatched · ${result.checklistUpdated || 0} checklist updates.</div>
+        ${result.errors && result.errors.length ? `<div class="alert alert-warning">${result.errors.map(escapeHtml).join('<br>')}</div>` : ''}
+        <div style="overflow:auto; max-height:360px; border:1px solid var(--gray-200); border-radius:12px;">
+          <table class="data-table"><thead><tr><th>Source</th><th>Name</th><th>Protocol</th><th>Participant</th><th>Score</th><th>Status</th><th>Notes</th></tr></thead><tbody>${previewRows || '<tr><td colspan="7">No new responses found.</td></tr>'}</tbody></table>
+        </div>
+      `;
+    }
+
+    function previewDigitalFormSync() {
+      google.script.run.withSuccessHandler(function(saveResult) {
+        if (!saveResult || !saveResult.success) {
+          showToast(saveResult && saveResult.message ? saveResult.message : 'Unable to save sync settings before preview', 'error');
+          return;
+        }
+        google.script.run.withSuccessHandler(renderDigitalSyncResult).withFailureHandler(handleError).runDigitalFormSyncDryRun(sessionToken);
+      }).withFailureHandler(handleError).saveDigitalFormSyncConfig(sessionToken, collectDigitalFormSyncConfig());
+    }
+
+    function runDigitalFormSyncNow() {
+      if (!confirm('Run Digital Forms Sync now and update high-confidence checklist matches?')) return;
+      google.script.run.withSuccessHandler(function(result) {
+        renderDigitalSyncResult(result);
+        if (result.success) {
+          showToast('Digital Forms Sync complete', 'success');
+          loadDigitalFormSyncSettings();
+        }
+      }).withFailureHandler(handleError).runDigitalFormSync(sessionToken, { dryRun: false });
+    }
+
+    function toggleDigitalFormSchedule(enabled) {
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Schedule updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).setDigitalFormSyncSchedule(sessionToken, enabled, 10);
+    }
+
+    function confirmDigitalFormMatch(queueId) {
+      const row = document.querySelector(`.digital-review-row[data-queue-id="${queueId}"]`);
+      const participantId = row ? row.querySelector('.digital-review-participant').value.trim() : '';
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Review updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).reviewDigitalFormMatch(sessionToken, queueId, 'confirm', participantId);
+    }
+
+    function ignoreDigitalFormMatch(queueId) {
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Review updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).reviewDigitalFormMatch(sessionToken, queueId, 'ignore', '');
+    }
+
     // ============================================
     // SETTINGS
     // ============================================
@@ -6386,7 +6866,10 @@
             </div>
           </div>
         </div>
+        ${renderEnrollmentSettingsManager()}
+        ${currentUser && currentUser.role === 'admin' ? '<div id="digitalFormSyncSettings">' + renderDigitalFormSyncLoading() + '</div>' : ''}
       `;
+      loadDigitalFormSyncSettings();
     }
 
     function handleChangePassword(event) {
@@ -6464,6 +6947,10 @@
 
       if (isSectionVisible('fieldNotes')) {
         loadFieldNotesSection();
+      }
+
+      if (!isSectionVisible('dashboard') && !isSectionVisible('participants')) {
+        refreshParticipantCountForFilters();
       }
     }
 
@@ -6579,18 +7066,20 @@
         "'": '&#039;'
       };
 
-      return (text || '').replace(/[&<>"']/g, m => map[m]);
+      return String(text === null || text === undefined ? '' : text).replace(/[&<>"']/g, m => map[m]);
     }
 
     function formatDate(dateString) {
       if (!dateString) return '-';
-      const date = new Date(dateString);
+      const date = parseDateForDisplay(dateString);
+      if (!date) return dateString;
       return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     }
 
     function formatDateTime(dateString) {
       if (!dateString) return '-';
-      const date = new Date(dateString);
+      const date = parseDateForDisplay(dateString);
+      if (!date) return dateString;
       return date.toLocaleDateString('en-US', {
         year: 'numeric', month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit'
