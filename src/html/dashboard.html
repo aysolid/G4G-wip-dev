@@ -3453,8 +3453,8 @@
             <h3 class="card-title"><span class="material-icons">lock</span> Enrollment Field Manager</h3>
           </div>
           <div class="card-body">
-            <div class="alert alert-warning">Enrollment Field Manager is restricted. Ask david to grant access.</div>
-            <p style="color: var(--gray-600); margin: 0.75rem 0 0;">Enrollment fields control the single-enrollment form, batch CSV template, participant columns, and CSV import validation, so only david or admins he authorizes can change them.</p>
+            <div class="alert alert-warning">Enrollment Field Manager is restricted. Ask the primary administrator to grant access.</div>
+            <p style="color: var(--gray-600); margin: 0.75rem 0 0;">Enrollment fields control the single-enrollment form, batch CSV template, participant columns, and CSV import validation, so only the primary administrator or explicitly authorized admins can change them.</p>
           </div>
         </div>
       `;
@@ -6660,7 +6660,7 @@
           </div>
           <div class="card-body">
             <div class="alert alert-warning">${escapeHtml(data.message || 'Ask the primary administrator to grant access to Digital Forms Sync.')}</div>
-            <p style="color:var(--gray-600); margin:0.75rem 0 0;">Only the primary administrator, david, or admins he explicitly authorizes can configure mappings, run sync jobs, schedule sync triggers, or review uncertain matches.</p>
+            <p style="color:var(--gray-600); margin:0.75rem 0 0;">Only the primary administrator or explicitly authorized admins can configure mappings, run sync jobs, schedule sync triggers, or review uncertain matches.</p>
           </div>
         </div>
       `;
@@ -6693,14 +6693,16 @@
     function renderDigitalFormSyncSettings(data) {
       const config = data.config || {};
       const tabs = data.tabs || [];
+      const workbookIds = config.masterWorkbookIds || {};
       window.digitalSyncTabsCache = tabs;
       const tabNames = tabs.map(tab => tab.name);
       const protocols = data.protocolItems || [];
       const mappingsByNumber = {};
       (config.mappings || []).forEach(mapping => mappingsByNumber[String(mapping.instrumentNumber)] = mapping);
+      const configuredWorkbookCount = ['UGA', 'Missouri'].filter(site => workbookIds[site]).length;
       const workbookMessage = data.workbookError
         ? `<div class="alert alert-warning" style="margin-top: 0.75rem;">Workbook connection warning: ${escapeHtml(data.workbookError)}</div>`
-        : (config.masterWorkbookId ? `<div class="alert alert-success" style="margin-top: 0.75rem;">Workbook connected. ${tabs.length} tabs available.</div>` : '');
+        : (configuredWorkbookCount ? `<div class="alert alert-success" style="margin-top: 0.75rem;">${configuredWorkbookCount} site workbook${configuredWorkbookCount === 1 ? '' : 's'} configured. ${tabs.length} mapping tabs loaded from the first available workbook.</div>` : '');
       const mappingRows = protocols.map(item => {
         const mapping = mappingsByNumber[String(item.number)] || { enabled: false, instrumentNumber: item.number, instrumentName: item.name, sheetName: '', timestampColumn: 'Timestamp', nameColumn: '' };
         const selectedSheet = mapping.sheetName || '';
@@ -6764,10 +6766,14 @@
             </div>
           </div>
           <div class="card-body">
-            <div style="display:grid; grid-template-columns: 1.5fr 0.6fr 0.6fr 0.6fr; gap:0.75rem; align-items:end;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr 0.55fr 0.55fr 0.55fr; gap:0.75rem; align-items:end;">
               <div class="form-group" style="margin:0;">
-                <label class="form-label">Master Workbook URL or ID</label>
-                <input class="form-input" id="digitalSyncWorkbookId" value="${escapeHtml(config.masterWorkbookId || '')}" placeholder="Paste the G4G Master Form Response workbook URL or ID">
+                <label class="form-label">UGA Master Workbook URL or ID</label>
+                <input class="form-input" id="digitalSyncWorkbookUga" value="${escapeHtml(workbookIds.UGA || config.masterWorkbookId || '')}" placeholder="Paste UGA master workbook URL or ID">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Missouri Master Workbook URL or ID</label>
+                <input class="form-input" id="digitalSyncWorkbookMissouri" value="${escapeHtml(workbookIds.Missouri || '')}" placeholder="Paste Missouri master workbook URL or ID">
               </div>
               <div class="form-group" style="margin:0;">
                 <label class="form-label">Auto-match %</label>
@@ -6789,14 +6795,15 @@
             </div>
             ${workbookMessage}
             <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin:1rem 0;">
-              <button class="btn btn-secondary" onclick="testDigitalFormWorkbookConnection()"><span class="material-icons">wifi_tethering</span> Test Connection</button>
+              <button class="btn btn-secondary" onclick="testDigitalFormWorkbookConnection('UGA')"><span class="material-icons">wifi_tethering</span> Test UGA</button>
+              <button class="btn btn-secondary" onclick="testDigitalFormWorkbookConnection('Missouri')"><span class="material-icons">wifi_tethering</span> Test Missouri</button>
               <button class="btn btn-primary" onclick="saveDigitalFormSyncConfig()"><span class="material-icons">save</span> Save Sync Settings</button>
               <button class="btn btn-secondary" onclick="previewDigitalFormSync()"><span class="material-icons">visibility</span> Preview Sync</button>
               <button class="btn btn-warning" onclick="runDigitalFormSyncNow()"><span class="material-icons">sync</span> Run Sync Now</button>
               <button class="btn btn-secondary" onclick="toggleDigitalFormSchedule(${data.triggers && data.triggers.enabled ? 'false' : 'true'})"><span class="material-icons">schedule</span> ${data.triggers && data.triggers.enabled ? 'Disable Schedule' : 'Enable 10-min Schedule'}</button>
             </div>
             <div class="alert alert-info" style="margin:1rem 0 0;">
-              After setup, use Preview Sync to test mappings, then enable scheduled syncing. The scheduled job checks for new rows every 10 minutes and uses watermarks so already-processed response rows are skipped. Only low-confidence or ambiguous matches appear in the review queue.
+After setup, use Preview Sync to test mappings, then enable scheduled syncing. The scheduled job checks both configured site workbooks every 10 minutes, filters matches by site, and uses watermarks so already-processed response rows are skipped. Only low-confidence or ambiguous matches appear in the review queue.
             </div>
             <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
             <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
@@ -6834,7 +6841,10 @@
       })).filter(mapping => mapping.sheetName || mapping.enabled);
       return {
         enabled: document.getElementById('digitalSyncEnabled').checked,
-        masterWorkbookId: document.getElementById('digitalSyncWorkbookId').value.trim(),
+        masterWorkbookIds: {
+          UGA: document.getElementById('digitalSyncWorkbookUga').value.trim(),
+          Missouri: document.getElementById('digitalSyncWorkbookMissouri').value.trim()
+        },
         autoMatchThreshold: Number(document.getElementById('digitalSyncAutoThreshold').value) || 90,
         reviewMatchThreshold: Number(document.getElementById('digitalSyncReviewThreshold').value) || 70,
         lateResponseWindowDays: Number(document.getElementById('digitalSyncLateDays').value) || 0,
@@ -6861,10 +6871,11 @@
       }
     }
 
-    function testDigitalFormWorkbookConnection() {
-      const workbookId = document.getElementById('digitalSyncWorkbookId').value.trim();
+    function testDigitalFormWorkbookConnection(site) {
+      const inputId = site === 'Missouri' ? 'digitalSyncWorkbookMissouri' : 'digitalSyncWorkbookUga';
+      const workbookId = document.getElementById(inputId).value.trim();
       google.script.run.withSuccessHandler(function(result) {
-        showToast(result.message || (result.success ? 'Workbook connected' : 'Unable to connect'), result.success ? 'success' : 'error');
+        showToast((site || 'Workbook') + ': ' + (result.message || (result.success ? 'Workbook connected' : 'Unable to connect')), result.success ? 'success' : 'error');
         if (result.success) loadDigitalFormSyncSettings();
       }).withFailureHandler(handleError).testDigitalFormWorkbook(sessionToken, workbookId);
     }

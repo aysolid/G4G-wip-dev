@@ -1827,6 +1827,7 @@ function getDefaultDigitalFormSyncConfig() {
   return {
     enabled: false,
     masterWorkbookId: '',
+    masterWorkbookIds: { UGA: '', Missouri: '' },
     autoMatchThreshold: 90,
     reviewMatchThreshold: 70,
     lateResponseWindowDays: 0,
@@ -1849,7 +1850,16 @@ function normalizeDigitalFormSyncConfig(config) {
   const defaults = getDefaultDigitalFormSyncConfig();
   const input = config || {};
   const normalized = Object.assign({}, defaults, input);
-  normalized.masterWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
+  const workbookIdsInput = input.masterWorkbookIds || {};
+  const legacyWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
+  normalized.masterWorkbookIds = {
+    UGA: extractSpreadsheetId(workbookIdsInput.UGA || workbookIdsInput.uga || input.ugaMasterWorkbookId || ''),
+    Missouri: extractSpreadsheetId(workbookIdsInput.Missouri || workbookIdsInput.missouri || input.missouriMasterWorkbookId || '')
+  };
+  if (legacyWorkbookId && !normalized.masterWorkbookIds.UGA && !normalized.masterWorkbookIds.Missouri) {
+    normalized.masterWorkbookIds.UGA = legacyWorkbookId;
+  }
+  normalized.masterWorkbookId = normalized.masterWorkbookIds.UGA || normalized.masterWorkbookIds.Missouri || legacyWorkbookId;
   normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
   normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
   normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
@@ -1943,8 +1953,15 @@ function getDigitalFormSyncAdminData(token) {
   const config = getDigitalFormSyncConfigInternal();
   let tabs = [];
   let workbookError = '';
-  if (config.masterWorkbookId) {
-    try { tabs = getWorkbookTabsForDigitalSync(config.masterWorkbookId); } catch (e) { workbookError = e.message; }
+  const tabWorkbookIds = [config.masterWorkbookIds.UGA, config.masterWorkbookIds.Missouri, config.masterWorkbookId].filter(Boolean);
+  for (let i = 0; i < tabWorkbookIds.length; i++) {
+    try {
+      tabs = getWorkbookTabsForDigitalSync(tabWorkbookIds[i]);
+      workbookError = '';
+      break;
+    } catch (e) {
+      workbookError = e.message;
+    }
   }
   return {
     success: true,
@@ -2211,10 +2228,11 @@ function getExistingDigitalSyncKeys() {
   const headers = data[0] || [];
   const keys = {};
   for (let i = 1; i < data.length; i++) {
+    const sourceWorkbookId = data[i][headers.indexOf('sourceWorkbookId')];
     const sourceSheet = data[i][headers.indexOf('sourceSheetName')];
     const sourceRow = data[i][headers.indexOf('sourceRowNumber')];
     const hash = data[i][headers.indexOf('responseHash')];
-    keys[String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
+    keys[String(sourceWorkbookId) + '::' + String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
   }
   return keys;
 }
@@ -2223,7 +2241,7 @@ function getDigitalSourceLink(workbookId, sheet, rowNumber) {
   return 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + rowNumber + ':' + rowNumber;
 }
 
-function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config) {
+function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config, site) {
   const timestampCol = headers.indexOf(mapping.timestampColumn || 'Timestamp');
   const nameCol = headers.indexOf(mapping.nameColumn || '');
   const responseTimestamp = timestampCol >= 0 ? row[timestampCol] : '';
@@ -2238,7 +2256,8 @@ function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, wor
   const candidates = [];
   Object.keys(rolloutIds).forEach(rolloutId => {
     (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
-      if (String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+      const sameSite = !site || String(participant.site || '').toLowerCase() === String(site || '').toLowerCase();
+      if (sameSite && String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
     });
   });
   const presentParticipantIds = {};
@@ -2407,8 +2426,12 @@ function runDigitalFormSync(token, options) {
   const dryRun = !!(options && options.dryRun);
   const force = !!(options && options.force);
   const config = getDigitalFormSyncConfigInternal();
-  if (!config.masterWorkbookId) return { success: false, message: 'Master workbook is not configured' };
-  const workbook = openDigitalFormWorkbook(config.masterWorkbookId);
+  const workbookConfigs = [
+    { site: 'UGA', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.UGA },
+    { site: 'Missouri', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.Missouri }
+  ].filter(item => item.workbookId);
+  if (!workbookConfigs.length && config.masterWorkbookId) workbookConfigs.push({ site: '', workbookId: config.masterWorkbookId });
+  if (!workbookConfigs.length) return { success: false, message: 'At least one site master workbook is not configured' };
   const datasets = buildDigitalSyncDatasets();
   const existingKeys = getExistingDigitalSyncKeys();
   const watermarks = getDigitalFormSyncWatermarksInternal();
@@ -2416,26 +2439,37 @@ function runDigitalFormSync(token, options) {
   const errors = [];
   const enabledMappings = (config.mappings || []).filter(mapping => mapping.enabled);
 
-  enabledMappings.forEach(mapping => {
-    const sheet = workbook.getSheetByName(mapping.sheetName);
-    if (!sheet) { errors.push('Sheet not found: ' + mapping.sheetName); return; }
-    if (sheet.getLastRow() < 2) return;
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
-    const lastRow = sheet.getLastRow();
-    const watermark = watermarks[mapping.sheetName] || {};
-    const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
-    if (startRow > lastRow) return;
-    const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
-    values.forEach((row, offset) => {
-      const rowNumber = startRow + offset;
-      const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, config.masterWorkbookId, datasets, config);
-      const existingKey = analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
-      if (existingKeys[existingKey] && !force) return;
-      matches.push(analysis);
-    });
-    if (!dryRun) {
-      watermarks[mapping.sheetName] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
+  workbookConfigs.forEach(workbookConfig => {
+    let workbook;
+    try {
+      workbook = openDigitalFormWorkbook(workbookConfig.workbookId);
+    } catch (e) {
+      errors.push((workbookConfig.site || 'Master') + ' workbook: ' + e.message);
+      return;
     }
+    enabledMappings.forEach(mapping => {
+      const sheet = workbook.getSheetByName(mapping.sheetName);
+      if (!sheet) { errors.push((workbookConfig.site || 'Master') + ' sheet not found: ' + mapping.sheetName); return; }
+      if (sheet.getLastRow() < 2) return;
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+      const lastRow = sheet.getLastRow();
+      const watermarkKey = (workbookConfig.site || workbookConfig.workbookId) + '::' + mapping.sheetName;
+      const watermark = watermarks[watermarkKey] || {};
+      const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
+      if (startRow > lastRow) return;
+      const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
+      values.forEach((row, offset) => {
+        const rowNumber = startRow + offset;
+        const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookConfig.workbookId, datasets, config, workbookConfig.site);
+        analysis.sourceSite = workbookConfig.site || '';
+        const existingKey = analysis.sourceWorkbookId + '::' + analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
+        if (existingKeys[existingKey] && !force) return;
+        matches.push(analysis);
+      });
+      if (!dryRun) {
+        watermarks[watermarkKey] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
+      }
+    });
   });
 
   const updatedCount = dryRun ? 0 : applyDigitalFormChecklistUpdates(matches, datasets, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
