@@ -221,8 +221,7 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal(),
-    digitalFormSync: getDigitalFormSyncConfigInternal()
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1320,8 +1319,7 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal(),
-    digitalFormSync: getDigitalFormSyncConfigInternal()
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1490,8 +1488,7 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal(),
-    digitalFormSync: getDigitalFormSyncConfigInternal()
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
 }
 
@@ -1640,6 +1637,99 @@ function upsertConfigValue(key, value, description) {
 const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
 const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
 const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
+const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
+
+function isDigitalFormSyncSuperAdmin(user) {
+  if (!user || user.role !== 'admin') return false;
+  const userId = String(user.userId || '').trim();
+  const username = String(user.username || '').trim().toLowerCase();
+  return userId === DIGITAL_FORM_SYNC_SUPER_ADMIN_ID || username === DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME;
+}
+
+function getDigitalFormSyncAllowedAdminIdsInternal() {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  const configMap = getConfigMap();
+  const raw = configMap[DIGITAL_FORM_SYNC_ACCESS_KEY];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      const ids = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.allowedAdminIds) ? parsed.allowedAdminIds : []);
+      ids.forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    } catch (e) {
+      String(raw).split(',').forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    }
+  }
+  return Object.keys(allowed);
+}
+
+function canAccessDigitalFormSync(user) {
+  if (!user || user.role !== 'admin') return false;
+  if (isDigitalFormSyncSuperAdmin(user)) return true;
+  const userId = String(user.userId || '').trim();
+  return !!userId && getDigitalFormSyncAllowedAdminIdsInternal().indexOf(userId) !== -1;
+}
+
+function getDigitalFormSyncAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessDigitalFormSync(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getDigitalFormSyncAllowedAdminIdsInternal()
+  };
+}
+
+function getAdminUsersForDigitalFormSyncAccess() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Users');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0] || [];
+  const idx = header => headers.indexOf(header);
+  const allowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  return values.slice(1)
+    .map(row => ({
+      userId: row[idx('userId')] || '',
+      username: row[idx('username')] || '',
+      fullName: row[idx('fullName')] || row[idx('name')] || '',
+      role: row[idx('role')] || '',
+      site: row[idx('site')] || '',
+      status: row[idx('status')] || ''
+    }))
+    .filter(user => String(user.role).toLowerCase() === 'admin' && String(user.status || 'active').toLowerCase() !== 'inactive')
+    .map(user => Object.assign({}, user, {
+      isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+      hasAccess: isDigitalFormSyncSuperAdmin(user) || allowed.indexOf(String(user.userId || '').trim()) !== -1
+    }));
+}
+
+function saveDigitalFormSyncAccess(token, adminUserIds) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only the primary Digital Forms Sync administrator can manage access.' };
+  }
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(DIGITAL_FORM_SYNC_ACCESS_KEY, JSON.stringify(Object.keys(allowed)), 'Admin users allowed to manage Digital Forms Sync');
+  return {
+    success: true,
+    message: 'Digital Forms Sync access updated',
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: getAdminUsersForDigitalFormSyncAccess()
+  };
+}
 
 function ensureDigitalFormSyncSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1724,7 +1814,7 @@ function saveDigitalFormSyncWatermarksInternal(watermarks) {
 
 function saveDigitalFormSyncConfig(token, config) {
   const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   ensureDigitalFormSyncSheets();
   const normalized = normalizeDigitalFormSyncConfig(config || {});
   upsertConfigValue(DIGITAL_FORM_SYNC_CONFIG_KEY, JSON.stringify(normalized), 'Google Forms digital protocol sync configuration');
@@ -1733,9 +1823,9 @@ function saveDigitalFormSyncConfig(token, config) {
 
 function getDigitalFormSyncConfig(token) {
   const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   ensureDigitalFormSyncSheets();
-  return { success: true, config: getDigitalFormSyncConfigInternal() };
+  return { success: true, config: getDigitalFormSyncConfigInternal(), accessControl: getDigitalFormSyncAccessControlForUser(currentUser) };
 }
 
 function openDigitalFormWorkbook(workbookId) {
@@ -1756,7 +1846,7 @@ function getWorkbookTabsForDigitalSync(workbookId) {
 
 function testDigitalFormWorkbook(token, workbookId) {
   const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   try {
     const tabs = getWorkbookTabsForDigitalSync(workbookId);
     return { success: true, message: 'Connected to master workbook', tabs: tabs };
@@ -1768,6 +1858,14 @@ function testDigitalFormWorkbook(token, workbookId) {
 function getDigitalFormSyncAdminData(token) {
   const currentUser = validateSession(token);
   if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) {
+    return {
+      success: true,
+      restricted: true,
+      message: 'Digital Forms Sync is restricted. Ask the primary administrator to grant access.',
+      accessControl: getDigitalFormSyncAccessControlForUser(currentUser)
+    };
+  }
   ensureDigitalFormSyncSheets();
   const config = getDigitalFormSyncConfigInternal();
   let tabs = [];
@@ -1782,7 +1880,9 @@ function getDigitalFormSyncAdminData(token) {
     workbookError: workbookError,
     protocolItems: getGlobalProtocolItems(),
     queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
-    triggers: getDigitalFormSyncTriggerSummary()
+    triggers: getDigitalFormSyncTriggerSummary(),
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: isDigitalFormSyncSuperAdmin(currentUser) ? getAdminUsersForDigitalFormSyncAccess() : []
   };
 }
 
@@ -2228,8 +2328,8 @@ function appendDigitalReviewQueue(matches, dryRun) {
 }
 
 function runDigitalFormSync(token, options) {
-  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin' };
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin', userId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID, username: DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   ensureDigitalFormSyncSheets();
   const dryRun = !!(options && options.dryRun);
   const force = !!(options && options.force);
@@ -2308,7 +2408,7 @@ function getDigitalFormSyncTriggerSummary() {
 
 function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
   const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun') {
       ScriptApp.deleteTrigger(trigger);
@@ -2344,7 +2444,7 @@ function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
 
 function reviewDigitalFormMatch(token, queueId, action, participantId) {
   const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
   ensureDigitalFormSyncSheets();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const queueSheet = ss.getSheetByName('FormResponseMatchQueue');
