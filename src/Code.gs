@@ -1640,6 +1640,7 @@ const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
 const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
 const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
 const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
+const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
 
 function isDigitalFormSyncSuperAdmin(user) {
   if (!user || user.role !== 'admin') return false;
@@ -1649,10 +1650,18 @@ function isDigitalFormSyncSuperAdmin(user) {
 }
 
 function getDigitalFormSyncAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
   const allowed = {};
   allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
   const configMap = getConfigMap();
-  const raw = configMap[DIGITAL_FORM_SYNC_ACCESS_KEY];
+  const raw = configMap[configKey];
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
@@ -1671,11 +1680,19 @@ function getDigitalFormSyncAllowedAdminIdsInternal() {
   return Object.keys(allowed);
 }
 
-function canAccessDigitalFormSync(user) {
+function isUserAllowedForSensitiveFeature(user, configKey) {
   if (!user || user.role !== 'admin') return false;
   if (isDigitalFormSyncSuperAdmin(user)) return true;
   const userId = String(user.userId || '').trim();
-  return !!userId && getDigitalFormSyncAllowedAdminIdsInternal().indexOf(userId) !== -1;
+  return !!userId && getSensitiveFeatureAllowedAdminIdsInternal(configKey).indexOf(userId) !== -1;
+}
+
+function canAccessDigitalFormSync(user) {
+  return isUserAllowedForSensitiveFeature(user, DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function canAccessEnrollmentFieldManager(user) {
+  return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
 }
 
 function getDigitalFormSyncAccessControlForUser(user) {
@@ -1684,6 +1701,15 @@ function getDigitalFormSyncAccessControlForUser(user) {
     isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
     superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
     allowedAdminIds: getDigitalFormSyncAllowedAdminIdsInternal()
+  };
+}
+
+function getEnrollmentFieldManagerAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessEnrollmentFieldManager(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
   };
 }
 
@@ -1729,6 +1755,53 @@ function saveDigitalFormSyncAccess(token, adminUserIds) {
     accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
     adminUsers: getAdminUsersForDigitalFormSyncAccess()
   };
+}
+
+function saveSensitiveFeatureAllowedAdminIdsInternal(configKey, adminUserIds, description) {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(configKey, JSON.stringify(Object.keys(allowed)), description);
+}
+
+function getAdminFeatureAccessData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
+  const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
+  return {
+    success: true,
+    isSuperAdmin: isSuperAdmin,
+    digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
+    enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
+    adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
+      digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
+      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1
+    })) : []
+  };
+}
+
+function saveAdminFeatureAccess(token, access) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only david can manage access to sensitive admin features.' };
+  }
+  const payload = access || {};
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    DIGITAL_FORM_SYNC_ACCESS_KEY,
+    payload.digitalFormsSyncAdminIds || [],
+    'Admin users allowed to manage Digital Forms Sync'
+  );
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
+    payload.enrollmentFieldManagerAdminIds || [],
+    'Admin users allowed to manage Enrollment Field Manager'
+  );
+  return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
 }
 
 function ensureDigitalFormSyncSheets() {
@@ -4312,7 +4385,7 @@ function getEnrollmentFields(token) {
 
 function saveEnrollmentFields(token, fields) {
   const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessEnrollmentFieldManager(currentUser)) return { success: false, message: 'Unauthorized' };
   if (!Array.isArray(fields) || fields.length === 0) return { success: false, message: 'At least one enrollment field is required' };
 
   const used = {};

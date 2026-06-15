@@ -1136,6 +1136,7 @@
     let batchEnrollmentResult = null;
     let instrumentStatsLookup = {};
     let attendanceParticipantsCache = [];
+    let adminFeatureAccess = null;
     let attendanceParticipantsRolloutId = null;
     let attendanceReportSessionLookup = {};
     let isLoggingOut = false;
@@ -3434,6 +3435,90 @@
         }).join('');
     }
 
+    function renderEnrollmentSettingsLoading() {
+      return `
+        <div class="card" style="max-width: 980px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">dynamic_form</span> Enrollment Field Manager</h3>
+          </div>
+          <div class="card-body"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+      `;
+    }
+
+    function renderEnrollmentSettingsRestricted() {
+      return `
+        <div class="card" style="max-width: 980px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">lock</span> Enrollment Field Manager</h3>
+          </div>
+          <div class="card-body">
+            <div class="alert alert-warning">Enrollment Field Manager is restricted. Ask david to grant access.</div>
+            <p style="color: var(--gray-600); margin: 0.75rem 0 0;">Enrollment fields control the single-enrollment form, batch CSV template, participant columns, and CSV import validation, so only david or admins he authorizes can change them.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAdminFeatureAccessManager(data) {
+      if (!data || !data.isSuperAdmin) return '';
+      const rows = (data.adminUsers || []).map(user => `
+        <div class="feature-access-row" data-user-id="${escapeHtml(user.userId || '')}" style="display:grid; grid-template-columns:1fr auto auto; gap:0.9rem; align-items:center; padding:0.8rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+          <div>
+            <strong>${escapeHtml(user.fullName || user.username || user.userId)}</strong>
+            <div style="font-size:0.75rem; color:var(--gray-500);">${escapeHtml(user.username || '')} · ${escapeHtml(user.site || 'All sites')} · ${escapeHtml(user.userId || '')}</div>
+          </div>
+          <label style="display:flex; gap:0.4rem; align-items:center;">
+            <input type="checkbox" class="feature-access-digital" ${user.digitalFormsSyncAccess ? 'checked' : ''} ${user.isSuperAdmin ? 'disabled' : ''}>
+            Digital Forms Sync
+          </label>
+          <label style="display:flex; gap:0.4rem; align-items:center;">
+            <input type="checkbox" class="feature-access-enrollment" ${user.enrollmentFieldManagerAccess ? 'checked' : ''} ${user.isSuperAdmin ? 'disabled' : ''}>
+            Enrollment Fields
+          </label>
+        </div>
+      `).join('');
+      return `
+        <div class="card" style="max-width: 980px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">admin_panel_settings</span> Sensitive Feature Access</h3>
+          </div>
+          <div class="card-body">
+            <p style="color: var(--gray-600); margin-bottom: 1rem;">David can grant specific admins access to Digital Forms Sync and Enrollment Field Manager. David always keeps access to both features.</p>
+            <div id="sensitiveFeatureAccessRows" style="display:grid; gap:0.65rem;">${rows || '<p style="color: var(--gray-500);">No active admin users found.</p>'}</div>
+            <button class="btn btn-primary" style="margin-top:1rem;" type="button" onclick="saveAdminFeatureAccessConfig()">
+              <span class="material-icons">save</span>
+              Save Feature Access
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadAdminFeatureAccessSettings() {
+      const enrollmentTarget = document.getElementById('enrollmentFieldManagerSettings');
+      const accessTarget = document.getElementById('sensitiveFeatureAccessSettings');
+      if (!currentUser || currentUser.role !== 'admin') return;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result || !result.success) {
+            if (enrollmentTarget) enrollmentTarget.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Unable to load admin feature access')}</div>`;
+            return;
+          }
+          adminFeatureAccess = result;
+          if (enrollmentTarget) {
+            enrollmentTarget.innerHTML = result.enrollmentFieldManager && result.enrollmentFieldManager.hasAccess
+              ? renderEnrollmentSettingsManager()
+              : renderEnrollmentSettingsRestricted();
+          }
+          if (accessTarget) accessTarget.innerHTML = renderAdminFeatureAccessManager(result);
+        })
+        .withFailureHandler(function(error) {
+          if (enrollmentTarget) enrollmentTarget.innerHTML = `<div class="alert alert-error">${escapeHtml(error && error.message ? error.message : error)}</div>`;
+        })
+        .getAdminFeatureAccessData(sessionToken);
+    }
+
     function renderEnrollmentSettingsManager() {
       if (!currentUser || currentUser.role !== 'admin') return '';
       const fields = getEnrollmentFieldsConfig();
@@ -3556,6 +3641,35 @@
         })
         .withFailureHandler(handleError)
         .saveEnrollmentFields(sessionToken, fields);
+    }
+
+    function collectAdminFeatureAccessConfig() {
+      const digitalFormsSyncAdminIds = [];
+      const enrollmentFieldManagerAdminIds = [];
+      Array.from(document.querySelectorAll('.feature-access-row')).forEach(row => {
+        const userId = row.dataset.userId;
+        if (!userId) return;
+        if (row.querySelector('.feature-access-digital').checked || row.querySelector('.feature-access-digital').disabled) {
+          digitalFormsSyncAdminIds.push(userId);
+        }
+        if (row.querySelector('.feature-access-enrollment').checked || row.querySelector('.feature-access-enrollment').disabled) {
+          enrollmentFieldManagerAdminIds.push(userId);
+        }
+      });
+      return { digitalFormsSyncAdminIds, enrollmentFieldManagerAdminIds };
+    }
+
+    function saveAdminFeatureAccessConfig() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showToast(result.message || (result.success ? 'Feature access updated' : 'Unable to update feature access'), result.success ? 'success' : 'error');
+          if (result.success) {
+            loadAdminFeatureAccessSettings();
+            loadDigitalFormSyncSettings();
+          }
+        })
+        .withFailureHandler(handleError)
+        .saveAdminFeatureAccess(sessionToken, collectAdminFeatureAccessConfig());
     }
 
     // ============================================
@@ -6579,6 +6693,7 @@
     function renderDigitalFormSyncSettings(data) {
       const config = data.config || {};
       const tabs = data.tabs || [];
+      window.digitalSyncTabsCache = tabs;
       const tabNames = tabs.map(tab => tab.name);
       const protocols = data.protocolItems || [];
       const mappingsByNumber = {};
@@ -6610,7 +6725,7 @@
             </div>
             <div class="form-group" style="margin:0;">
               <label class="form-label">Response Tab</label>
-              <select class="form-select digital-sync-sheet">${tabOptions}</select>
+              <select class="form-select digital-sync-sheet" onchange="updateDigitalSyncColumnOptions(this.closest('.digital-sync-row'))">${tabOptions}</select>
             </div>
             <div class="form-group" style="margin:0;">
               <label class="form-label">Timestamp Column</label>
@@ -6680,12 +6795,14 @@
               <button class="btn btn-warning" onclick="runDigitalFormSyncNow()"><span class="material-icons">sync</span> Run Sync Now</button>
               <button class="btn btn-secondary" onclick="toggleDigitalFormSchedule(${data.triggers && data.triggers.enabled ? 'false' : 'true'})"><span class="material-icons">schedule</span> ${data.triggers && data.triggers.enabled ? 'Disable Schedule' : 'Enable 10-min Schedule'}</button>
             </div>
+            <div class="alert alert-info" style="margin:1rem 0 0;">
+              After setup, use Preview Sync to test mappings, then enable scheduled syncing. The scheduled job checks for new rows every 10 minutes and uses watermarks so already-processed response rows are skipped. Only low-confidence or ambiguous matches appear in the review queue.
+            </div>
             <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
             <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
             <div id="digitalSyncPreview" style="margin-top:1rem;"></div>
             <h4 style="margin:1.5rem 0 0.75rem;">Match Review Queue</h4>
             <div id="digitalSyncReviewQueue" style="display:grid; gap:0.65rem;">${queueHtml}</div>
-            ${renderDigitalFormSyncAccessManager(data)}
           </div>
         </div>
       `;
@@ -6725,6 +6842,23 @@
         saveAliasesOnReview: document.getElementById('digitalSyncSaveAliases').checked,
         mappings
       };
+    }
+
+    function updateDigitalSyncColumnOptions(row) {
+      if (!row) return;
+      const sheetName = row.querySelector('.digital-sync-sheet').value;
+      const tab = (window.digitalSyncTabsCache || []).find(item => item.name === sheetName);
+      const headers = tab ? tab.headers || [] : [];
+      const timestampSelect = row.querySelector('.digital-sync-timestamp');
+      const nameSelect = row.querySelector('.digital-sync-name');
+      const options = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+      if (timestampSelect) {
+        timestampSelect.innerHTML = `<option value="Timestamp">Timestamp</option>${options}`;
+        if (headers.indexOf('Timestamp') !== -1) timestampSelect.value = 'Timestamp';
+      }
+      if (nameSelect) {
+        nameSelect.innerHTML = `<option value="">Select name column...</option>${options}`;
+      }
     }
 
     function testDigitalFormWorkbookConnection() {
@@ -6866,9 +7000,11 @@
             </div>
           </div>
         </div>
-        ${renderEnrollmentSettingsManager()}
+        ${currentUser && currentUser.role === 'admin' ? '<div id="enrollmentFieldManagerSettings">' + renderEnrollmentSettingsLoading() + '</div>' : ''}
+        ${currentUser && currentUser.role === 'admin' ? '<div id="sensitiveFeatureAccessSettings"></div>' : ''}
         ${currentUser && currentUser.role === 'admin' ? '<div id="digitalFormSyncSettings">' + renderDigitalFormSyncLoading() + '</div>' : ''}
       `;
+      loadAdminFeatureAccessSettings();
       loadDigitalFormSyncSettings();
     }
 
