@@ -237,6 +237,216 @@ function getConfig() {
   return { success: false, message: 'Session not found' };
 }
 
+// ============================================
+// MEDIA & FIELD RECORDS
+// ============================================
+
+function ensureMediaRecordSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createSheetIfNotExists(ss, 'ParticipantMedia', [
+    'mediaId', 'rolloutId', 'participantId', 'site', 'mediaType', 'title', 'driveUrl',
+    'thumbnailUrl', 'playtesterParticipantId', 'playtesterName', 'notes', 'createdAt',
+    'createdBy', 'updatedAt', 'updatedBy', 'status'
+  ]);
+  createSheetIfNotExists(ss, 'CohortMedia', [
+    'mediaId', 'rolloutId', 'site', 'mediaCategory', 'title', 'driveUrl', 'thumbnailUrl',
+    'description', 'capturedDate', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'status'
+  ]);
+}
+
+function buildRowFromObject(headers, data) {
+  return headers.map(header => data[header] !== undefined ? data[header] : '');
+}
+
+function rowToObject(headers, row) {
+  const obj = {};
+  headers.forEach((header, idx) => obj[header] = row[idx]);
+  return obj;
+}
+
+function getParticipantsForMediaRollout_(token, rolloutId) {
+  const result = getAllParticipants(token, { rolloutId: rolloutId });
+  if (!result.success) return result;
+  const participants = (result.participants || []).filter(participant => String(participant.rolloutId) === String(rolloutId));
+  return { success: true, participants: participants };
+}
+
+function getParticipantMediaByRollout(token, rolloutId, mediaType) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  if (!rolloutId || rolloutId === 'All') return { success: false, message: 'Select a specific cohort first' };
+  ensureMediaRecordSheets();
+  const participantsResult = getParticipantsForMediaRollout_(token, rolloutId);
+  if (!participantsResult.success) return participantsResult;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const media = [];
+  for (let i = 1; i < data.length; i++) {
+    const item = rowToObject(headers, data[i]);
+    if (String(item.rolloutId) !== String(rolloutId)) continue;
+    if (String(item.mediaType) !== String(mediaType)) continue;
+    if (String(item.status || 'active').toLowerCase() === 'deleted') continue;
+    media.push(item);
+  }
+  return { success: true, participants: participantsResult.participants, media: media };
+}
+
+function saveParticipantMedia(token, media) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const payload = media || {};
+  if (!payload.rolloutId || !payload.participantId || !payload.mediaType) return { success: false, message: 'rolloutId, participantId, and mediaType are required' };
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const now = new Date().toISOString();
+  const existingId = String(payload.mediaId || '').trim();
+  const mediaIdCol = headers.indexOf('mediaId');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const participantCol = headers.indexOf('participantId');
+  const typeCol = headers.indexOf('mediaType');
+  let rowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    const byId = existingId && String(data[i][mediaIdCol]) === existingId;
+    const byNaturalKey = String(data[i][rolloutCol]) === String(payload.rolloutId) && String(data[i][participantCol]) === String(payload.participantId) && String(data[i][typeCol]) === String(payload.mediaType) && String(data[i][headers.indexOf('status')] || 'active') !== 'deleted';
+    if (byId || byNaturalKey) { rowIndex = i + 1; break; }
+  }
+  const existing = rowIndex > 0 ? rowToObject(headers, data[rowIndex - 1]) : {};
+  const record = Object.assign({}, existing, {
+    mediaId: existing.mediaId || existingId || generateUUID(),
+    rolloutId: payload.rolloutId,
+    participantId: payload.participantId,
+    site: payload.site || existing.site || '',
+    mediaType: payload.mediaType,
+    title: payload.title || existing.title || '',
+    driveUrl: String(payload.driveUrl || '').trim(),
+    thumbnailUrl: String(payload.thumbnailUrl || existing.thumbnailUrl || '').trim(),
+    playtesterParticipantId: payload.playtesterParticipantId || '',
+    playtesterName: payload.playtesterName || '',
+    notes: payload.notes || '',
+    createdAt: existing.createdAt || now,
+    createdBy: existing.createdBy || currentUser.fullName,
+    updatedAt: now,
+    updatedBy: currentUser.fullName,
+    status: payload.status || 'active'
+  });
+  const row = buildRowFromObject(headers, record);
+  if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
+  else appendRowsAsPlainText(sheet, [row]);
+  invalidateSheetSnapshot('ParticipantMedia');
+  return { success: true, message: 'Participant media saved', media: record };
+}
+
+function deleteParticipantMedia(token, mediaId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const statusCol = headers.indexOf('status');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const updatedByCol = headers.indexOf('updatedBy');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][mediaIdCol]) === String(mediaId)) {
+      const row = data[i].slice(0, headers.length);
+      row[statusCol] = 'deleted';
+      row[updatedAtCol] = new Date().toISOString();
+      row[updatedByCol] = currentUser.fullName;
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateSheetSnapshot('ParticipantMedia');
+      return { success: true, message: 'Participant media removed' };
+    }
+  }
+  return { success: false, message: 'Media record not found' };
+}
+
+function getCohortMediaByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  if (!rolloutId || rolloutId === 'All') return { success: false, message: 'Select a specific cohort first' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const media = [];
+  for (let i = 1; i < data.length; i++) {
+    const item = rowToObject(headers, data[i]);
+    if (String(item.rolloutId) !== String(rolloutId)) continue;
+    if (String(item.status || 'active').toLowerCase() === 'deleted') continue;
+    media.push(item);
+  }
+  return { success: true, media: media };
+}
+
+function saveCohortMedia(token, media) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const payload = media || {};
+  if (!payload.rolloutId || !payload.mediaCategory) return { success: false, message: 'rolloutId and mediaCategory are required' };
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const now = new Date().toISOString();
+  const existingId = String(payload.mediaId || '').trim();
+  let rowIndex = -1;
+  const mediaIdCol = headers.indexOf('mediaId');
+  for (let i = 1; i < data.length; i++) {
+    if (existingId && String(data[i][mediaIdCol]) === existingId) { rowIndex = i + 1; break; }
+  }
+  const existing = rowIndex > 0 ? rowToObject(headers, data[rowIndex - 1]) : {};
+  const record = Object.assign({}, existing, {
+    mediaId: existing.mediaId || existingId || generateUUID(),
+    rolloutId: payload.rolloutId,
+    site: payload.site || existing.site || '',
+    mediaCategory: payload.mediaCategory,
+    title: payload.title || '',
+    driveUrl: String(payload.driveUrl || '').trim(),
+    thumbnailUrl: String(payload.thumbnailUrl || '').trim(),
+    description: payload.description || '',
+    capturedDate: payload.capturedDate || '',
+    createdAt: existing.createdAt || now,
+    createdBy: existing.createdBy || currentUser.fullName,
+    updatedAt: now,
+    updatedBy: currentUser.fullName,
+    status: payload.status || 'active'
+  });
+  const row = buildRowFromObject(headers, record);
+  if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
+  else appendRowsAsPlainText(sheet, [row]);
+  invalidateSheetSnapshot('CohortMedia');
+  return { success: true, message: 'Cohort media saved', media: record };
+}
+
+function deleteCohortMedia(token, mediaId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const statusCol = headers.indexOf('status');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const updatedByCol = headers.indexOf('updatedBy');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][mediaIdCol]) === String(mediaId)) {
+      const row = data[i].slice(0, headers.length);
+      row[statusCol] = 'deleted';
+      row[updatedAtCol] = new Date().toISOString();
+      row[updatedByCol] = currentUser.fullName;
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateSheetSnapshot('CohortMedia');
+      return { success: true, message: 'Cohort media removed' };
+    }
+  }
+  return { success: false, message: 'Media record not found' };
+}
+
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
@@ -2661,6 +2871,8 @@ function initializeDatabase() {
   createSheetIfNotExists(ss, 'SessionAttendance', [
     'attendanceId', 'sessionId', 'participantId', 'status', 'markedAt', 'markedBy', 'notes'
   ]);
+
+  ensureMediaRecordSheets();
 
   // Create ActivityLog sheet
   createSheetIfNotExists(ss, 'ActivityLog', [
