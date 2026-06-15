@@ -221,7 +221,8 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal()
+    enrollmentFields: getEnrollmentFieldsInternal(),
+    digitalFormSync: getDigitalFormSyncConfigInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1319,7 +1320,8 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal()
+    enrollmentFields: getEnrollmentFieldsInternal(),
+    digitalFormSync: getDigitalFormSyncConfigInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1488,7 +1490,8 @@ function getConfig() {
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
     sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal()
+    enrollmentFields: getEnrollmentFieldsInternal(),
+    digitalFormSync: getDigitalFormSyncConfigInternal()
   };
 }
 
@@ -1627,6 +1630,778 @@ function upsertConfigValue(key, value, description) {
   }
   configSheet.appendRow([key, value, description || '', timestamp]);
   invalidateConfigRuntimeCache();
+}
+
+
+// ============================================
+// DIGITAL GOOGLE FORMS PROTOCOL SYNC
+// ============================================
+
+const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
+const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
+const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
+
+function ensureDigitalFormSyncSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createSheetIfNotExists(ss, 'FormResponseSyncLog', [
+    'syncId', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'responseHash', 'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName',
+    'candidateRolloutId', 'candidateSessionId', 'participantId', 'checklistId', 'matchStatus',
+    'confidenceScore', 'matchedBy', 'matchedAt', 'notes', 'sourceLink'
+  ]);
+  createSheetIfNotExists(ss, 'FormResponseMatchQueue', [
+    'queueId', 'createdAt', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName', 'candidateRolloutId',
+    'candidateSessionId', 'suggestedParticipantId', 'suggestedParticipantName', 'confidenceScore',
+    'status', 'reviewedBy', 'reviewedAt', 'notes', 'sourceLink', 'responseHash'
+  ]);
+  createSheetIfNotExists(ss, 'ParticipantAliases', [
+    'aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'
+  ]);
+}
+
+function getDefaultDigitalFormSyncConfig() {
+  return {
+    enabled: false,
+    masterWorkbookId: '',
+    autoMatchThreshold: 90,
+    reviewMatchThreshold: 70,
+    lateResponseWindowDays: 0,
+    preferPresentAttendance: true,
+    updateMissingChecklistItems: true,
+    saveAliasesOnReview: true,
+    mappings: []
+  };
+}
+
+function extractSpreadsheetId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) return match[1];
+  return raw.replace(/[?#].*$/, '');
+}
+
+function normalizeDigitalFormSyncConfig(config) {
+  const defaults = getDefaultDigitalFormSyncConfig();
+  const input = config || {};
+  const normalized = Object.assign({}, defaults, input);
+  normalized.masterWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
+  normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
+  normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
+  normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
+  normalized.mappings = Array.isArray(input.mappings) ? input.mappings.map(mapping => ({
+    enabled: !!mapping.enabled,
+    instrumentNumber: String(mapping.instrumentNumber || '').trim(),
+    instrumentName: String(mapping.instrumentName || '').trim(),
+    sheetName: String(mapping.sheetName || '').trim(),
+    timestampColumn: String(mapping.timestampColumn || 'Timestamp').trim() || 'Timestamp',
+    nameColumn: String(mapping.nameColumn || '').trim(),
+    allowLateResponses: mapping.allowLateResponses !== false
+  })).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
+  return normalized;
+}
+
+function getDigitalFormSyncConfigInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_CONFIG_KEY]) return getDefaultDigitalFormSyncConfig();
+  try {
+    return normalizeDigitalFormSyncConfig(JSON.parse(configMap[DIGITAL_FORM_SYNC_CONFIG_KEY] || '{}'));
+  } catch (e) {
+    return getDefaultDigitalFormSyncConfig();
+  }
+}
+
+function getDigitalFormSyncWatermarksInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY]) return {};
+  try { return JSON.parse(configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY] || '{}') || {}; } catch (e) { return {}; }
+}
+
+function saveDigitalFormSyncWatermarksInternal(watermarks) {
+  upsertConfigValue(DIGITAL_FORM_SYNC_WATERMARKS_KEY, JSON.stringify(watermarks || {}), 'Per-form response sync watermarks');
+}
+
+function saveDigitalFormSyncConfig(token, config) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const normalized = normalizeDigitalFormSyncConfig(config || {});
+  upsertConfigValue(DIGITAL_FORM_SYNC_CONFIG_KEY, JSON.stringify(normalized), 'Google Forms digital protocol sync configuration');
+  return { success: true, message: 'Digital Forms Sync configuration saved', config: normalized };
+}
+
+function getDigitalFormSyncConfig(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  return { success: true, config: getDigitalFormSyncConfigInternal() };
+}
+
+function openDigitalFormWorkbook(workbookId) {
+  const id = extractSpreadsheetId(workbookId);
+  if (!id) throw new Error('Master workbook ID is required');
+  return SpreadsheetApp.openById(id);
+}
+
+function getWorkbookTabsForDigitalSync(workbookId) {
+  const workbook = openDigitalFormWorkbook(workbookId);
+  return workbook.getSheets().map(sheet => ({
+    name: sheet.getName(),
+    sheetId: sheet.getSheetId(),
+    lastRow: sheet.getLastRow(),
+    headers: sheet.getLastRow() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean) : []
+  }));
+}
+
+function testDigitalFormWorkbook(token, workbookId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  try {
+    const tabs = getWorkbookTabsForDigitalSync(workbookId);
+    return { success: true, message: 'Connected to master workbook', tabs: tabs };
+  } catch (error) {
+    return { success: false, message: 'Unable to connect: ' + error.message };
+  }
+}
+
+function getDigitalFormSyncAdminData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const config = getDigitalFormSyncConfigInternal();
+  let tabs = [];
+  let workbookError = '';
+  if (config.masterWorkbookId) {
+    try { tabs = getWorkbookTabsForDigitalSync(config.masterWorkbookId); } catch (e) { workbookError = e.message; }
+  }
+  return {
+    success: true,
+    config: config,
+    tabs: tabs,
+    workbookError: workbookError,
+    protocolItems: getGlobalProtocolItems(),
+    queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
+    triggers: getDigitalFormSyncTriggerSummary()
+  };
+}
+
+function normalizePersonNameForMatch(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  a = String(a || '');
+  b = String(b || '');
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = [];
+  const curr = [];
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyStringScore(a, b) {
+  const left = normalizePersonNameForMatch(a);
+  const right = normalizePersonNameForMatch(b);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+  const distance = levenshteinDistance(left, right);
+  const maxLen = Math.max(left.length, right.length) || 1;
+  return Math.max(0, Math.round((1 - distance / maxLen) * 100));
+}
+
+function scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds) {
+  const entered = normalizePersonNameForMatch(rawName);
+  const fullName = normalizePersonNameForMatch(participant.fullName);
+  if (!entered || !fullName) return { score: 0, reason: 'Missing name' };
+  const enteredTokens = entered.split(' ').filter(Boolean);
+  const fullTokens = fullName.split(' ').filter(Boolean);
+  let score = fuzzyStringScore(entered, fullName);
+  let reason = 'Fuzzy full-name comparison';
+  if (entered === fullName) {
+    score = 100;
+    reason = 'Exact full-name match';
+  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
+    score = Math.max(score, 82);
+    reason = 'First-name match';
+  } else if (enteredTokens.length >= 2 && fullTokens.length >= 2 && enteredTokens[0] === fullTokens[0] && enteredTokens[enteredTokens.length - 1] === fullTokens[fullTokens.length - 1]) {
+    score = Math.max(score, 95);
+    reason = 'First and last name match';
+  } else if (enteredTokens[0] && fullTokens[0] && enteredTokens[0] === fullTokens[0]) {
+    score = Math.max(score, 74);
+    reason = 'Shared first name with fuzzy remainder';
+  }
+
+  const aliasList = aliases[String(participant.participantId)] || [];
+  aliasList.forEach(alias => {
+    const aliasScore = fuzzyStringScore(entered, alias.normalizedAlias || alias.alias);
+    if (aliasScore > score) {
+      score = aliasScore;
+      reason = 'Participant alias match';
+    }
+  });
+
+  if (presentParticipantIds && presentParticipantIds[String(participant.participantId)] && score > 0) {
+    score = Math.min(100, score + 5);
+    reason += ' + present attendance';
+  }
+  return { score: score, reason: reason };
+}
+
+function chooseBestParticipantMatch(rawName, candidates, aliases, presentParticipantIds) {
+  const scored = candidates.map(participant => {
+    const scoredMatch = scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds);
+    return Object.assign({}, participant, { score: scoredMatch.score, reason: scoredMatch.reason });
+  }).sort((a, b) => b.score - a.score || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+
+  const best = scored[0] || null;
+  const second = scored[1] || null;
+  if (!best) return { participant: null, score: 0, reason: 'No candidate participants' };
+
+  const enteredTokens = normalizePersonNameForMatch(rawName).split(' ').filter(Boolean);
+  if (enteredTokens.length === 1) {
+    const sameFirstName = scored.filter(candidate => normalizePersonNameForMatch(candidate.fullName).split(' ')[0] === enteredTokens[0]);
+    if (sameFirstName.length > 1) {
+      return { participant: best, score: Math.min(best.score, 69), reason: 'First name is not unique in candidate cohort' };
+    }
+  }
+
+  if (second && best.score - second.score < 8 && best.score < 95) {
+    return { participant: best, score: Math.min(best.score, 79), reason: 'Close competing participant match' };
+  }
+  return { participant: best, score: best.score, reason: best.reason };
+}
+
+function getDigitalFormMatchQueueInternal(options) {
+  ensureDigitalFormSyncSheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('FormResponseMatchQueue');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const statusFilter = options && options.status;
+  const limit = Number(options && options.limit) || 100;
+  const rows = [];
+  for (let i = data.length - 1; i >= 1 && rows.length < limit; i--) {
+    const row = data[i];
+    const status = row[headers.indexOf('status')];
+    if (statusFilter && status !== statusFilter) continue;
+    rows.push({
+      queueId: row[headers.indexOf('queueId')],
+      createdAt: row[headers.indexOf('createdAt')],
+      sourceSheetName: row[headers.indexOf('sourceSheetName')],
+      sourceRowNumber: row[headers.indexOf('sourceRowNumber')],
+      sourceTimestamp: row[headers.indexOf('sourceTimestamp')],
+      rawName: row[headers.indexOf('rawName')],
+      instrumentNumber: row[headers.indexOf('instrumentNumber')],
+      instrumentName: row[headers.indexOf('instrumentName')],
+      candidateRolloutId: row[headers.indexOf('candidateRolloutId')],
+      candidateSessionId: row[headers.indexOf('candidateSessionId')],
+      suggestedParticipantId: row[headers.indexOf('suggestedParticipantId')],
+      suggestedParticipantName: row[headers.indexOf('suggestedParticipantName')],
+      confidenceScore: row[headers.indexOf('confidenceScore')],
+      status: status,
+      notes: row[headers.indexOf('notes')],
+      sourceLink: row[headers.indexOf('sourceLink')]
+    });
+  }
+  return rows;
+}
+
+function buildDigitalSyncDatasets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const sessionsSnapshot = getSheetSnapshot('StudySessions');
+  const attendanceSnapshot = getSheetSnapshot('SessionAttendance');
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const aliasSheet = ss.getSheetByName('ParticipantAliases');
+  const aliases = {};
+  if (aliasSheet && aliasSheet.getLastRow() > 1) {
+    const aliasData = aliasSheet.getDataRange().getValues();
+    const aliasHeaders = aliasData[0] || [];
+    for (let i = 1; i < aliasData.length; i++) {
+      const pid = String(aliasData[i][aliasHeaders.indexOf('participantId')] || '');
+      if (!pid) continue;
+      aliases[pid] = aliases[pid] || [];
+      aliases[pid].push({ alias: aliasData[i][aliasHeaders.indexOf('alias')], normalizedAlias: aliasData[i][aliasHeaders.indexOf('normalizedAlias')] });
+    }
+  }
+
+  const pHeaders = participantsSnapshot.headers;
+  const participants = [];
+  const participantsByRollout = {};
+  for (let i = 1; i < participantsSnapshot.data.length; i++) {
+    const row = participantsSnapshot.data[i];
+    const participant = {
+      participantId: row[pHeaders.indexOf('participantId')],
+      fullName: row[pHeaders.indexOf('fullName')],
+      site: row[pHeaders.indexOf('site')],
+      rolloutId: row[pHeaders.indexOf('rolloutId')],
+      status: row[pHeaders.indexOf('status')]
+    };
+    if (!participant.participantId) continue;
+    participants.push(participant);
+    participantsByRollout[String(participant.rolloutId)] = participantsByRollout[String(participant.rolloutId)] || [];
+    participantsByRollout[String(participant.rolloutId)].push(participant);
+  }
+
+  const sHeaders = sessionsSnapshot.headers;
+  const sessionsByDate = {};
+  const sessionById = {};
+  for (let i = 1; i < sessionsSnapshot.data.length; i++) {
+    const row = sessionsSnapshot.data[i];
+    const session = {
+      sessionId: row[sHeaders.indexOf('sessionId')],
+      rolloutId: row[sHeaders.indexOf('rolloutId')],
+      sessionNumber: row[sHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(row[sHeaders.indexOf('sessionDate')]),
+      status: row[sHeaders.indexOf('status')]
+    };
+    const dateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!dateOnly) continue;
+    session.dateOnly = dateOnly;
+    sessionById[String(session.sessionId)] = session;
+    sessionsByDate[dateOnly] = sessionsByDate[dateOnly] || [];
+    sessionsByDate[dateOnly].push(session);
+  }
+
+  const aHeaders = attendanceSnapshot.headers;
+  const presentBySession = {};
+  for (let i = 1; i < attendanceSnapshot.data.length; i++) {
+    const row = attendanceSnapshot.data[i];
+    if (String(row[aHeaders.indexOf('status')] || '') !== 'present') continue;
+    const sessionId = String(row[aHeaders.indexOf('sessionId')] || '');
+    presentBySession[sessionId] = presentBySession[sessionId] || {};
+    presentBySession[sessionId][String(row[aHeaders.indexOf('participantId')] || '')] = true;
+  }
+
+  const cHeaders = checklistSnapshot.headers;
+  const checklistByParticipantInstrument = {};
+  for (let i = 1; i < checklistSnapshot.data.length; i++) {
+    const row = checklistSnapshot.data[i];
+    const key = String(row[cHeaders.indexOf('participantId')]) + '|' + String(row[cHeaders.indexOf('instrumentNumber')]);
+    checklistByParticipantInstrument[key] = { rowIndex: i, row: row };
+  }
+
+  return {
+    participantsByRollout: participantsByRollout,
+    sessionsByDate: sessionsByDate,
+    sessionById: sessionById,
+    presentBySession: presentBySession,
+    aliases: aliases,
+    checklistSnapshot: checklistSnapshot,
+    checklistByParticipantInstrument: checklistByParticipantInstrument
+  };
+}
+
+function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
+  if (!responseDate) return [];
+  const exact = datasets.sessionsByDate[responseDate] || [];
+  if (exact.length || !mapping.allowLateResponses || !config.lateResponseWindowDays) return exact;
+  const target = parseDateOnlyString(responseDate);
+  if (!target) return [];
+  const matches = [];
+  Object.keys(datasets.sessionsByDate).forEach(dateKey => {
+    const sessionDate = parseDateOnlyString(dateKey);
+    if (!sessionDate) return;
+    const diffDays = Math.abs(Math.round((target.getTime() - sessionDate.getTime()) / 86400000));
+    if (diffDays <= config.lateResponseWindowDays) {
+      datasets.sessionsByDate[dateKey].forEach(session => matches.push(session));
+    }
+  });
+  return matches;
+}
+
+function buildDigitalResponseHash(values) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(values || []))).substring(0, 32);
+}
+
+function getExistingDigitalSyncKeys() {
+  ensureDigitalFormSyncSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const keys = {};
+  for (let i = 1; i < data.length; i++) {
+    const sourceSheet = data[i][headers.indexOf('sourceSheetName')];
+    const sourceRow = data[i][headers.indexOf('sourceRowNumber')];
+    const hash = data[i][headers.indexOf('responseHash')];
+    keys[String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
+  }
+  return keys;
+}
+
+function getDigitalSourceLink(workbookId, sheet, rowNumber) {
+  return 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + rowNumber + ':' + rowNumber;
+}
+
+function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config) {
+  const timestampCol = headers.indexOf(mapping.timestampColumn || 'Timestamp');
+  const nameCol = headers.indexOf(mapping.nameColumn || '');
+  const responseTimestamp = timestampCol >= 0 ? row[timestampCol] : '';
+  const rawName = nameCol >= 0 ? row[nameCol] : '';
+  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
+  const responseHash = buildDigitalResponseHash(row);
+  const sourceLink = getDigitalSourceLink(workbookId, sheet, rowNumber);
+  const normalizedName = normalizePersonNameForMatch(rawName);
+  const sessions = findSessionsForDigitalResponse(responseDate, datasets, config, mapping);
+  const rolloutIds = {};
+  sessions.forEach(session => rolloutIds[String(session.rolloutId)] = true);
+  const candidates = [];
+  Object.keys(rolloutIds).forEach(rolloutId => {
+    (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
+      if (String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+    });
+  });
+  const presentParticipantIds = {};
+  if (config.preferPresentAttendance) {
+    sessions.forEach(session => {
+      Object.assign(presentParticipantIds, datasets.presentBySession[String(session.sessionId)] || {});
+    });
+  }
+  const match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
+  const participant = match.participant;
+  const selectedSession = sessions[0] || null;
+  const checklistKey = participant ? String(participant.participantId) + '|' + String(mapping.instrumentNumber) : '';
+  const checklist = checklistKey ? datasets.checklistByParticipantInstrument[checklistKey] : null;
+  let matchStatus = 'unmatched';
+  let notes = match.reason || '';
+  if (timestampCol === -1) notes = 'Timestamp column not found';
+  if (!mapping.nameColumn || nameCol === -1) notes = 'Name column not found';
+  else if (!sessions.length) notes = 'No DARTS session found for response date ' + (responseDate || '(blank)');
+  else if (!participant) notes = 'No participant candidate matched';
+  else if (!checklist) notes = 'Matched participant, but checklist item was not found';
+  else if (match.score >= config.autoMatchThreshold) matchStatus = 'auto_matched';
+  else if (match.score >= config.reviewMatchThreshold) matchStatus = 'needs_review';
+  else matchStatus = 'unmatched';
+
+  return {
+    sourceWorkbookId: workbookId,
+    sourceSheetName: sheet.getName(),
+    sourceRowNumber: rowNumber,
+    sourceTimestamp: responseTimestamp && !isNaN(new Date(responseTimestamp).getTime()) ? new Date(responseTimestamp).toISOString() : String(responseTimestamp || ''),
+    responseHash: responseHash,
+    rawName: rawName,
+    normalizedName: normalizedName,
+    instrumentNumber: mapping.instrumentNumber,
+    instrumentName: mapping.instrumentName,
+    candidateRolloutId: selectedSession ? selectedSession.rolloutId : '',
+    candidateSessionId: selectedSession ? selectedSession.sessionId : '',
+    participantId: participant ? participant.participantId : '',
+    participantName: participant ? participant.fullName : '',
+    checklistId: checklist ? checklist.row[datasets.checklistSnapshot.headers.indexOf('checklistId')] : '',
+    checklistRowIndex: checklist ? checklist.rowIndex : -1,
+    matchStatus: matchStatus,
+    confidenceScore: match.score || 0,
+    notes: notes,
+    sourceLink: sourceLink
+  };
+}
+
+function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
+  const checklistSnapshot = datasets.checklistSnapshot;
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const completedByCol = cHeaders.indexOf('completedBy');
+  const notesCol = cHeaders.indexOf('notes');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
+  const touchedParticipants = {};
+  let updated = 0;
+  matches.forEach(match => {
+    if (match.matchStatus !== 'auto_matched' || match.checklistRowIndex < 1) return;
+    const row = cData[match.checklistRowIndex];
+    if (!row) return;
+    if (String(row[statusCol] || '') === 'completed' && String(row[dataLinkCol] || '').indexOf(match.sourceLink) !== -1) {
+      match.matchStatus = 'duplicate';
+      return;
+    }
+    row[statusCol] = 'completed';
+    row[completedDateCol] = match.sourceTimestamp || new Date().toISOString();
+    row[completedByCol] = currentUserName || DIGITAL_FORM_SYNC_SYSTEM_USER;
+    const existingNotes = String(row[notesCol] || '').trim();
+    const syncNote = 'Auto-completed from Google Forms: ' + match.sourceSheetName + ' row ' + match.sourceRowNumber + ' (confidence ' + match.confidenceScore + '%).';
+    row[notesCol] = existingNotes ? (existingNotes + '\n' + syncNote) : syncNote;
+    if (dataLinkCol !== -1) row[dataLinkCol] = match.sourceLink;
+    touchedParticipants[String(match.participantId)] = true;
+    updated++;
+  });
+  if (updated > 0) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    invalidateSheetSnapshot('Checklist');
+    Object.keys(touchedParticipants).forEach(participantId => {
+      updateParticipantCompletion(participantId);
+      syncParticipantStatusFromChecklist(participantId);
+    });
+  }
+  return updated;
+}
+
+function appendDigitalSyncLogs(matches, dryRun, actorName) {
+  if (dryRun || !matches.length) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const rows = matches.map(match => {
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('syncId', generateUUID());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('responseHash', match.responseHash);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('participantId', match.participantId);
+    set('checklistId', match.checklistId);
+    set('matchStatus', match.matchStatus);
+    set('confidenceScore', match.confidenceScore);
+    set('matchedBy', actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+    set('matchedAt', new Date().toISOString());
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    return row;
+  });
+  appendRowsAsPlainText(sheet, rows);
+}
+
+function appendDigitalReviewQueue(matches, dryRun) {
+  if (dryRun) return 0;
+  const reviewMatches = matches.filter(match => match.matchStatus === 'needs_review' || match.matchStatus === 'unmatched');
+  if (!reviewMatches.length) return 0;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseMatchQueue');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const existing = {};
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    existing[String(data[i][headers.indexOf('sourceSheetName')]) + '::' + String(data[i][headers.indexOf('sourceRowNumber')]) + '::' + String(data[i][headers.indexOf('responseHash')])] = true;
+  }
+  const rows = [];
+  reviewMatches.forEach(match => {
+    const key = match.sourceSheetName + '::' + match.sourceRowNumber + '::' + match.responseHash;
+    if (existing[key]) return;
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('queueId', generateUUID());
+    set('createdAt', new Date().toISOString());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('suggestedParticipantId', match.participantId);
+    set('suggestedParticipantName', match.participantName);
+    set('confidenceScore', match.confidenceScore);
+    set('status', 'pending');
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    set('responseHash', match.responseHash);
+    rows.push(row);
+  });
+  appendRowsAsPlainText(sheet, rows);
+  return rows.length;
+}
+
+function runDigitalFormSync(token, options) {
+  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin' };
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const dryRun = !!(options && options.dryRun);
+  const force = !!(options && options.force);
+  const config = getDigitalFormSyncConfigInternal();
+  if (!config.masterWorkbookId) return { success: false, message: 'Master workbook is not configured' };
+  const workbook = openDigitalFormWorkbook(config.masterWorkbookId);
+  const datasets = buildDigitalSyncDatasets();
+  const existingKeys = getExistingDigitalSyncKeys();
+  const watermarks = getDigitalFormSyncWatermarksInternal();
+  const matches = [];
+  const errors = [];
+  const enabledMappings = (config.mappings || []).filter(mapping => mapping.enabled);
+
+  enabledMappings.forEach(mapping => {
+    const sheet = workbook.getSheetByName(mapping.sheetName);
+    if (!sheet) { errors.push('Sheet not found: ' + mapping.sheetName); return; }
+    if (sheet.getLastRow() < 2) return;
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+    const lastRow = sheet.getLastRow();
+    const watermark = watermarks[mapping.sheetName] || {};
+    const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
+    if (startRow > lastRow) return;
+    const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
+    values.forEach((row, offset) => {
+      const rowNumber = startRow + offset;
+      const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, config.masterWorkbookId, datasets, config);
+      const existingKey = analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
+      if (existingKeys[existingKey] && !force) return;
+      matches.push(analysis);
+    });
+    if (!dryRun) {
+      watermarks[mapping.sheetName] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
+    }
+  });
+
+  const updatedCount = dryRun ? 0 : applyDigitalFormChecklistUpdates(matches, datasets, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  const queuedCount = appendDigitalReviewQueue(matches, dryRun);
+  appendDigitalSyncLogs(matches, dryRun, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  if (!dryRun) saveDigitalFormSyncWatermarksInternal(watermarks);
+
+  return {
+    success: true,
+    dryRun: dryRun,
+    processed: matches.length,
+    autoMatched: matches.filter(match => match.matchStatus === 'auto_matched').length,
+    needsReview: matches.filter(match => match.matchStatus === 'needs_review').length,
+    unmatched: matches.filter(match => match.matchStatus === 'unmatched').length,
+    duplicate: matches.filter(match => match.matchStatus === 'duplicate').length,
+    checklistUpdated: updatedCount,
+    queued: queuedCount,
+    errors: errors,
+    preview: matches.slice(0, 100)
+  };
+}
+
+function runDigitalFormSyncDryRun(token) {
+  return runDigitalFormSync(token, { dryRun: true, force: true });
+}
+
+function digitalFormSyncScheduledRun() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    const config = getDigitalFormSyncConfigInternal();
+    if (!config.enabled) return;
+    runDigitalFormSync(null, { dryRun: false });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getDigitalFormSyncTriggerSummary() {
+  const triggers = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun');
+  return { enabled: triggers.length > 0, count: triggers.length };
+}
+
+function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  if (enabled) {
+    const minutes = Math.max(5, Number(everyMinutes) || 10);
+    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
+  }
+  return { success: true, message: enabled ? 'Scheduled sync enabled' : 'Scheduled sync disabled', triggers: getDigitalFormSyncTriggerSummary() };
+}
+
+function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
+  const normalized = normalizePersonNameForMatch(alias);
+  if (!participantId || !normalized) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('participantId')]) === String(participantId) && String(data[i][headers.indexOf('normalizedAlias')]) === normalized) return;
+  }
+  const row = new Array(headers.length).fill('');
+  const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+  set('aliasId', generateUUID());
+  set('participantId', participantId);
+  set('alias', alias);
+  set('normalizedAlias', normalized);
+  set('createdAt', new Date().toISOString());
+  set('createdBy', createdBy || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  set('notes', notes || 'Created from Digital Forms Sync review');
+  appendRowsAsPlainText(sheet, [row]);
+}
+
+function reviewDigitalFormMatch(token, queueId, action, participantId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const queueSheet = ss.getSheetByName('FormResponseMatchQueue');
+  const queueData = queueSheet.getDataRange().getValues();
+  const qHeaders = queueData[0] || [];
+  let rowIndex = -1;
+  let queueRow = null;
+  for (let i = 1; i < queueData.length; i++) {
+    if (String(queueData[i][qHeaders.indexOf('queueId')]) === String(queueId)) {
+      rowIndex = i + 1;
+      queueRow = queueData[i];
+      break;
+    }
+  }
+  if (!queueRow) return { success: false, message: 'Review item not found' };
+  if (action === 'ignore') {
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('ignored');
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
+    invalidateSheetSnapshot('FormResponseMatchQueue');
+    return { success: true, message: 'Response ignored' };
+  }
+  const targetParticipantId = participantId || queueRow[qHeaders.indexOf('suggestedParticipantId')];
+  if (!targetParticipantId) return { success: false, message: 'Participant ID is required to confirm this match' };
+  const instrumentNumber = queueRow[qHeaders.indexOf('instrumentNumber')];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  const participantCol = cHeaders.indexOf('participantId');
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  let checklistRowIndex = -1;
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][participantCol]) === String(targetParticipantId) && String(cData[i][instrumentCol]) === String(instrumentNumber)) {
+      checklistRowIndex = i;
+      break;
+    }
+  }
+  if (checklistRowIndex === -1) return { success: false, message: 'Checklist item not found for selected participant' };
+  const match = {
+    matchStatus: 'auto_matched',
+    checklistRowIndex: checklistRowIndex,
+    participantId: targetParticipantId,
+    sourceTimestamp: queueRow[qHeaders.indexOf('sourceTimestamp')],
+    sourceSheetName: queueRow[qHeaders.indexOf('sourceSheetName')],
+    sourceRowNumber: queueRow[qHeaders.indexOf('sourceRowNumber')],
+    confidenceScore: queueRow[qHeaders.indexOf('confidenceScore')],
+    sourceLink: queueRow[qHeaders.indexOf('sourceLink')]
+  };
+  applyDigitalFormChecklistUpdates([match], buildDigitalSyncDatasets(), currentUser.fullName);
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('resolved');
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
+  invalidateSheetSnapshot('FormResponseMatchQueue');
+  if (getDigitalFormSyncConfigInternal().saveAliasesOnReview) {
+    saveParticipantAliasInternal(targetParticipantId, queueRow[qHeaders.indexOf('rawName')], currentUser.fullName, 'Confirmed from form response review');
+  }
+  return { success: true, message: 'Match confirmed and checklist updated' };
 }
 
 // ============================================
@@ -1694,6 +2469,8 @@ function initializeDatabase() {
   createSheetIfNotExists(ss, 'Config', [
     'key', 'value', 'description', 'updatedAt'
   ]);
+
+  ensureDigitalFormSyncSheets();
 
   Logger.log('Database initialized successfully!');
   return { success: true, message: 'Database initialized successfully!' };

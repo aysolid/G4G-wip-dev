@@ -6499,6 +6499,266 @@
       showToast('Nothing to download', 'error');
     }
 
+
+    // ============================================
+    // DIGITAL FORMS SYNC SETTINGS
+    // ============================================
+    function renderDigitalFormSyncLoading() {
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">sync_alt</span> Digital Forms Sync</h3>
+          </div>
+          <div class="card-body"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+      `;
+    }
+
+    function loadDigitalFormSyncSettings() {
+      const target = document.getElementById('digitalFormSyncSettings');
+      if (!target || !currentUser || currentUser.role !== 'admin') return;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result || !result.success) {
+            target.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Unable to load Digital Forms Sync settings')}</div>`;
+            return;
+          }
+          target.innerHTML = renderDigitalFormSyncSettings(result);
+        })
+        .withFailureHandler(function(error) {
+          target.innerHTML = `<div class="alert alert-error">${escapeHtml(error && error.message ? error.message : error)}</div>`;
+        })
+        .getDigitalFormSyncAdminData(sessionToken);
+    }
+
+    function renderDigitalFormSyncSettings(data) {
+      const config = data.config || {};
+      const tabs = data.tabs || [];
+      const tabNames = tabs.map(tab => tab.name);
+      const protocols = data.protocolItems || [];
+      const mappingsByNumber = {};
+      (config.mappings || []).forEach(mapping => mappingsByNumber[String(mapping.instrumentNumber)] = mapping);
+      const workbookMessage = data.workbookError
+        ? `<div class="alert alert-warning" style="margin-top: 0.75rem;">Workbook connection warning: ${escapeHtml(data.workbookError)}</div>`
+        : (config.masterWorkbookId ? `<div class="alert alert-success" style="margin-top: 0.75rem;">Workbook connected. ${tabs.length} tabs available.</div>` : '');
+      const mappingRows = protocols.map(item => {
+        const mapping = mappingsByNumber[String(item.number)] || { enabled: false, instrumentNumber: item.number, instrumentName: item.name, sheetName: '', timestampColumn: 'Timestamp', nameColumn: '' };
+        const selectedSheet = mapping.sheetName || '';
+        const selectedTab = tabs.find(tab => tab.name === selectedSheet);
+        const headers = selectedTab ? selectedTab.headers : [];
+        const columnOptions = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+        const tabOptions = [''].concat(tabNames).map(name => `<option value="${escapeHtml(name)}" ${name === selectedSheet ? 'selected' : ''}>${name ? escapeHtml(name) : 'Select response tab...'}</option>`).join('');
+        const timestampOptions = mapping.timestampColumn && headers.indexOf(mapping.timestampColumn) === -1
+          ? `<option value="${escapeHtml(mapping.timestampColumn)}" selected>${escapeHtml(mapping.timestampColumn)}</option>` + columnOptions
+          : columnOptions;
+        const nameOptions = mapping.nameColumn && headers.indexOf(mapping.nameColumn) === -1
+          ? `<option value="${escapeHtml(mapping.nameColumn)}" selected>${escapeHtml(mapping.nameColumn)}</option>` + columnOptions
+          : columnOptions;
+        return `
+          <div class="digital-sync-row" data-instrument-number="${escapeHtml(item.number)}" data-instrument-name="${escapeHtml(item.name)}" style="display:grid; grid-template-columns: 0.55fr 1.4fr 1.25fr 1.15fr 1.15fr; gap:0.75rem; align-items:end; padding:0.85rem; border:1px solid var(--gray-200); border-radius:12px; background:var(--gray-50);">
+            <label class="form-label" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
+              <input type="checkbox" class="digital-sync-enabled" ${mapping.enabled ? 'checked' : ''}> Enabled
+            </label>
+            <div>
+              <div style="font-weight:700;">${escapeHtml(item.name)}</div>
+              <div style="font-size:0.75rem; color:var(--gray-500);">Protocol #${escapeHtml(item.number)}</div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Response Tab</label>
+              <select class="form-select digital-sync-sheet">${tabOptions}</select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Timestamp Column</label>
+              <select class="form-select digital-sync-timestamp"><option value="Timestamp">Timestamp</option>${timestampOptions}</select>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label class="form-label">Name Column</label>
+              <select class="form-select digital-sync-name"><option value="">Select name column...</option>${nameOptions}</select>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const queue = data.queue || [];
+      const queueHtml = queue.length ? queue.map(item => `
+        <div class="digital-review-row" data-queue-id="${escapeHtml(item.queueId)}" style="display:grid; grid-template-columns: 1.4fr 1fr 1fr 0.7fr 1.1fr auto auto; gap:0.75rem; align-items:center; padding:0.75rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+          <div>
+            <strong>${escapeHtml(item.rawName || '(blank name)')}</strong>
+            <div style="font-size:0.75rem; color:var(--gray-500);">${escapeHtml(item.sourceSheetName)} row ${escapeHtml(item.sourceRowNumber)} · ${escapeHtml(item.sourceTimestamp || '')}</div>
+          </div>
+          <div>${escapeHtml(item.instrumentName || '')}</div>
+          <div>${escapeHtml(item.suggestedParticipantName || item.suggestedParticipantId || 'No suggestion')}</div>
+          <div><span class="badge badge-info">${escapeHtml(item.confidenceScore || 0)}%</span></div>
+          <input class="form-input digital-review-participant" placeholder="Participant ID" value="${escapeHtml(item.suggestedParticipantId || '')}">
+          <button class="btn btn-sm btn-primary" onclick="confirmDigitalFormMatch('${escapeHtml(item.queueId)}')">Confirm</button>
+          <button class="btn btn-sm btn-secondary" onclick="ignoreDigitalFormMatch('${escapeHtml(item.queueId)}')">Ignore</button>
+        </div>
+      `).join('') : '<p style="color: var(--gray-500);">No pending form-response matches need review.</p>';
+
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title"><span class="material-icons">sync_alt</span> Digital Forms Sync</h3>
+              <div style="font-size:0.85rem; color:var(--gray-500);">Connect the G4G master Google Forms workbook and automatically complete checklist items from digital responses.</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:grid; grid-template-columns: 1.5fr 0.6fr 0.6fr 0.6fr; gap:0.75rem; align-items:end;">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Master Workbook URL or ID</label>
+                <input class="form-input" id="digitalSyncWorkbookId" value="${escapeHtml(config.masterWorkbookId || '')}" placeholder="Paste the G4G Master Form Response workbook URL or ID">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Auto-match %</label>
+                <input type="number" min="0" max="100" class="form-input" id="digitalSyncAutoThreshold" value="${escapeHtml(config.autoMatchThreshold || 90)}">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Review %</label>
+                <input type="number" min="0" max="100" class="form-input" id="digitalSyncReviewThreshold" value="${escapeHtml(config.reviewMatchThreshold || 70)}">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Late window days</label>
+                <input type="number" min="0" max="14" class="form-input" id="digitalSyncLateDays" value="${escapeHtml(config.lateResponseWindowDays || 0)}">
+              </div>
+            </div>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:0.85rem;">
+              <label><input type="checkbox" id="digitalSyncEnabled" ${config.enabled ? 'checked' : ''}> Enable scheduled syncing</label>
+              <label><input type="checkbox" id="digitalSyncPreferAttendance" ${config.preferPresentAttendance !== false ? 'checked' : ''}> Prefer participants marked present</label>
+              <label><input type="checkbox" id="digitalSyncSaveAliases" ${config.saveAliasesOnReview !== false ? 'checked' : ''}> Save aliases after review</label>
+            </div>
+            ${workbookMessage}
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin:1rem 0;">
+              <button class="btn btn-secondary" onclick="testDigitalFormWorkbookConnection()"><span class="material-icons">wifi_tethering</span> Test Connection</button>
+              <button class="btn btn-primary" onclick="saveDigitalFormSyncConfig()"><span class="material-icons">save</span> Save Sync Settings</button>
+              <button class="btn btn-secondary" onclick="previewDigitalFormSync()"><span class="material-icons">visibility</span> Preview Sync</button>
+              <button class="btn btn-warning" onclick="runDigitalFormSyncNow()"><span class="material-icons">sync</span> Run Sync Now</button>
+              <button class="btn btn-secondary" onclick="toggleDigitalFormSchedule(${data.triggers && data.triggers.enabled ? 'false' : 'true'})"><span class="material-icons">schedule</span> ${data.triggers && data.triggers.enabled ? 'Disable Schedule' : 'Enable 10-min Schedule'}</button>
+            </div>
+            <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
+            <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
+            <div id="digitalSyncPreview" style="margin-top:1rem;"></div>
+            <h4 style="margin:1.5rem 0 0.75rem;">Match Review Queue</h4>
+            <div id="digitalSyncReviewQueue" style="display:grid; gap:0.65rem;">${queueHtml}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function collectDigitalFormSyncConfig() {
+      const mappings = Array.from(document.querySelectorAll('.digital-sync-row')).map(row => ({
+        enabled: row.querySelector('.digital-sync-enabled').checked,
+        instrumentNumber: row.dataset.instrumentNumber,
+        instrumentName: row.dataset.instrumentName,
+        sheetName: row.querySelector('.digital-sync-sheet').value,
+        timestampColumn: row.querySelector('.digital-sync-timestamp').value || 'Timestamp',
+        nameColumn: row.querySelector('.digital-sync-name').value,
+        allowLateResponses: true
+      })).filter(mapping => mapping.sheetName || mapping.enabled);
+      return {
+        enabled: document.getElementById('digitalSyncEnabled').checked,
+        masterWorkbookId: document.getElementById('digitalSyncWorkbookId').value.trim(),
+        autoMatchThreshold: Number(document.getElementById('digitalSyncAutoThreshold').value) || 90,
+        reviewMatchThreshold: Number(document.getElementById('digitalSyncReviewThreshold').value) || 70,
+        lateResponseWindowDays: Number(document.getElementById('digitalSyncLateDays').value) || 0,
+        preferPresentAttendance: document.getElementById('digitalSyncPreferAttendance').checked,
+        saveAliasesOnReview: document.getElementById('digitalSyncSaveAliases').checked,
+        mappings
+      };
+    }
+
+    function testDigitalFormWorkbookConnection() {
+      const workbookId = document.getElementById('digitalSyncWorkbookId').value.trim();
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Workbook connected' : 'Unable to connect'), result.success ? 'success' : 'error');
+        if (result.success) loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).testDigitalFormWorkbook(sessionToken, workbookId);
+    }
+
+    function saveDigitalFormSyncConfig() {
+      google.script.run.withSuccessHandler(function(result) {
+        if (result.success) {
+          showToast('Digital Forms Sync settings saved', 'success');
+          appConfig = appConfig || {};
+          appConfig.digitalFormSync = result.config;
+          loadDigitalFormSyncSettings();
+        } else {
+          showToast(result.message || 'Unable to save Digital Forms Sync settings', 'error');
+        }
+      }).withFailureHandler(handleError).saveDigitalFormSyncConfig(sessionToken, collectDigitalFormSyncConfig());
+    }
+
+    function renderDigitalSyncResult(result) {
+      const target = document.getElementById('digitalSyncPreview');
+      if (!target) return;
+      if (!result || !result.success) {
+        target.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Sync failed')}</div>`;
+        return;
+      }
+      const previewRows = (result.preview || []).slice(0, 20).map(match => `
+        <tr>
+          <td>${escapeHtml(match.sourceSheetName)} #${escapeHtml(match.sourceRowNumber)}</td>
+          <td>${escapeHtml(match.rawName)}</td>
+          <td>${escapeHtml(match.instrumentName)}</td>
+          <td>${escapeHtml(match.participantName || match.participantId || '-')}</td>
+          <td>${escapeHtml(match.confidenceScore)}%</td>
+          <td>${escapeHtml(match.matchStatus)}</td>
+          <td>${escapeHtml(match.notes || '')}</td>
+        </tr>
+      `).join('');
+      target.innerHTML = `
+        <div class="alert alert-info">Processed ${result.processed} responses · ${result.autoMatched} auto-matched · ${result.needsReview} review · ${result.unmatched} unmatched · ${result.checklistUpdated || 0} checklist updates.</div>
+        ${result.errors && result.errors.length ? `<div class="alert alert-warning">${result.errors.map(escapeHtml).join('<br>')}</div>` : ''}
+        <div style="overflow:auto; max-height:360px; border:1px solid var(--gray-200); border-radius:12px;">
+          <table class="data-table"><thead><tr><th>Source</th><th>Name</th><th>Protocol</th><th>Participant</th><th>Score</th><th>Status</th><th>Notes</th></tr></thead><tbody>${previewRows || '<tr><td colspan="7">No new responses found.</td></tr>'}</tbody></table>
+        </div>
+      `;
+    }
+
+    function previewDigitalFormSync() {
+      google.script.run.withSuccessHandler(function(saveResult) {
+        if (!saveResult || !saveResult.success) {
+          showToast(saveResult && saveResult.message ? saveResult.message : 'Unable to save sync settings before preview', 'error');
+          return;
+        }
+        google.script.run.withSuccessHandler(renderDigitalSyncResult).withFailureHandler(handleError).runDigitalFormSyncDryRun(sessionToken);
+      }).withFailureHandler(handleError).saveDigitalFormSyncConfig(sessionToken, collectDigitalFormSyncConfig());
+    }
+
+    function runDigitalFormSyncNow() {
+      if (!confirm('Run Digital Forms Sync now and update high-confidence checklist matches?')) return;
+      google.script.run.withSuccessHandler(function(result) {
+        renderDigitalSyncResult(result);
+        if (result.success) {
+          showToast('Digital Forms Sync complete', 'success');
+          loadDigitalFormSyncSettings();
+        }
+      }).withFailureHandler(handleError).runDigitalFormSync(sessionToken, { dryRun: false });
+    }
+
+    function toggleDigitalFormSchedule(enabled) {
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Schedule updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).setDigitalFormSyncSchedule(sessionToken, enabled, 10);
+    }
+
+    function confirmDigitalFormMatch(queueId) {
+      const row = document.querySelector(`.digital-review-row[data-queue-id="${queueId}"]`);
+      const participantId = row ? row.querySelector('.digital-review-participant').value.trim() : '';
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Review updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).reviewDigitalFormMatch(sessionToken, queueId, 'confirm', participantId);
+    }
+
+    function ignoreDigitalFormMatch(queueId) {
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || 'Review updated', result.success ? 'success' : 'error');
+        loadDigitalFormSyncSettings();
+      }).withFailureHandler(handleError).reviewDigitalFormMatch(sessionToken, queueId, 'ignore', '');
+    }
+
     // ============================================
     // SETTINGS
     // ============================================
@@ -6547,7 +6807,9 @@
           </div>
         </div>
         ${renderEnrollmentSettingsManager()}
+        ${currentUser && currentUser.role === 'admin' ? '<div id="digitalFormSyncSettings">' + renderDigitalFormSyncLoading() + '</div>' : ''}
       `;
+      loadDigitalFormSyncSettings();
     }
 
     function handleChangePassword(event) {
