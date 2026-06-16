@@ -1212,6 +1212,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1349,6 +1350,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1486,6 +1488,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1722,6 +1725,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1854,6 +1858,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -3988,7 +3993,8 @@ function getSessionsByRollout(token, rolloutId) {
           goproLink: headers.indexOf('goproLink') !== -1 ? data[i][headers.indexOf('goproLink')] : '',
           tascamLink: headers.indexOf('tascamLink') !== -1 ? data[i][headers.indexOf('tascamLink')] : '',
           meetingOwlLink: headers.indexOf('meetingOwlLink') !== -1 ? data[i][headers.indexOf('meetingOwlLink')] : '',
-          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : ''
+          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : '',
+          fieldNotesLink: headers.indexOf('fieldNotesLink') !== -1 ? data[i][headers.indexOf('fieldNotesLink')] : ''
         });
       }
     }
