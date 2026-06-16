@@ -5593,7 +5593,7 @@
       const section = document.getElementById('playtestingRecordingsSection');
       if (!section) return;
       if (currentRolloutFilter === 'All') {
-        section.innerHTML = mediaSelectCohortEmpty('screen_record', 'Playtesting Recordings');
+        section.innerHTML = mediaSelectCohortEmpty('screen_share', 'Playtesting Recordings');
         return;
       }
       section.innerHTML = '<div class="card"><div class="card-body"><div class="loading"><div class="spinner"></div></div></div></div>';
@@ -5602,7 +5602,7 @@
           section.innerHTML = `<div class="card"><div class="card-body"><div class="empty-state"><span class="material-icons">error</span><h3>${escapeHtml(result.message || 'Unable to load playtesting records')}</h3></div></div></div>`;
           return;
         }
-        renderParticipantMediaSection(section, result, 'playtesting_recording', 'Playtesting Recordings', 'screen_record', 'Screen Recording URL', true);
+        renderParticipantMediaSection(section, result, 'playtesting_recording', 'Playtesting Recordings', 'screen_share', 'Screen Recording URL', true);
       }).withFailureHandler(handleError).getParticipantMediaByRollout(sessionToken, currentRolloutFilter, 'playtesting_recording');
     }
 
@@ -5623,12 +5623,19 @@
               <div class="stat-card"><h3>${Math.max(0, participants.length - completeCount)}</h3><p>Missing</p></div>
               <div class="stat-card"><h3>${completion}%</h3><p>Complete</p></div>
             </div>
+            ${includePlaytester ? `
+              <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+                <button class="btn btn-primary" onclick='saveParticipantMediaBatchUi(${JSON.stringify(mediaType)}, true)'>
+                  <span class="material-icons">save</span>
+                  Save All Playtesting Records
+                </button>
+              </div>` : ''}
             <div style="display:grid; gap:0.75rem;">
               ${participants.map(p => {
                 const item = mediaMap[String(p.participantId)] || {};
                 const safeId = encodeURIComponent(p.participantId);
                 return `
-                  <div class="card" style="box-shadow:none; border:1px solid var(--gray-200); margin:0;">
+                  <div class="card participant-media-row" data-media-type="${escapeHtml(mediaType)}" data-participant-id="${escapeHtml(p.participantId)}" data-participant-name="${escapeHtml(p.fullName)}" style="box-shadow:none; border:1px solid var(--gray-200); margin:0;">
                     <div class="card-body" style="display:grid; grid-template-columns:1.15fr ${includePlaytester ? '1.1fr ' : ''}1.4fr 1.1fr auto; gap:0.75rem; align-items:end;">
                       <input type="hidden" id="${mediaType}_mediaId_${safeId}" value="${escapeHtml(item.mediaId || '')}">
                       <div>
@@ -5674,6 +5681,49 @@
           mediaType === 'final_showcase' ? loadFinalShowcaseSection() : loadPlaytestingRecordingsSection();
         }
       }).withFailureHandler(handleError).saveParticipantMedia(sessionToken, payload);
+    }
+
+    function collectParticipantMediaPayload(mediaType, participantId, participantName, includePlaytester) {
+      const safeId = encodeURIComponent(participantId);
+      const playtesterEl = document.getElementById(`${mediaType}_playtester_${safeId}`);
+      const playtesterId = playtesterEl ? playtesterEl.value : '';
+      const playtesterName = playtesterEl && playtesterEl.selectedIndex >= 0 ? playtesterEl.options[playtesterEl.selectedIndex].text.replace(/\s*\([^)]*\)$/, '') : '';
+      return {
+        mediaId: document.getElementById(`${mediaType}_mediaId_${safeId}`).value,
+        rolloutId: currentRolloutFilter,
+        participantId: participantId,
+        site: currentSiteFilter === 'All' ? '' : currentSiteFilter,
+        mediaType: mediaType,
+        title: mediaType === 'final_showcase' ? `${participantName} Final Game Showcase` : `${participantName} Playtesting Recording`,
+        driveUrl: document.getElementById(`${mediaType}_url_${safeId}`).value,
+        notes: document.getElementById(`${mediaType}_notes_${safeId}`).value,
+        playtesterParticipantId: includePlaytester ? playtesterId : '',
+        playtesterName: includePlaytester ? playtesterName : ''
+      };
+    }
+
+    function saveParticipantMediaBatchUi(mediaType, includePlaytester) {
+      const rows = Array.from(document.querySelectorAll(`.participant-media-row[data-media-type="${mediaType}"]`));
+      const payloads = rows.map(row => collectParticipantMediaPayload(
+        mediaType,
+        row.dataset.participantId,
+        row.dataset.participantName,
+        includePlaytester
+      ));
+      const saveablePayloads = payloads.filter(item =>
+        item.mediaId ||
+        String(item.driveUrl || '').trim() ||
+        String(item.notes || '').trim() ||
+        String(item.playtesterParticipantId || '').trim()
+      );
+      if (!saveablePayloads.length) {
+        showToast('Enter at least one playtester, URL, or note before saving.', 'warning');
+        return;
+      }
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Saved playtesting records' : 'Unable to save playtesting records'), result.success ? 'success' : 'error');
+        if (result.success) loadPlaytestingRecordingsSection();
+      }).withFailureHandler(handleError).saveParticipantMediaBatch(sessionToken, saveablePayloads);
     }
 
     function loadCohortMediaGallerySection() {

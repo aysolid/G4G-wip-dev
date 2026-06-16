@@ -339,6 +339,83 @@ function saveParticipantMedia(token, media) {
   return { success: true, message: 'Participant media saved', media: record };
 }
 
+function saveParticipantMediaBatch(token, mediaItems) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const items = Array.isArray(mediaItems) ? mediaItems : [];
+  if (!items.length) return { success: false, message: 'No media records were provided' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const participantCol = headers.indexOf('participantId');
+  const typeCol = headers.indexOf('mediaType');
+  const statusCol = headers.indexOf('status');
+  const now = new Date().toISOString();
+  const existingById = {};
+  const existingByNaturalKey = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowNumber = i + 1;
+    const mediaId = String(row[mediaIdCol] || '').trim();
+    const naturalKey = [
+      row[rolloutCol],
+      row[participantCol],
+      row[typeCol]
+    ].map(value => String(value || '')).join('::');
+    const isDeleted = String(row[statusCol] || 'active').toLowerCase() === 'deleted';
+    if (mediaId) existingById[mediaId] = { rowNumber: rowNumber, row: row };
+    if (!isDeleted) existingByNaturalKey[naturalKey] = { rowNumber: rowNumber, row: row };
+  }
+
+  const rowsToAppend = [];
+  let savedCount = 0;
+  items.forEach(item => {
+    const payload = item || {};
+    if (!payload.rolloutId || !payload.participantId || !payload.mediaType) return;
+    const existingId = String(payload.mediaId || '').trim();
+    const naturalKey = [
+      payload.rolloutId,
+      payload.participantId,
+      payload.mediaType
+    ].map(value => String(value || '')).join('::');
+    const match = (existingId && existingById[existingId]) || existingByNaturalKey[naturalKey];
+    const existing = match ? rowToObject(headers, match.row) : {};
+    const record = Object.assign({}, existing, {
+      mediaId: existing.mediaId || existingId || generateUUID(),
+      rolloutId: payload.rolloutId,
+      participantId: payload.participantId,
+      site: payload.site || existing.site || '',
+      mediaType: payload.mediaType,
+      title: payload.title || existing.title || '',
+      driveUrl: String(payload.driveUrl || '').trim(),
+      thumbnailUrl: String(payload.thumbnailUrl || existing.thumbnailUrl || '').trim(),
+      playtesterParticipantId: payload.playtesterParticipantId || '',
+      playtesterName: payload.playtesterName || '',
+      notes: payload.notes || '',
+      createdAt: existing.createdAt || now,
+      createdBy: existing.createdBy || currentUser.fullName,
+      updatedAt: now,
+      updatedBy: currentUser.fullName,
+      status: payload.status || 'active'
+    });
+    const row = buildRowFromObject(headers, record);
+    if (match) {
+      sheet.getRange(match.rowNumber, 1, 1, headers.length).setValues([row]);
+    } else {
+      rowsToAppend.push(row);
+    }
+    savedCount++;
+  });
+
+  if (rowsToAppend.length) appendRowsAsPlainText(sheet, rowsToAppend);
+  invalidateSheetSnapshot('ParticipantMedia');
+  return { success: true, message: `${savedCount} participant media record${savedCount === 1 ? '' : 's'} saved`, savedCount: savedCount };
+}
+
 function deleteParticipantMedia(token, mediaId) {
   const currentUser = validateSession(token);
   if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
