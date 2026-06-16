@@ -2123,10 +2123,15 @@ function getDefaultDigitalFormSyncConfig() {
     autoMatchThreshold: 90,
     reviewMatchThreshold: 70,
     lateResponseWindowDays: 0,
+    enableRecentCompletedFallback: false,
+    recentCompletedFallbackDays: 30,
+    recentCompletedFallbackMaxCohorts: 1,
+    allowRecentCompletedAutoMatch: false,
     preferPresentAttendance: true,
     updateMissingChecklistItems: true,
     saveAliasesOnReview: true,
-    mappings: []
+    mappings: [],
+    siteMappings: { UGA: [], Missouri: [] }
   };
 }
 
@@ -2155,7 +2160,12 @@ function normalizeDigitalFormSyncConfig(config) {
   normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
   normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
   normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
-  normalized.mappings = Array.isArray(input.mappings) ? input.mappings.map(mapping => ({
+  normalized.enableRecentCompletedFallback = !!normalized.enableRecentCompletedFallback;
+  normalized.recentCompletedFallbackDays = Math.max(0, Number(normalized.recentCompletedFallbackDays) || defaults.recentCompletedFallbackDays);
+  normalized.recentCompletedFallbackMaxCohorts = Math.max(1, Number(normalized.recentCompletedFallbackMaxCohorts) || defaults.recentCompletedFallbackMaxCohorts);
+  normalized.allowRecentCompletedAutoMatch = !!normalized.allowRecentCompletedAutoMatch;
+
+  const normalizeMapping = mapping => ({
     enabled: !!mapping.enabled,
     instrumentNumber: String(mapping.instrumentNumber || '').trim(),
     instrumentName: String(mapping.instrumentName || '').trim(),
@@ -2163,8 +2173,24 @@ function normalizeDigitalFormSyncConfig(config) {
     timestampColumn: String(mapping.timestampColumn || 'Timestamp').trim() || 'Timestamp',
     nameColumn: String(mapping.nameColumn || '').trim(),
     allowLateResponses: mapping.allowLateResponses !== false
-  })).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
+  });
+  const legacyMappings = Array.isArray(input.mappings) ? input.mappings.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
+  const inputSiteMappings = input.siteMappings || {};
+  normalized.siteMappings = { UGA: [], Missouri: [] };
+  ['UGA', 'Missouri'].forEach(site => {
+    const siteInput = inputSiteMappings[site] || inputSiteMappings[String(site).toLowerCase()] || null;
+    normalized.siteMappings[site] = Array.isArray(siteInput) && siteInput.length
+      ? siteInput.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName)
+      : legacyMappings.slice();
+  });
+  normalized.mappings = legacyMappings.length ? legacyMappings : (normalized.siteMappings.UGA || []);
   return normalized;
+}
+
+function getDigitalFormMappingsForSite(config, site) {
+  const normalizedSite = String(site || '').toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
+  const siteMappings = config && config.siteMappings && Array.isArray(config.siteMappings[normalizedSite]) ? config.siteMappings[normalizedSite] : [];
+  return siteMappings.length ? siteMappings : ((config && config.mappings) || []);
 }
 
 function getDigitalFormSyncConfigInternal() {
@@ -2245,20 +2271,31 @@ function getDigitalFormSyncAdminData(token) {
   const config = getDigitalFormSyncConfigInternal();
   let tabs = [];
   let workbookError = '';
-  const tabWorkbookIds = [config.masterWorkbookIds.UGA, config.masterWorkbookIds.Missouri, config.masterWorkbookId].filter(Boolean);
-  for (let i = 0; i < tabWorkbookIds.length; i++) {
+  const tabsBySite = {};
+  ['UGA', 'Missouri'].forEach(site => {
+    const workbookId = config.masterWorkbookIds && config.masterWorkbookIds[site];
+    if (!workbookId) return;
     try {
-      tabs = getWorkbookTabsForDigitalSync(tabWorkbookIds[i]);
-      workbookError = '';
-      break;
+      tabsBySite[site] = getWorkbookTabsForDigitalSync(workbookId);
+      if (!tabs.length) tabs = tabsBySite[site];
     } catch (e) {
-      workbookError = e.message;
+      tabsBySite[site] = [];
+      workbookError += (workbookError ? '; ' : '') + site + ': ' + e.message;
+    }
+  });
+  if (!tabs.length && config.masterWorkbookId) {
+    try {
+      tabs = getWorkbookTabsForDigitalSync(config.masterWorkbookId);
+      if (!tabsBySite.UGA || !tabsBySite.UGA.length) tabsBySite.UGA = tabs;
+    } catch (e) {
+      workbookError += (workbookError ? '; ' : '') + e.message;
     }
   }
   return {
     success: true,
     config: config,
     tabs: tabs,
+    tabsBySite: tabsBySite,
     workbookError: workbookError,
     protocolItems: getGlobalProtocolItems(),
     queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
@@ -2424,6 +2461,22 @@ function buildDigitalSyncDatasets() {
     }
   }
 
+  const rolloutsSnapshot = getSheetSnapshot('StudyRollouts');
+  const rHeaders = rolloutsSnapshot.headers;
+  const rolloutsById = {};
+  for (let i = 1; i < rolloutsSnapshot.data.length; i++) {
+    const row = rolloutsSnapshot.data[i];
+    const rollout = {
+      rolloutId: row[rHeaders.indexOf('rolloutId')],
+      site: row[rHeaders.indexOf('site')],
+      schoolName: row[rHeaders.indexOf('schoolName')],
+      period: row[rHeaders.indexOf('period')],
+      year: row[rHeaders.indexOf('year')],
+      status: row[rHeaders.indexOf('status')]
+    };
+    if (rollout.rolloutId) rolloutsById[String(rollout.rolloutId)] = rollout;
+  }
+
   const pHeaders = participantsSnapshot.headers;
   const participants = [];
   const participantsByRollout = {};
@@ -2445,6 +2498,7 @@ function buildDigitalSyncDatasets() {
   const sHeaders = sessionsSnapshot.headers;
   const sessionsByDate = {};
   const sessionById = {};
+  const rolloutSessionBounds = {};
   for (let i = 1; i < sessionsSnapshot.data.length; i++) {
     const row = sessionsSnapshot.data[i];
     const session = {
@@ -2460,7 +2514,25 @@ function buildDigitalSyncDatasets() {
     sessionById[String(session.sessionId)] = session;
     sessionsByDate[dateOnly] = sessionsByDate[dateOnly] || [];
     sessionsByDate[dateOnly].push(session);
+    const rolloutIdKey = String(session.rolloutId || '');
+    rolloutSessionBounds[rolloutIdKey] = rolloutSessionBounds[rolloutIdKey] || { firstDate: dateOnly, lastDate: dateOnly, sessionCount: 0 };
+    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].firstDate) < 0) rolloutSessionBounds[rolloutIdKey].firstDate = dateOnly;
+    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].lastDate) > 0) rolloutSessionBounds[rolloutIdKey].lastDate = dateOnly;
+    rolloutSessionBounds[rolloutIdKey].sessionCount++;
   }
+
+  const completedRolloutsBySite = {};
+  const todayKey = getDateOnly(new Date());
+  Object.keys(rolloutsById).forEach(rolloutId => {
+    const bounds = rolloutSessionBounds[rolloutId];
+    if (!bounds || !bounds.lastDate) return;
+    if (compareDateStrings(bounds.lastDate, todayKey) > 0) return;
+    const rollout = Object.assign({}, rolloutsById[rolloutId], bounds);
+    const siteKey = String(rollout.site || '').toLowerCase();
+    completedRolloutsBySite[siteKey] = completedRolloutsBySite[siteKey] || [];
+    completedRolloutsBySite[siteKey].push(rollout);
+  });
+  Object.keys(completedRolloutsBySite).forEach(siteKey => completedRolloutsBySite[siteKey].sort((a, b) => compareDateStrings(b.lastDate, a.lastDate)));
 
   const aHeaders = attendanceSnapshot.headers;
   const presentBySession = {};
@@ -2481,7 +2553,10 @@ function buildDigitalSyncDatasets() {
   }
 
   return {
+    participants: participants,
     participantsByRollout: participantsByRollout,
+    rolloutsById: rolloutsById,
+    completedRolloutsBySite: completedRolloutsBySite,
     sessionsByDate: sessionsByDate,
     sessionById: sessionById,
     presentBySession: presentBySession,
@@ -2491,12 +2566,15 @@ function buildDigitalSyncDatasets() {
   };
 }
 
-function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
-  if (!responseDate) return [];
+function getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping) {
+  if (!responseDate) return { sessions: [], strategy: 'no_timestamp', notes: 'No response date available' };
   const exact = datasets.sessionsByDate[responseDate] || [];
-  if (exact.length || !mapping.allowLateResponses || !config.lateResponseWindowDays) return exact;
+  if (exact.length) return { sessions: exact, strategy: 'session_date', notes: 'Matched by exact session date ' + responseDate };
+  if (!mapping.allowLateResponses || !config.lateResponseWindowDays) {
+    return { sessions: [], strategy: 'no_session', notes: 'No DARTS session found for response date ' + responseDate };
+  }
   const target = parseDateOnlyString(responseDate);
-  if (!target) return [];
+  if (!target) return { sessions: [], strategy: 'no_timestamp', notes: 'Response date could not be parsed' };
   const matches = [];
   Object.keys(datasets.sessionsByDate).forEach(dateKey => {
     const sessionDate = parseDateOnlyString(dateKey);
@@ -2506,7 +2584,44 @@ function findSessionsForDigitalResponse(responseDate, datasets, config, mapping)
       datasets.sessionsByDate[dateKey].forEach(session => matches.push(session));
     }
   });
-  return matches;
+  return matches.length
+    ? { sessions: matches, strategy: 'late_window', notes: 'Matched by late response window around ' + responseDate }
+    : { sessions: [], strategy: 'no_session', notes: 'No DARTS session found within late-response window for ' + responseDate };
+}
+
+function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
+  return getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping).sessions;
+}
+
+function getRecentCompletedFallbackCandidates(responseDate, site, datasets, config) {
+  if (!config.enableRecentCompletedFallback) return { candidates: [], rollout: null, strategy: '', notes: '' };
+  const siteKey = String(site || '').toLowerCase();
+  if (!siteKey) return { candidates: [], rollout: null, strategy: '', notes: '' };
+  const responseDateKey = responseDate || getDateOnly(new Date());
+  const responseDateObj = parseDateOnlyString(responseDateKey);
+  const maxCohorts = Math.max(1, Number(config.recentCompletedFallbackMaxCohorts) || 1);
+  const graceDays = Math.max(0, Number(config.recentCompletedFallbackDays) || 0);
+  const recentRollouts = (datasets.completedRolloutsBySite[siteKey] || []).filter(rollout => {
+    if (!responseDateObj || !rollout.lastDate) return true;
+    if (compareDateStrings(rollout.lastDate, responseDateKey) > 0) return false;
+    const lastDate = parseDateOnlyString(rollout.lastDate);
+    if (!lastDate) return true;
+    const diffDays = Math.round((responseDateObj.getTime() - lastDate.getTime()) / 86400000);
+    return diffDays >= 0 && diffDays <= graceDays;
+  }).slice(0, maxCohorts);
+  const candidates = [];
+  recentRollouts.forEach(rollout => {
+    (datasets.participantsByRollout[String(rollout.rolloutId)] || []).forEach(participant => {
+      if (String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+    });
+  });
+  const rollout = recentRollouts[0] || null;
+  return {
+    candidates: candidates,
+    rollout: rollout,
+    strategy: candidates.length ? 'recent_completed_cohort' : '',
+    notes: candidates.length && rollout ? 'Fallback searched recent completed cohort: ' + rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')' : ''
+  };
 }
 
 function buildDigitalResponseHash(values) {
@@ -2542,10 +2657,11 @@ function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, wor
   const responseHash = buildDigitalResponseHash(row);
   const sourceLink = getDigitalSourceLink(workbookId, sheet, rowNumber);
   const normalizedName = normalizePersonNameForMatch(rawName);
-  const sessions = findSessionsForDigitalResponse(responseDate, datasets, config, mapping);
+  const sessionMatch = getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping);
+  const sessions = sessionMatch.sessions || [];
   const rolloutIds = {};
   sessions.forEach(session => rolloutIds[String(session.rolloutId)] = true);
-  const candidates = [];
+  let candidates = [];
   Object.keys(rolloutIds).forEach(rolloutId => {
     (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
       const sameSite = !site || String(participant.site || '').toLowerCase() === String(site || '').toLowerCase();
@@ -2558,21 +2674,46 @@ function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, wor
       Object.assign(presentParticipantIds, datasets.presentBySession[String(session.sessionId)] || {});
     });
   }
-  const match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
-  const participant = match.participant;
-  const selectedSession = sessions[0] || null;
+  let match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
+  let participant = match.participant;
+  let selectedSession = sessions[0] || null;
+  let matchStrategy = sessionMatch.strategy || 'session_date';
+  let strategyNotes = sessionMatch.notes || '';
+  let fallbackUsed = false;
+
+  if ((!participant || (match.score || 0) < config.reviewMatchThreshold) && config.enableRecentCompletedFallback) {
+    const fallback = getRecentCompletedFallbackCandidates(responseDate, site, datasets, config);
+    if (fallback.candidates.length) {
+      const fallbackMatch = chooseBestParticipantMatch(rawName, fallback.candidates, datasets.aliases, {});
+      if (!participant || fallbackMatch.score > (match.score || 0)) {
+        candidates = fallback.candidates;
+        match = fallbackMatch;
+        participant = match.participant;
+        selectedSession = null;
+        matchStrategy = fallback.strategy;
+        strategyNotes = fallback.notes;
+        fallbackUsed = true;
+      }
+    }
+  }
+
   const checklistKey = participant ? String(participant.participantId) + '|' + String(mapping.instrumentNumber) : '';
   const checklist = checklistKey ? datasets.checklistByParticipantInstrument[checklistKey] : null;
   let matchStatus = 'unmatched';
   let notes = match.reason || '';
+  const canAutoMatch = matchStrategy !== 'recent_completed_cohort' || config.allowRecentCompletedAutoMatch;
   if (timestampCol === -1) notes = 'Timestamp column not found';
   if (!mapping.nameColumn || nameCol === -1) notes = 'Name column not found';
-  else if (!sessions.length) notes = 'No DARTS session found for response date ' + (responseDate || '(blank)');
+  else if (!sessions.length && !fallbackUsed) notes = strategyNotes || ('No DARTS session found for response date ' + (responseDate || '(blank)'));
   else if (!participant) notes = 'No participant candidate matched';
   else if (!checklist) notes = 'Matched participant, but checklist item was not found';
-  else if (match.score >= config.autoMatchThreshold) matchStatus = 'auto_matched';
+  else if (match.score >= config.autoMatchThreshold && canAutoMatch) matchStatus = 'auto_matched';
   else if (match.score >= config.reviewMatchThreshold) matchStatus = 'needs_review';
   else matchStatus = 'unmatched';
+  if (strategyNotes) notes = notes ? notes + ' — ' + strategyNotes : strategyNotes;
+  if (matchStrategy === 'recent_completed_cohort' && !config.allowRecentCompletedAutoMatch && matchStatus === 'needs_review') {
+    notes += ' — Recent completed cohort fallback is configured for review-first matching.';
+  }
 
   return {
     sourceWorkbookId: workbookId,
@@ -2584,7 +2725,7 @@ function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, wor
     normalizedName: normalizedName,
     instrumentNumber: mapping.instrumentNumber,
     instrumentName: mapping.instrumentName,
-    candidateRolloutId: selectedSession ? selectedSession.rolloutId : '',
+    candidateRolloutId: selectedSession ? selectedSession.rolloutId : (participant ? participant.rolloutId : ''),
     candidateSessionId: selectedSession ? selectedSession.sessionId : '',
     participantId: participant ? participant.participantId : '',
     participantName: participant ? participant.fullName : '',
@@ -2592,6 +2733,7 @@ function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, wor
     checklistRowIndex: checklist ? checklist.rowIndex : -1,
     matchStatus: matchStatus,
     confidenceScore: match.score || 0,
+    matchedBy: matchStrategy,
     notes: notes,
     sourceLink: sourceLink
   };
@@ -2660,7 +2802,7 @@ function appendDigitalSyncLogs(matches, dryRun, actorName) {
     set('checklistId', match.checklistId);
     set('matchStatus', match.matchStatus);
     set('confidenceScore', match.confidenceScore);
-    set('matchedBy', actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+    set('matchedBy', match.matchedBy || actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
     set('matchedAt', new Date().toISOString());
     set('notes', match.notes);
     set('sourceLink', match.sourceLink);
@@ -2729,9 +2871,9 @@ function runDigitalFormSync(token, options) {
   const watermarks = getDigitalFormSyncWatermarksInternal();
   const matches = [];
   const errors = [];
-  const enabledMappings = (config.mappings || []).filter(mapping => mapping.enabled);
-
   workbookConfigs.forEach(workbookConfig => {
+    const enabledMappings = getDigitalFormMappingsForSite(config, workbookConfig.site).filter(mapping => mapping.enabled);
+
     let workbook;
     try {
       workbook = openDigitalFormWorkbook(workbookConfig.workbookId);

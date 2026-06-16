@@ -7365,55 +7365,69 @@
 
     function renderDigitalFormSyncSettings(data) {
       const config = data.config || {};
+      const tabsBySite = data.tabsBySite || {};
       const tabs = data.tabs || [];
       const workbookIds = config.masterWorkbookIds || {};
+      window.digitalSyncTabsBySiteCache = tabsBySite;
       window.digitalSyncTabsCache = tabs;
-      const tabNames = tabs.map(tab => tab.name);
       const protocols = data.protocolItems || [];
-      const mappingsByNumber = {};
-      (config.mappings || []).forEach(mapping => mappingsByNumber[String(mapping.instrumentNumber)] = mapping);
+      const siteMappings = config.siteMappings || { UGA: config.mappings || [], Missouri: config.mappings || [] };
       const configuredWorkbookCount = ['UGA', 'Missouri'].filter(site => workbookIds[site]).length;
       const workbookMessage = data.workbookError
         ? `<div class="alert alert-warning" style="margin-top: 0.75rem;">Workbook connection warning: ${escapeHtml(data.workbookError)}</div>`
-        : (configuredWorkbookCount ? `<div class="alert alert-success" style="margin-top: 0.75rem;">${configuredWorkbookCount} site workbook${configuredWorkbookCount === 1 ? '' : 's'} configured. ${tabs.length} mapping tabs loaded from the first available workbook.</div>` : '');
-      const mappingRows = protocols.map(item => {
-        const mapping = mappingsByNumber[String(item.number)] || { enabled: false, instrumentNumber: item.number, instrumentName: item.name, sheetName: '', timestampColumn: 'Timestamp', nameColumn: '' };
-        const selectedSheet = mapping.sheetName || '';
-        const selectedTab = tabs.find(tab => tab.name === selectedSheet);
-        const headers = selectedTab ? selectedTab.headers : [];
-        const columnOptions = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
-        const tabOptions = [''].concat(tabNames).map(name => `<option value="${escapeHtml(name)}" ${name === selectedSheet ? 'selected' : ''}>${name ? escapeHtml(name) : 'Select response tab...'}</option>`).join('');
-        const timestampOptions = mapping.timestampColumn && headers.indexOf(mapping.timestampColumn) === -1
-          ? `<option value="${escapeHtml(mapping.timestampColumn)}" selected>${escapeHtml(mapping.timestampColumn)}</option>` + columnOptions
-          : columnOptions;
-        const nameOptions = mapping.nameColumn && headers.indexOf(mapping.nameColumn) === -1
-          ? `<option value="${escapeHtml(mapping.nameColumn)}" selected>${escapeHtml(mapping.nameColumn)}</option>` + columnOptions
-          : columnOptions;
-        return `
-          <div class="digital-sync-row" data-instrument-number="${escapeHtml(item.number)}" data-instrument-name="${escapeHtml(item.name)}" style="display:grid; grid-template-columns: 0.55fr 1.4fr 1.25fr 1.15fr 1.15fr; gap:0.75rem; align-items:end; padding:0.85rem; border:1px solid var(--gray-200); border-radius:12px; background:var(--gray-50);">
-            <label class="form-label" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
-              <input type="checkbox" class="digital-sync-enabled" ${mapping.enabled ? 'checked' : ''}> Enabled
-            </label>
-            <div>
-              <div style="font-weight:700;">${escapeHtml(item.name)}</div>
-              <div style="font-size:0.75rem; color:var(--gray-500);">Protocol #${escapeHtml(item.number)}</div>
+        : (configuredWorkbookCount ? `<div class="alert alert-success" style="margin-top: 0.75rem;">${configuredWorkbookCount} site workbook${configuredWorkbookCount === 1 ? '' : 's'} configured. Configure each site's mappings below so UGA and Missouri can use different response tabs or columns.</div>` : '');
+      const renderMappingRowsForSite = (site) => {
+        const siteTabs = tabsBySite[site] || tabs || [];
+        const tabNames = siteTabs.map(tab => tab.name);
+        const mappingsByNumber = {};
+        (siteMappings[site] || config.mappings || []).forEach(mapping => mappingsByNumber[String(mapping.instrumentNumber)] = mapping);
+        return protocols.map(item => {
+          const mapping = mappingsByNumber[String(item.number)] || { enabled: false, instrumentNumber: item.number, instrumentName: item.name, sheetName: '', timestampColumn: 'Timestamp', nameColumn: '' };
+          const selectedSheet = mapping.sheetName || '';
+          const selectedTab = siteTabs.find(tab => tab.name === selectedSheet);
+          const headers = selectedTab ? selectedTab.headers : [];
+          const columnOptions = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+          const tabOptions = [''].concat(tabNames).map(name => `<option value="${escapeHtml(name)}" ${name === selectedSheet ? 'selected' : ''}>${name ? escapeHtml(name) : 'Select response tab...'}</option>`).join('');
+          const timestampOptions = mapping.timestampColumn && headers.indexOf(mapping.timestampColumn) === -1
+            ? `<option value="${escapeHtml(mapping.timestampColumn)}" selected>${escapeHtml(mapping.timestampColumn)}</option>` + columnOptions
+            : columnOptions;
+          const nameOptions = mapping.nameColumn && headers.indexOf(mapping.nameColumn) === -1
+            ? `<option value="${escapeHtml(mapping.nameColumn)}" selected>${escapeHtml(mapping.nameColumn)}</option>` + columnOptions
+            : columnOptions;
+          return `
+            <div class="digital-sync-row" data-site="${escapeHtml(site)}" data-instrument-number="${escapeHtml(item.number)}" data-instrument-name="${escapeHtml(item.name)}" style="display:grid; grid-template-columns: 0.55fr 1.4fr 1.25fr 1.15fr 1.15fr; gap:0.75rem; align-items:end; padding:0.85rem; border:1px solid var(--gray-200); border-radius:12px; background:var(--gray-50);">
+              <label class="form-label" style="margin:0; display:flex; gap:0.4rem; align-items:center;">
+                <input type="checkbox" class="digital-sync-enabled" ${mapping.enabled ? 'checked' : ''}> Enabled
+              </label>
+              <div>
+                <div style="font-weight:700;">${escapeHtml(item.name)}</div>
+                <div style="font-size:0.75rem; color:var(--gray-500);">Protocol #${escapeHtml(item.number)}</div>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Response Tab</label>
+                <select class="form-select digital-sync-sheet" onchange="updateDigitalSyncColumnOptions(this.closest('.digital-sync-row'))">${tabOptions}</select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Timestamp Column</label>
+                <select class="form-select digital-sync-timestamp"><option value="Timestamp">Timestamp</option>${timestampOptions}</select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Name Column</label>
+                <select class="form-select digital-sync-name"><option value="">Select name column...</option>${nameOptions}</select>
+              </div>
             </div>
-            <div class="form-group" style="margin:0;">
-              <label class="form-label">Response Tab</label>
-              <select class="form-select digital-sync-sheet" onchange="updateDigitalSyncColumnOptions(this.closest('.digital-sync-row'))">${tabOptions}</select>
-            </div>
-            <div class="form-group" style="margin:0;">
-              <label class="form-label">Timestamp Column</label>
-              <select class="form-select digital-sync-timestamp"><option value="Timestamp">Timestamp</option>${timestampOptions}</select>
-            </div>
-            <div class="form-group" style="margin:0;">
-              <label class="form-label">Name Column</label>
-              <select class="form-select digital-sync-name"><option value="">Select name column...</option>${nameOptions}</select>
-            </div>
-          </div>
-        `;
-      }).join('');
-
+          `;
+        }).join('');
+      };
+      const mappingRows = ['UGA', 'Missouri'].map(site => `
+        <details class="digital-sync-site-panel" ${site === 'UGA' ? 'open' : ''} style="border:1px solid var(--gray-200); border-radius:14px; padding:0.75rem; background:#fff;">
+          <summary style="cursor:pointer; font-weight:800; display:flex; justify-content:space-between; align-items:center;">
+            <span>${site} Protocol-to-Form Mappings</span>
+            <span style="font-size:0.78rem; color:var(--gray-500);">${(tabsBySite[site] || []).length} tabs loaded</span>
+          </summary>
+          <div style="display:grid; gap:0.65rem; margin-top:0.75rem;">${renderMappingRowsForSite(site)}</div>
+        </details>
+      `).join('');
       const queue = data.queue || [];
       const queueHtml = queue.length ? queue.map(item => `
         <div class="digital-review-row" data-queue-id="${escapeHtml(item.queueId)}" style="display:grid; grid-template-columns: 1.4fr 1fr 1fr 0.7fr 1.1fr auto auto; gap:0.75rem; align-items:center; padding:0.75rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
@@ -7465,6 +7479,18 @@
               <label><input type="checkbox" id="digitalSyncEnabled" ${config.enabled ? 'checked' : ''}> Enable scheduled syncing</label>
               <label><input type="checkbox" id="digitalSyncPreferAttendance" ${config.preferPresentAttendance !== false ? 'checked' : ''}> Prefer participants marked present</label>
               <label><input type="checkbox" id="digitalSyncSaveAliases" ${config.saveAliasesOnReview !== false ? 'checked' : ''}> Save aliases after review</label>
+              <label><input type="checkbox" id="digitalSyncRecentFallback" ${config.enableRecentCompletedFallback ? 'checked' : ''}> Fallback to recent completed cohort</label>
+              <label><input type="checkbox" id="digitalSyncAllowFallbackAuto" ${config.allowRecentCompletedAutoMatch ? 'checked' : ''}> Allow high-confidence fallback auto-match</label>
+            </div>
+            <div style="display:grid; grid-template-columns: 0.55fr 0.55fr; gap:0.75rem; margin-top:0.85rem; max-width:420px;">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Fallback grace days</label>
+                <input type="number" min="0" max="90" class="form-input" id="digitalSyncFallbackDays" value="${escapeHtml(config.recentCompletedFallbackDays || 30)}">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Max completed cohorts</label>
+                <input type="number" min="1" max="3" class="form-input" id="digitalSyncFallbackMax" value="${escapeHtml(config.recentCompletedFallbackMaxCohorts || 1)}">
+              </div>
             </div>
             ${workbookMessage}
             <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin:1rem 0;">
@@ -7476,7 +7502,7 @@
               <button class="btn btn-secondary" onclick="toggleDigitalFormSchedule(${data.triggers && data.triggers.enabled ? 'false' : 'true'})"><span class="material-icons">schedule</span> ${data.triggers && data.triggers.enabled ? 'Disable Schedule' : 'Enable 10-min Schedule'}</button>
             </div>
             <div class="alert alert-info" style="margin:1rem 0 0;">
-After setup, use Preview Sync to test mappings, then enable scheduled syncing. The scheduled job checks both configured site workbooks every 10 minutes, filters matches by site, and uses watermarks so already-processed response rows are skipped. Only low-confidence or ambiguous matches appear in the review queue.
+After setup, use Preview Sync to test each site's mappings, then enable scheduled syncing. The scheduled job checks both configured site workbooks every 10 minutes, uses site-specific protocol mappings, filters matches by site, and uses watermarks so already-processed response rows are skipped. Timestamp/session-date matching is tried first; if enabled, recent completed cohort fallback is used only when the primary match is missing or low-confidence.
             </div>
             <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
             <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
@@ -7503,15 +7529,20 @@ After setup, use Preview Sync to test mappings, then enable scheduled syncing. T
     }
 
     function collectDigitalFormSyncConfig() {
-      const mappings = Array.from(document.querySelectorAll('.digital-sync-row')).map(row => ({
-        enabled: row.querySelector('.digital-sync-enabled').checked,
-        instrumentNumber: row.dataset.instrumentNumber,
-        instrumentName: row.dataset.instrumentName,
-        sheetName: row.querySelector('.digital-sync-sheet').value,
-        timestampColumn: row.querySelector('.digital-sync-timestamp').value || 'Timestamp',
-        nameColumn: row.querySelector('.digital-sync-name').value,
-        allowLateResponses: true
-      })).filter(mapping => mapping.sheetName || mapping.enabled);
+      const siteMappings = { UGA: [], Missouri: [] };
+      Array.from(document.querySelectorAll('.digital-sync-row')).forEach(row => {
+        const site = row.dataset.site || 'UGA';
+        const mapping = {
+          enabled: row.querySelector('.digital-sync-enabled').checked,
+          instrumentNumber: row.dataset.instrumentNumber,
+          instrumentName: row.dataset.instrumentName,
+          sheetName: row.querySelector('.digital-sync-sheet').value,
+          timestampColumn: row.querySelector('.digital-sync-timestamp').value || 'Timestamp',
+          nameColumn: row.querySelector('.digital-sync-name').value,
+          allowLateResponses: true
+        };
+        if (mapping.sheetName || mapping.enabled) siteMappings[site].push(mapping);
+      });
       return {
         enabled: document.getElementById('digitalSyncEnabled').checked,
         masterWorkbookIds: {
@@ -7521,16 +7552,23 @@ After setup, use Preview Sync to test mappings, then enable scheduled syncing. T
         autoMatchThreshold: Number(document.getElementById('digitalSyncAutoThreshold').value) || 90,
         reviewMatchThreshold: Number(document.getElementById('digitalSyncReviewThreshold').value) || 70,
         lateResponseWindowDays: Number(document.getElementById('digitalSyncLateDays').value) || 0,
+        enableRecentCompletedFallback: document.getElementById('digitalSyncRecentFallback').checked,
+        recentCompletedFallbackDays: Number(document.getElementById('digitalSyncFallbackDays').value) || 30,
+        recentCompletedFallbackMaxCohorts: Number(document.getElementById('digitalSyncFallbackMax').value) || 1,
+        allowRecentCompletedAutoMatch: document.getElementById('digitalSyncAllowFallbackAuto').checked,
         preferPresentAttendance: document.getElementById('digitalSyncPreferAttendance').checked,
         saveAliasesOnReview: document.getElementById('digitalSyncSaveAliases').checked,
-        mappings
+        mappings: siteMappings.UGA,
+        siteMappings
       };
     }
 
     function updateDigitalSyncColumnOptions(row) {
       if (!row) return;
       const sheetName = row.querySelector('.digital-sync-sheet').value;
-      const tab = (window.digitalSyncTabsCache || []).find(item => item.name === sheetName);
+      const site = row.dataset.site || 'UGA';
+      const siteTabs = (window.digitalSyncTabsBySiteCache && window.digitalSyncTabsBySiteCache[site]) || window.digitalSyncTabsCache || [];
+      const tab = siteTabs.find(item => item.name === sheetName);
       const headers = tab ? tab.headers || [] : [];
       const timestampSelect = row.querySelector('.digital-sync-timestamp');
       const nameSelect = row.querySelector('.digital-sync-name');
@@ -7581,6 +7619,7 @@ After setup, use Preview Sync to test mappings, then enable scheduled syncing. T
           <td>${escapeHtml(match.participantName || match.participantId || '-')}</td>
           <td>${escapeHtml(match.confidenceScore)}%</td>
           <td>${escapeHtml(match.matchStatus)}</td>
+          <td>${escapeHtml(match.matchedBy || '')}</td>
           <td>${escapeHtml(match.notes || '')}</td>
         </tr>
       `).join('');
@@ -7588,7 +7627,7 @@ After setup, use Preview Sync to test mappings, then enable scheduled syncing. T
         <div class="alert alert-info">Processed ${result.processed} responses · ${result.autoMatched} auto-matched · ${result.needsReview} review · ${result.unmatched} unmatched · ${result.checklistUpdated || 0} checklist updates.</div>
         ${result.errors && result.errors.length ? `<div class="alert alert-warning">${result.errors.map(escapeHtml).join('<br>')}</div>` : ''}
         <div style="overflow:auto; max-height:360px; border:1px solid var(--gray-200); border-radius:12px;">
-          <table class="data-table"><thead><tr><th>Source</th><th>Name</th><th>Protocol</th><th>Participant</th><th>Score</th><th>Status</th><th>Notes</th></tr></thead><tbody>${previewRows || '<tr><td colspan="7">No new responses found.</td></tr>'}</tbody></table>
+          <table class="data-table"><thead><tr><th>Source</th><th>Name</th><th>Protocol</th><th>Participant</th><th>Score</th><th>Status</th><th>Matched By</th><th>Notes</th></tr></thead><tbody>${previewRows || '<tr><td colspan="8">No new responses found.</td></tr>'}</tbody></table>
         </div>
       `;
     }
