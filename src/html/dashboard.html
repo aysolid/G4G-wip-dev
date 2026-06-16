@@ -1149,6 +1149,7 @@
     let batchLinkState = { participants: [], instrumentNumber: null, rolloutId: null, instrumentName: '' };
     let batchEnrollmentUpload = null;
     let batchEnrollmentResult = null;
+    let participantMediaState = {};
     let instrumentStatsLookup = {};
     let attendanceParticipantsCache = [];
     let adminFeatureAccess = null;
@@ -5607,6 +5608,10 @@
     }
 
     function renderParticipantMediaSection(section, result, mediaType, title, icon, linkLabel, includePlaytester) {
+      if (includePlaytester) {
+        renderPlaytestingRecordingsSection(section, result, mediaType, title, icon);
+        return;
+      }
       const participants = result.participants || [];
       const mediaMap = mediaByParticipant(result.media || []);
       const completeCount = participants.filter(p => mediaMap[String(p.participantId)] && mediaMap[String(p.participantId)].driveUrl).length;
@@ -5623,13 +5628,6 @@
               <div class="stat-card"><h3>${Math.max(0, participants.length - completeCount)}</h3><p>Missing</p></div>
               <div class="stat-card"><h3>${completion}%</h3><p>Complete</p></div>
             </div>
-            ${includePlaytester ? `
-              <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
-                <button class="btn btn-primary" onclick='saveParticipantMediaBatchUi(${JSON.stringify(mediaType)}, true)'>
-                  <span class="material-icons">save</span>
-                  Save All Playtesting Records
-                </button>
-              </div>` : ''}
             <div style="display:grid; gap:0.75rem;">
               ${participants.map(p => {
                 const item = mediaMap[String(p.participantId)] || {};
@@ -5656,6 +5654,194 @@
             </div>
           </div>
         </div>`;
+    }
+
+    function renderPlaytestingRecordingsSection(section, result, mediaType, title, icon) {
+      const participants = result.participants || [];
+      const mediaMap = mediaByParticipant(result.media || []);
+      const completeCount = participants.filter(p => mediaMap[String(p.participantId)] && mediaMap[String(p.participantId)].driveUrl).length;
+      const completion = participants.length ? Math.round((completeCount / participants.length) * 100) : 0;
+      participantMediaState[mediaType] = { participants: participants, media: result.media || [], mediaMap: mediaMap };
+
+      section.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">${icon}</span>${escapeHtml(title)}</h3>
+          </div>
+          <div class="card-body">
+            <div style="display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:0.75rem; margin-bottom:1rem;">
+              <div class="stat-card"><h3>${participants.length}</h3><p>Participants</p></div>
+              <div class="stat-card"><h3>${completeCount}</h3><p>Links Added</p></div>
+              <div class="stat-card"><h3>${Math.max(0, participants.length - completeCount)}</h3><p>Missing</p></div>
+              <div class="stat-card"><h3>${completion}%</h3><p>Complete</p></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.75rem;">
+              <div style="color:var(--gray-600); font-size:0.9rem;">Clean summary view. Use Batch Update to assign playtesters, add recording URLs, and save multiple participants at once.</div>
+              <button class="btn btn-primary" onclick="openPlaytestingRecordingsModal()">
+                <span class="material-icons">edit_note</span>
+                Batch Update Playtesting Records
+              </button>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Participant</th>
+                    <th>Playtester</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${participants.map(p => {
+                    const item = mediaMap[String(p.participantId)] || {};
+                    const playtesterName = getParticipantMediaPlaytesterName(item, participants);
+                    return `
+                      <tr>
+                        <td><strong>${escapeHtml(p.fullName)}</strong></td>
+                        <td>${playtesterName ? escapeHtml(playtesterName) : '<span style="color:var(--gray-500);">Not assigned</span>'}</td>
+                        <td><span class="badge ${item.driveUrl ? 'badge-success' : 'badge-warning'}">${item.driveUrl ? 'Added' : 'Missing'}</span></td>
+                        <td>
+                          <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                            ${item.driveUrl ? `<a class="btn btn-sm btn-secondary" href="${escapeHtml(item.driveUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-icons">open_in_new</span>Open</a>` : ''}
+                            <button class="btn btn-sm btn-primary" onclick="openPlaytestingRecordingsModal(${JSON.stringify(p.participantId)})"><span class="material-icons">edit</span>Edit</button>
+                          </div>
+                        </td>
+                      </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function getParticipantMediaPlaytesterName(item, participants) {
+      if (!item) return '';
+      if (item.playtesterName) return String(item.playtesterName).replace(/\s*\([^)]*\)$/, '');
+      const playtesterId = String(item.playtesterParticipantId || '');
+      const match = (participants || []).find(p => String(p.participantId) === playtesterId);
+      return match ? match.fullName : '';
+    }
+
+    function participantNameOptions(participants, selectedId, excludedId) {
+      return ['<option value="">Select playtester...</option>'].concat((participants || [])
+        .filter(p => String(p.participantId) !== String(excludedId || ''))
+        .map(p => `<option value="${escapeHtml(p.participantId)}" ${String(p.participantId) === String(selectedId || '') ? 'selected' : ''}>${escapeHtml(p.fullName)}</option>`))
+        .join('');
+    }
+
+    function openPlaytestingRecordingsModal(focusParticipantId) {
+      const mediaType = 'playtesting_recording';
+      const state = participantMediaState[mediaType] || { participants: [], mediaMap: {} };
+      const participants = state.participants || [];
+      const mediaMap = state.mediaMap || {};
+      if (!participants.length) {
+        showToast('No participants are loaded for this cohort yet.', 'warning');
+        return;
+      }
+      document.getElementById('modalTitle').textContent = 'Batch Playtesting Recordings';
+      document.getElementById('modalBody').innerHTML = `
+        <p style="color:var(--gray-600); margin-top:0;">Assign playtesters and paste screen-recording links here. The main Playtesting Recordings page stays clean for review.</p>
+        <div class="table-container" style="max-height:520px; overflow-y:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Participant</th>
+                <th style="min-width:220px;">Playtester</th>
+                <th style="min-width:280px;">Screen Recording URL</th>
+                <th style="min-width:220px;">Notes</th>
+                <th>Current</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${participants.map(p => {
+                const item = mediaMap[String(p.participantId)] || {};
+                const safeId = encodeURIComponent(p.participantId);
+                const highlight = focusParticipantId && String(focusParticipantId) === String(p.participantId) ? 'background:#eff6ff;' : '';
+                return `
+                  <tr style="${highlight}">
+                    <td>
+                      <strong>${escapeHtml(p.fullName)}</strong>
+                      <input type="hidden" id="${mediaType}_modal_mediaId_${safeId}" value="${escapeHtml(item.mediaId || '')}">
+                    </td>
+                    <td>
+                      <select class="form-select" id="${mediaType}_modal_playtester_${safeId}">
+                        ${participantNameOptions(participants, item.playtesterParticipantId, p.participantId)}
+                      </select>
+                    </td>
+                    <td>
+                      <input class="form-input" type="url" id="${mediaType}_modal_url_${safeId}" value="${escapeHtml(item.driveUrl || '')}" placeholder="Paste recording link">
+                    </td>
+                    <td>
+                      <input class="form-input" id="${mediaType}_modal_notes_${safeId}" value="${escapeHtml(item.notes || '')}" placeholder="Optional notes">
+                    </td>
+                    <td>
+                      ${item.driveUrl ? `<a class="btn btn-sm btn-secondary" href="${escapeHtml(item.driveUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-icons">open_in_new</span>Open</a>` : '<span class="badge badge-warning">Missing</span>'}
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+      document.getElementById('modalFooter').innerHTML = `
+        <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        <button class="btn btn-primary" onclick="savePlaytestingRecordingsFromModal()">
+          <span class="material-icons">save</span>
+          Save All Records
+        </button>
+      `;
+      openModal();
+      if (focusParticipantId) {
+        setTimeout(function() {
+          const focusEl = document.getElementById(`${mediaType}_modal_playtester_${encodeURIComponent(focusParticipantId)}`);
+          if (focusEl) focusEl.focus();
+        }, 50);
+      }
+    }
+
+    function collectPlaytestingModalPayload(participant) {
+      const mediaType = 'playtesting_recording';
+      const safeId = encodeURIComponent(participant.participantId);
+      const playtesterEl = document.getElementById(`${mediaType}_modal_playtester_${safeId}`);
+      const playtesterId = playtesterEl ? playtesterEl.value : '';
+      const playtesterName = playtesterEl && playtesterEl.selectedIndex >= 0 ? playtesterEl.options[playtesterEl.selectedIndex].text : '';
+      return {
+        mediaId: document.getElementById(`${mediaType}_modal_mediaId_${safeId}`).value,
+        rolloutId: currentRolloutFilter,
+        participantId: participant.participantId,
+        site: currentSiteFilter === 'All' ? '' : currentSiteFilter,
+        mediaType: mediaType,
+        title: `${participant.fullName} Playtesting Recording`,
+        driveUrl: document.getElementById(`${mediaType}_modal_url_${safeId}`).value,
+        notes: document.getElementById(`${mediaType}_modal_notes_${safeId}`).value,
+        playtesterParticipantId: playtesterId,
+        playtesterName: playtesterName
+      };
+    }
+
+    function savePlaytestingRecordingsFromModal() {
+      const mediaType = 'playtesting_recording';
+      const state = participantMediaState[mediaType] || { participants: [] };
+      const payloads = (state.participants || []).map(collectPlaytestingModalPayload);
+      const saveablePayloads = payloads.filter(item =>
+        item.mediaId ||
+        String(item.driveUrl || '').trim() ||
+        String(item.notes || '').trim() ||
+        String(item.playtesterParticipantId || '').trim()
+      );
+      if (!saveablePayloads.length) {
+        showToast('Enter at least one playtester, URL, or note before saving.', 'warning');
+        return;
+      }
+      google.script.run.withSuccessHandler(function(result) {
+        showToast(result.message || (result.success ? 'Saved playtesting records' : 'Unable to save playtesting records'), result.success ? 'success' : 'error');
+        if (result.success) {
+          closeModal();
+          loadPlaytestingRecordingsSection();
+        }
+      }).withFailureHandler(handleError).saveParticipantMediaBatch(sessionToken, saveablePayloads);
     }
 
     function saveParticipantMediaUi(mediaType, participantId, participantName, includePlaytester) {
