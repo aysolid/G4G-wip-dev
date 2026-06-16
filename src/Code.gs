@@ -72,6 +72,21 @@ function getSheetSnapshot(sheetName, options) {
   return snapshot;
 }
 
+function invalidateSheetSnapshot(sheetName) {
+  Object.keys(RUNTIME_CACHE.sheetSnapshots).forEach(key => {
+    if (key === sheetName || key.indexOf(sheetName + '::') === 0) {
+      delete RUNTIME_CACHE.sheetSnapshots[key];
+    }
+  });
+}
+
+function invalidateConfigRuntimeCache() {
+  RUNTIME_CACHE.configMap = null;
+  RUNTIME_CACHE.globalProtocolItems = null;
+  RUNTIME_CACHE.rolloutProtocolItems = {};
+  invalidateSheetSnapshot('Config');
+}
+
 function getGlobalProtocolItems() {
   if (RUNTIME_CACHE.globalProtocolItems) return RUNTIME_CACHE.globalProtocolItems;
   const configMap = getConfigMap();
@@ -205,7 +220,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -221,6 +237,293 @@ function getConfig() {
   return { success: false, message: 'Session not found' };
 }
 
+// ============================================
+// MEDIA & FIELD RECORDS
+// ============================================
+
+function ensureMediaRecordSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createSheetIfNotExists(ss, 'ParticipantMedia', [
+    'mediaId', 'rolloutId', 'participantId', 'site', 'mediaType', 'title', 'driveUrl',
+    'thumbnailUrl', 'playtesterParticipantId', 'playtesterName', 'notes', 'createdAt',
+    'createdBy', 'updatedAt', 'updatedBy', 'status'
+  ]);
+  createSheetIfNotExists(ss, 'CohortMedia', [
+    'mediaId', 'rolloutId', 'site', 'mediaCategory', 'title', 'driveUrl', 'thumbnailUrl',
+    'description', 'capturedDate', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'status'
+  ]);
+}
+
+function buildRowFromObject(headers, data) {
+  return headers.map(header => data[header] !== undefined ? data[header] : '');
+}
+
+function rowToObject(headers, row) {
+  const obj = {};
+  headers.forEach((header, idx) => obj[header] = row[idx]);
+  return obj;
+}
+
+function getParticipantsForMediaRollout_(token, rolloutId) {
+  const result = getAllParticipants(token, { rolloutId: rolloutId });
+  if (!result.success) return result;
+  const participants = (result.participants || []).filter(participant => String(participant.rolloutId) === String(rolloutId));
+  return { success: true, participants: participants };
+}
+
+function getParticipantMediaByRollout(token, rolloutId, mediaType) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  if (!rolloutId || rolloutId === 'All') return { success: false, message: 'Select a specific cohort first' };
+  ensureMediaRecordSheets();
+  const participantsResult = getParticipantsForMediaRollout_(token, rolloutId);
+  if (!participantsResult.success) return participantsResult;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const media = [];
+  for (let i = 1; i < data.length; i++) {
+    const item = rowToObject(headers, data[i]);
+    if (String(item.rolloutId) !== String(rolloutId)) continue;
+    if (String(item.mediaType) !== String(mediaType)) continue;
+    if (String(item.status || 'active').toLowerCase() === 'deleted') continue;
+    media.push(item);
+  }
+  return { success: true, participants: participantsResult.participants, media: media };
+}
+
+function saveParticipantMedia(token, media) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const payload = media || {};
+  if (!payload.rolloutId || !payload.participantId || !payload.mediaType) return { success: false, message: 'rolloutId, participantId, and mediaType are required' };
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const now = new Date().toISOString();
+  const existingId = String(payload.mediaId || '').trim();
+  const mediaIdCol = headers.indexOf('mediaId');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const participantCol = headers.indexOf('participantId');
+  const typeCol = headers.indexOf('mediaType');
+  let rowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    const byId = existingId && String(data[i][mediaIdCol]) === existingId;
+    const byNaturalKey = String(data[i][rolloutCol]) === String(payload.rolloutId) && String(data[i][participantCol]) === String(payload.participantId) && String(data[i][typeCol]) === String(payload.mediaType) && String(data[i][headers.indexOf('status')] || 'active') !== 'deleted';
+    if (byId || byNaturalKey) { rowIndex = i + 1; break; }
+  }
+  const existing = rowIndex > 0 ? rowToObject(headers, data[rowIndex - 1]) : {};
+  const record = Object.assign({}, existing, {
+    mediaId: existing.mediaId || existingId || generateUUID(),
+    rolloutId: payload.rolloutId,
+    participantId: payload.participantId,
+    site: payload.site || existing.site || '',
+    mediaType: payload.mediaType,
+    title: payload.title || existing.title || '',
+    driveUrl: String(payload.driveUrl || '').trim(),
+    thumbnailUrl: String(payload.thumbnailUrl || existing.thumbnailUrl || '').trim(),
+    playtesterParticipantId: payload.playtesterParticipantId || '',
+    playtesterName: payload.playtesterName || '',
+    notes: payload.notes || '',
+    createdAt: existing.createdAt || now,
+    createdBy: existing.createdBy || currentUser.fullName,
+    updatedAt: now,
+    updatedBy: currentUser.fullName,
+    status: payload.status || 'active'
+  });
+  const row = buildRowFromObject(headers, record);
+  if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
+  else appendRowsAsPlainText(sheet, [row]);
+  invalidateSheetSnapshot('ParticipantMedia');
+  return { success: true, message: 'Participant media saved', media: record };
+}
+
+function saveParticipantMediaBatch(token, mediaItems) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  const items = Array.isArray(mediaItems) ? mediaItems : [];
+  if (!items.length) return { success: false, message: 'No media records were provided' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const participantCol = headers.indexOf('participantId');
+  const typeCol = headers.indexOf('mediaType');
+  const statusCol = headers.indexOf('status');
+  const now = new Date().toISOString();
+  const existingById = {};
+  const existingByNaturalKey = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowNumber = i + 1;
+    const mediaId = String(row[mediaIdCol] || '').trim();
+    const naturalKey = [
+      row[rolloutCol],
+      row[participantCol],
+      row[typeCol]
+    ].map(value => String(value || '')).join('::');
+    const isDeleted = String(row[statusCol] || 'active').toLowerCase() === 'deleted';
+    if (mediaId) existingById[mediaId] = { rowNumber: rowNumber, row: row };
+    if (!isDeleted) existingByNaturalKey[naturalKey] = { rowNumber: rowNumber, row: row };
+  }
+
+  const rowsToAppend = [];
+  let savedCount = 0;
+  items.forEach(item => {
+    const payload = item || {};
+    if (!payload.rolloutId || !payload.participantId || !payload.mediaType) return;
+    const existingId = String(payload.mediaId || '').trim();
+    const naturalKey = [
+      payload.rolloutId,
+      payload.participantId,
+      payload.mediaType
+    ].map(value => String(value || '')).join('::');
+    const match = (existingId && existingById[existingId]) || existingByNaturalKey[naturalKey];
+    const existing = match ? rowToObject(headers, match.row) : {};
+    const record = Object.assign({}, existing, {
+      mediaId: existing.mediaId || existingId || generateUUID(),
+      rolloutId: payload.rolloutId,
+      participantId: payload.participantId,
+      site: payload.site || existing.site || '',
+      mediaType: payload.mediaType,
+      title: payload.title || existing.title || '',
+      driveUrl: String(payload.driveUrl || '').trim(),
+      thumbnailUrl: String(payload.thumbnailUrl || existing.thumbnailUrl || '').trim(),
+      playtesterParticipantId: payload.playtesterParticipantId || '',
+      playtesterName: payload.playtesterName || '',
+      notes: payload.notes || '',
+      createdAt: existing.createdAt || now,
+      createdBy: existing.createdBy || currentUser.fullName,
+      updatedAt: now,
+      updatedBy: currentUser.fullName,
+      status: payload.status || 'active'
+    });
+    const row = buildRowFromObject(headers, record);
+    if (match) {
+      sheet.getRange(match.rowNumber, 1, 1, headers.length).setValues([row]);
+    } else {
+      rowsToAppend.push(row);
+    }
+    savedCount++;
+  });
+
+  if (rowsToAppend.length) appendRowsAsPlainText(sheet, rowsToAppend);
+  invalidateSheetSnapshot('ParticipantMedia');
+  return { success: true, message: `${savedCount} participant media record${savedCount === 1 ? '' : 's'} saved`, savedCount: savedCount };
+}
+
+function deleteParticipantMedia(token, mediaId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const statusCol = headers.indexOf('status');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const updatedByCol = headers.indexOf('updatedBy');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][mediaIdCol]) === String(mediaId)) {
+      const row = data[i].slice(0, headers.length);
+      row[statusCol] = 'deleted';
+      row[updatedAtCol] = new Date().toISOString();
+      row[updatedByCol] = currentUser.fullName;
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateSheetSnapshot('ParticipantMedia');
+      return { success: true, message: 'Participant media removed' };
+    }
+  }
+  return { success: false, message: 'Media record not found' };
+}
+
+function getCohortMediaByRollout(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  if (!rolloutId || rolloutId === 'All') return { success: false, message: 'Select a specific cohort first' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const media = [];
+  for (let i = 1; i < data.length; i++) {
+    const item = rowToObject(headers, data[i]);
+    if (String(item.rolloutId) !== String(rolloutId)) continue;
+    if (String(item.status || 'active').toLowerCase() === 'deleted') continue;
+    media.push(item);
+  }
+  return { success: true, media: media };
+}
+
+function saveCohortMedia(token, media) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const payload = media || {};
+  if (!payload.rolloutId || !payload.mediaCategory) return { success: false, message: 'rolloutId and mediaCategory are required' };
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const now = new Date().toISOString();
+  const existingId = String(payload.mediaId || '').trim();
+  let rowIndex = -1;
+  const mediaIdCol = headers.indexOf('mediaId');
+  for (let i = 1; i < data.length; i++) {
+    if (existingId && String(data[i][mediaIdCol]) === existingId) { rowIndex = i + 1; break; }
+  }
+  const existing = rowIndex > 0 ? rowToObject(headers, data[rowIndex - 1]) : {};
+  const record = Object.assign({}, existing, {
+    mediaId: existing.mediaId || existingId || generateUUID(),
+    rolloutId: payload.rolloutId,
+    site: payload.site || existing.site || '',
+    mediaCategory: payload.mediaCategory,
+    title: payload.title || '',
+    driveUrl: String(payload.driveUrl || '').trim(),
+    thumbnailUrl: String(payload.thumbnailUrl || '').trim(),
+    description: payload.description || '',
+    capturedDate: payload.capturedDate || '',
+    createdAt: existing.createdAt || now,
+    createdBy: existing.createdBy || currentUser.fullName,
+    updatedAt: now,
+    updatedBy: currentUser.fullName,
+    status: payload.status || 'active'
+  });
+  const row = buildRowFromObject(headers, record);
+  if (rowIndex > 0) sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
+  else appendRowsAsPlainText(sheet, [row]);
+  invalidateSheetSnapshot('CohortMedia');
+  return { success: true, message: 'Cohort media saved', media: record };
+}
+
+function deleteCohortMedia(token, mediaId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+  ensureMediaRecordSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CohortMedia');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const mediaIdCol = headers.indexOf('mediaId');
+  const statusCol = headers.indexOf('status');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const updatedByCol = headers.indexOf('updatedBy');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][mediaIdCol]) === String(mediaId)) {
+      const row = data[i].slice(0, headers.length);
+      row[statusCol] = 'deleted';
+      row[updatedAtCol] = new Date().toISOString();
+      row[updatedByCol] = currentUser.fullName;
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateSheetSnapshot('CohortMedia');
+      return { success: true, message: 'Cohort media removed' };
+    }
+  }
+  return { success: false, message: 'Media record not found' };
+}
+
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
@@ -230,18 +533,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -326,18 +631,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -422,18 +729,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -518,18 +827,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -614,18 +925,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -710,18 +1023,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -806,18 +1121,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -895,6 +1212,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -941,18 +1259,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1030,6 +1350,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1076,18 +1397,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1165,6 +1488,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1211,18 +1535,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1282,7 +1608,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
@@ -1307,18 +1634,20 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
@@ -1396,6 +1725,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1448,7 +1778,8 @@ function getConfig() {
     instruments: protocols,
     participantStatuses: CONFIG.PARTICIPANT_STATUSES,
     checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
   };
 }
 
@@ -1527,6 +1858,7 @@ function saveFieldNotesLink(token, sessionId, link) {
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Field notes link saved' };
     }
   }
@@ -1573,18 +1905,1002 @@ function upsertConfigValue(key, value, description) {
   const valueCol = headers.indexOf('value');
   const descCol = headers.indexOf('description');
   const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
   for (let i = 1; i < data.length; i++) {
     if (data[i][keyCol] === key) {
-      configSheet.getRange(i + 1, valueCol + 1).setValue(value);
-      configSheet.getRange(i + 1, descCol + 1).setValue(description || '');
-      configSheet.getRange(i + 1, updatedAtCol + 1).setValue(new Date().toISOString());
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
       return;
     }
   }
-  configSheet.appendRow([key, value, description || '', new Date().toISOString()]);
-  RUNTIME_CACHE.configMap = null;
-  RUNTIME_CACHE.globalProtocolItems = null;
-  RUNTIME_CACHE.rolloutProtocolItems = {};
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
+}
+
+
+// ============================================
+// DIGITAL GOOGLE FORMS PROTOCOL SYNC
+// ============================================
+
+const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
+const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
+const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
+const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
+const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
+
+function isDigitalFormSyncSuperAdmin(user) {
+  if (!user || user.role !== 'admin') return false;
+  const userId = String(user.userId || '').trim();
+  const username = String(user.username || '').trim().toLowerCase();
+  return userId === DIGITAL_FORM_SYNC_SUPER_ADMIN_ID || username === DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME;
+}
+
+function getDigitalFormSyncAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  const configMap = getConfigMap();
+  const raw = configMap[configKey];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      const ids = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.allowedAdminIds) ? parsed.allowedAdminIds : []);
+      ids.forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    } catch (e) {
+      String(raw).split(',').forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    }
+  }
+  return Object.keys(allowed);
+}
+
+function isUserAllowedForSensitiveFeature(user, configKey) {
+  if (!user || user.role !== 'admin') return false;
+  if (isDigitalFormSyncSuperAdmin(user)) return true;
+  const userId = String(user.userId || '').trim();
+  return !!userId && getSensitiveFeatureAllowedAdminIdsInternal(configKey).indexOf(userId) !== -1;
+}
+
+function canAccessDigitalFormSync(user) {
+  return isUserAllowedForSensitiveFeature(user, DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function canAccessEnrollmentFieldManager(user) {
+  return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function getDigitalFormSyncAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessDigitalFormSync(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getDigitalFormSyncAllowedAdminIdsInternal()
+  };
+}
+
+function getEnrollmentFieldManagerAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessEnrollmentFieldManager(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
+  };
+}
+
+function getAdminUsersForDigitalFormSyncAccess() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Users');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0] || [];
+  const idx = header => headers.indexOf(header);
+  const allowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  return values.slice(1)
+    .map(row => ({
+      userId: row[idx('userId')] || '',
+      username: row[idx('username')] || '',
+      fullName: row[idx('fullName')] || row[idx('name')] || '',
+      role: row[idx('role')] || '',
+      site: row[idx('site')] || '',
+      status: row[idx('status')] || ''
+    }))
+    .filter(user => String(user.role).toLowerCase() === 'admin' && String(user.status || 'active').toLowerCase() !== 'inactive')
+    .map(user => Object.assign({}, user, {
+      isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+      hasAccess: isDigitalFormSyncSuperAdmin(user) || allowed.indexOf(String(user.userId || '').trim()) !== -1
+    }));
+}
+
+function saveDigitalFormSyncAccess(token, adminUserIds) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only the primary Digital Forms Sync administrator can manage access.' };
+  }
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(DIGITAL_FORM_SYNC_ACCESS_KEY, JSON.stringify(Object.keys(allowed)), 'Admin users allowed to manage Digital Forms Sync');
+  return {
+    success: true,
+    message: 'Digital Forms Sync access updated',
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: getAdminUsersForDigitalFormSyncAccess()
+  };
+}
+
+function saveSensitiveFeatureAllowedAdminIdsInternal(configKey, adminUserIds, description) {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(configKey, JSON.stringify(Object.keys(allowed)), description);
+}
+
+function getAdminFeatureAccessData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
+  const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
+  return {
+    success: true,
+    isSuperAdmin: isSuperAdmin,
+    digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
+    enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
+    adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
+      digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
+      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1
+    })) : []
+  };
+}
+
+function saveAdminFeatureAccess(token, access) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only david can manage access to sensitive admin features.' };
+  }
+  const payload = access || {};
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    DIGITAL_FORM_SYNC_ACCESS_KEY,
+    payload.digitalFormsSyncAdminIds || [],
+    'Admin users allowed to manage Digital Forms Sync'
+  );
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
+    payload.enrollmentFieldManagerAdminIds || [],
+    'Admin users allowed to manage Enrollment Field Manager'
+  );
+  return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
+}
+
+function ensureDigitalFormSyncSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createSheetIfNotExists(ss, 'FormResponseSyncLog', [
+    'syncId', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'responseHash', 'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName',
+    'candidateRolloutId', 'candidateSessionId', 'participantId', 'checklistId', 'matchStatus',
+    'confidenceScore', 'matchedBy', 'matchedAt', 'notes', 'sourceLink'
+  ]);
+  createSheetIfNotExists(ss, 'FormResponseMatchQueue', [
+    'queueId', 'createdAt', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName', 'candidateRolloutId',
+    'candidateSessionId', 'suggestedParticipantId', 'suggestedParticipantName', 'confidenceScore',
+    'status', 'reviewedBy', 'reviewedAt', 'notes', 'sourceLink', 'responseHash'
+  ]);
+  createSheetIfNotExists(ss, 'ParticipantAliases', [
+    'aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'
+  ]);
+}
+
+function getDefaultDigitalFormSyncConfig() {
+  return {
+    enabled: false,
+    masterWorkbookId: '',
+    masterWorkbookIds: { UGA: '', Missouri: '' },
+    autoMatchThreshold: 90,
+    reviewMatchThreshold: 70,
+    lateResponseWindowDays: 0,
+    preferPresentAttendance: true,
+    updateMissingChecklistItems: true,
+    saveAliasesOnReview: true,
+    mappings: []
+  };
+}
+
+function extractSpreadsheetId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) return match[1];
+  return raw.replace(/[?#].*$/, '');
+}
+
+function normalizeDigitalFormSyncConfig(config) {
+  const defaults = getDefaultDigitalFormSyncConfig();
+  const input = config || {};
+  const normalized = Object.assign({}, defaults, input);
+  const workbookIdsInput = input.masterWorkbookIds || {};
+  const legacyWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
+  normalized.masterWorkbookIds = {
+    UGA: extractSpreadsheetId(workbookIdsInput.UGA || workbookIdsInput.uga || input.ugaMasterWorkbookId || ''),
+    Missouri: extractSpreadsheetId(workbookIdsInput.Missouri || workbookIdsInput.missouri || input.missouriMasterWorkbookId || '')
+  };
+  if (legacyWorkbookId && !normalized.masterWorkbookIds.UGA && !normalized.masterWorkbookIds.Missouri) {
+    normalized.masterWorkbookIds.UGA = legacyWorkbookId;
+  }
+  normalized.masterWorkbookId = normalized.masterWorkbookIds.UGA || normalized.masterWorkbookIds.Missouri || legacyWorkbookId;
+  normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
+  normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
+  normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
+  normalized.mappings = Array.isArray(input.mappings) ? input.mappings.map(mapping => ({
+    enabled: !!mapping.enabled,
+    instrumentNumber: String(mapping.instrumentNumber || '').trim(),
+    instrumentName: String(mapping.instrumentName || '').trim(),
+    sheetName: String(mapping.sheetName || '').trim(),
+    timestampColumn: String(mapping.timestampColumn || 'Timestamp').trim() || 'Timestamp',
+    nameColumn: String(mapping.nameColumn || '').trim(),
+    allowLateResponses: mapping.allowLateResponses !== false
+  })).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
+  return normalized;
+}
+
+function getDigitalFormSyncConfigInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_CONFIG_KEY]) return getDefaultDigitalFormSyncConfig();
+  try {
+    return normalizeDigitalFormSyncConfig(JSON.parse(configMap[DIGITAL_FORM_SYNC_CONFIG_KEY] || '{}'));
+  } catch (e) {
+    return getDefaultDigitalFormSyncConfig();
+  }
+}
+
+function getDigitalFormSyncWatermarksInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY]) return {};
+  try { return JSON.parse(configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY] || '{}') || {}; } catch (e) { return {}; }
+}
+
+function saveDigitalFormSyncWatermarksInternal(watermarks) {
+  upsertConfigValue(DIGITAL_FORM_SYNC_WATERMARKS_KEY, JSON.stringify(watermarks || {}), 'Per-form response sync watermarks');
+}
+
+function saveDigitalFormSyncConfig(token, config) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const normalized = normalizeDigitalFormSyncConfig(config || {});
+  upsertConfigValue(DIGITAL_FORM_SYNC_CONFIG_KEY, JSON.stringify(normalized), 'Google Forms digital protocol sync configuration');
+  return { success: true, message: 'Digital Forms Sync configuration saved', config: normalized };
+}
+
+function getDigitalFormSyncConfig(token) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  return { success: true, config: getDigitalFormSyncConfigInternal(), accessControl: getDigitalFormSyncAccessControlForUser(currentUser) };
+}
+
+function openDigitalFormWorkbook(workbookId) {
+  const id = extractSpreadsheetId(workbookId);
+  if (!id) throw new Error('Master workbook ID is required');
+  return SpreadsheetApp.openById(id);
+}
+
+function getWorkbookTabsForDigitalSync(workbookId) {
+  const workbook = openDigitalFormWorkbook(workbookId);
+  return workbook.getSheets().map(sheet => ({
+    name: sheet.getName(),
+    sheetId: sheet.getSheetId(),
+    lastRow: sheet.getLastRow(),
+    headers: sheet.getLastRow() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean) : []
+  }));
+}
+
+function testDigitalFormWorkbook(token, workbookId) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  try {
+    const tabs = getWorkbookTabsForDigitalSync(workbookId);
+    return { success: true, message: 'Connected to master workbook', tabs: tabs };
+  } catch (error) {
+    return { success: false, message: 'Unable to connect: ' + error.message };
+  }
+}
+
+function getDigitalFormSyncAdminData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) {
+    return {
+      success: true,
+      restricted: true,
+      message: 'Digital Forms Sync is restricted. Ask the primary administrator to grant access.',
+      accessControl: getDigitalFormSyncAccessControlForUser(currentUser)
+    };
+  }
+  ensureDigitalFormSyncSheets();
+  const config = getDigitalFormSyncConfigInternal();
+  let tabs = [];
+  let workbookError = '';
+  const tabWorkbookIds = [config.masterWorkbookIds.UGA, config.masterWorkbookIds.Missouri, config.masterWorkbookId].filter(Boolean);
+  for (let i = 0; i < tabWorkbookIds.length; i++) {
+    try {
+      tabs = getWorkbookTabsForDigitalSync(tabWorkbookIds[i]);
+      workbookError = '';
+      break;
+    } catch (e) {
+      workbookError = e.message;
+    }
+  }
+  return {
+    success: true,
+    config: config,
+    tabs: tabs,
+    workbookError: workbookError,
+    protocolItems: getGlobalProtocolItems(),
+    queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
+    triggers: getDigitalFormSyncTriggerSummary(),
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: isDigitalFormSyncSuperAdmin(currentUser) ? getAdminUsersForDigitalFormSyncAccess() : []
+  };
+}
+
+function normalizePersonNameForMatch(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  a = String(a || '');
+  b = String(b || '');
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = [];
+  const curr = [];
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyStringScore(a, b) {
+  const left = normalizePersonNameForMatch(a);
+  const right = normalizePersonNameForMatch(b);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+  const distance = levenshteinDistance(left, right);
+  const maxLen = Math.max(left.length, right.length) || 1;
+  return Math.max(0, Math.round((1 - distance / maxLen) * 100));
+}
+
+function scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds) {
+  const entered = normalizePersonNameForMatch(rawName);
+  const fullName = normalizePersonNameForMatch(participant.fullName);
+  if (!entered || !fullName) return { score: 0, reason: 'Missing name' };
+  const enteredTokens = entered.split(' ').filter(Boolean);
+  const fullTokens = fullName.split(' ').filter(Boolean);
+  let score = fuzzyStringScore(entered, fullName);
+  let reason = 'Fuzzy full-name comparison';
+  if (entered === fullName) {
+    score = 100;
+    reason = 'Exact full-name match';
+  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
+    score = Math.max(score, 82);
+    reason = 'First-name match';
+  } else if (enteredTokens.length >= 2 && fullTokens.length >= 2 && enteredTokens[0] === fullTokens[0] && enteredTokens[enteredTokens.length - 1] === fullTokens[fullTokens.length - 1]) {
+    score = Math.max(score, 95);
+    reason = 'First and last name match';
+  } else if (enteredTokens[0] && fullTokens[0] && enteredTokens[0] === fullTokens[0]) {
+    score = Math.max(score, 74);
+    reason = 'Shared first name with fuzzy remainder';
+  }
+
+  const aliasList = aliases[String(participant.participantId)] || [];
+  aliasList.forEach(alias => {
+    const aliasScore = fuzzyStringScore(entered, alias.normalizedAlias || alias.alias);
+    if (aliasScore > score) {
+      score = aliasScore;
+      reason = 'Participant alias match';
+    }
+  });
+
+  if (presentParticipantIds && presentParticipantIds[String(participant.participantId)] && score > 0) {
+    score = Math.min(100, score + 5);
+    reason += ' + present attendance';
+  }
+  return { score: score, reason: reason };
+}
+
+function chooseBestParticipantMatch(rawName, candidates, aliases, presentParticipantIds) {
+  const scored = candidates.map(participant => {
+    const scoredMatch = scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds);
+    return Object.assign({}, participant, { score: scoredMatch.score, reason: scoredMatch.reason });
+  }).sort((a, b) => b.score - a.score || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+
+  const best = scored[0] || null;
+  const second = scored[1] || null;
+  if (!best) return { participant: null, score: 0, reason: 'No candidate participants' };
+
+  const enteredTokens = normalizePersonNameForMatch(rawName).split(' ').filter(Boolean);
+  if (enteredTokens.length === 1) {
+    const sameFirstName = scored.filter(candidate => normalizePersonNameForMatch(candidate.fullName).split(' ')[0] === enteredTokens[0]);
+    if (sameFirstName.length > 1) {
+      return { participant: best, score: Math.min(best.score, 69), reason: 'First name is not unique in candidate cohort' };
+    }
+  }
+
+  if (second && best.score - second.score < 8 && best.score < 95) {
+    return { participant: best, score: Math.min(best.score, 79), reason: 'Close competing participant match' };
+  }
+  return { participant: best, score: best.score, reason: best.reason };
+}
+
+function getDigitalFormMatchQueueInternal(options) {
+  ensureDigitalFormSyncSheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('FormResponseMatchQueue');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const statusFilter = options && options.status;
+  const limit = Number(options && options.limit) || 100;
+  const rows = [];
+  for (let i = data.length - 1; i >= 1 && rows.length < limit; i--) {
+    const row = data[i];
+    const status = row[headers.indexOf('status')];
+    if (statusFilter && status !== statusFilter) continue;
+    rows.push({
+      queueId: row[headers.indexOf('queueId')],
+      createdAt: row[headers.indexOf('createdAt')],
+      sourceSheetName: row[headers.indexOf('sourceSheetName')],
+      sourceRowNumber: row[headers.indexOf('sourceRowNumber')],
+      sourceTimestamp: row[headers.indexOf('sourceTimestamp')],
+      rawName: row[headers.indexOf('rawName')],
+      instrumentNumber: row[headers.indexOf('instrumentNumber')],
+      instrumentName: row[headers.indexOf('instrumentName')],
+      candidateRolloutId: row[headers.indexOf('candidateRolloutId')],
+      candidateSessionId: row[headers.indexOf('candidateSessionId')],
+      suggestedParticipantId: row[headers.indexOf('suggestedParticipantId')],
+      suggestedParticipantName: row[headers.indexOf('suggestedParticipantName')],
+      confidenceScore: row[headers.indexOf('confidenceScore')],
+      status: status,
+      notes: row[headers.indexOf('notes')],
+      sourceLink: row[headers.indexOf('sourceLink')]
+    });
+  }
+  return rows;
+}
+
+function buildDigitalSyncDatasets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const sessionsSnapshot = getSheetSnapshot('StudySessions');
+  const attendanceSnapshot = getSheetSnapshot('SessionAttendance');
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const aliasSheet = ss.getSheetByName('ParticipantAliases');
+  const aliases = {};
+  if (aliasSheet && aliasSheet.getLastRow() > 1) {
+    const aliasData = aliasSheet.getDataRange().getValues();
+    const aliasHeaders = aliasData[0] || [];
+    for (let i = 1; i < aliasData.length; i++) {
+      const pid = String(aliasData[i][aliasHeaders.indexOf('participantId')] || '');
+      if (!pid) continue;
+      aliases[pid] = aliases[pid] || [];
+      aliases[pid].push({ alias: aliasData[i][aliasHeaders.indexOf('alias')], normalizedAlias: aliasData[i][aliasHeaders.indexOf('normalizedAlias')] });
+    }
+  }
+
+  const pHeaders = participantsSnapshot.headers;
+  const participants = [];
+  const participantsByRollout = {};
+  for (let i = 1; i < participantsSnapshot.data.length; i++) {
+    const row = participantsSnapshot.data[i];
+    const participant = {
+      participantId: row[pHeaders.indexOf('participantId')],
+      fullName: row[pHeaders.indexOf('fullName')],
+      site: row[pHeaders.indexOf('site')],
+      rolloutId: row[pHeaders.indexOf('rolloutId')],
+      status: row[pHeaders.indexOf('status')]
+    };
+    if (!participant.participantId) continue;
+    participants.push(participant);
+    participantsByRollout[String(participant.rolloutId)] = participantsByRollout[String(participant.rolloutId)] || [];
+    participantsByRollout[String(participant.rolloutId)].push(participant);
+  }
+
+  const sHeaders = sessionsSnapshot.headers;
+  const sessionsByDate = {};
+  const sessionById = {};
+  for (let i = 1; i < sessionsSnapshot.data.length; i++) {
+    const row = sessionsSnapshot.data[i];
+    const session = {
+      sessionId: row[sHeaders.indexOf('sessionId')],
+      rolloutId: row[sHeaders.indexOf('rolloutId')],
+      sessionNumber: row[sHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(row[sHeaders.indexOf('sessionDate')]),
+      status: row[sHeaders.indexOf('status')]
+    };
+    const dateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!dateOnly) continue;
+    session.dateOnly = dateOnly;
+    sessionById[String(session.sessionId)] = session;
+    sessionsByDate[dateOnly] = sessionsByDate[dateOnly] || [];
+    sessionsByDate[dateOnly].push(session);
+  }
+
+  const aHeaders = attendanceSnapshot.headers;
+  const presentBySession = {};
+  for (let i = 1; i < attendanceSnapshot.data.length; i++) {
+    const row = attendanceSnapshot.data[i];
+    if (String(row[aHeaders.indexOf('status')] || '') !== 'present') continue;
+    const sessionId = String(row[aHeaders.indexOf('sessionId')] || '');
+    presentBySession[sessionId] = presentBySession[sessionId] || {};
+    presentBySession[sessionId][String(row[aHeaders.indexOf('participantId')] || '')] = true;
+  }
+
+  const cHeaders = checklistSnapshot.headers;
+  const checklistByParticipantInstrument = {};
+  for (let i = 1; i < checklistSnapshot.data.length; i++) {
+    const row = checklistSnapshot.data[i];
+    const key = String(row[cHeaders.indexOf('participantId')]) + '|' + String(row[cHeaders.indexOf('instrumentNumber')]);
+    checklistByParticipantInstrument[key] = { rowIndex: i, row: row };
+  }
+
+  return {
+    participantsByRollout: participantsByRollout,
+    sessionsByDate: sessionsByDate,
+    sessionById: sessionById,
+    presentBySession: presentBySession,
+    aliases: aliases,
+    checklistSnapshot: checklistSnapshot,
+    checklistByParticipantInstrument: checklistByParticipantInstrument
+  };
+}
+
+function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
+  if (!responseDate) return [];
+  const exact = datasets.sessionsByDate[responseDate] || [];
+  if (exact.length || !mapping.allowLateResponses || !config.lateResponseWindowDays) return exact;
+  const target = parseDateOnlyString(responseDate);
+  if (!target) return [];
+  const matches = [];
+  Object.keys(datasets.sessionsByDate).forEach(dateKey => {
+    const sessionDate = parseDateOnlyString(dateKey);
+    if (!sessionDate) return;
+    const diffDays = Math.abs(Math.round((target.getTime() - sessionDate.getTime()) / 86400000));
+    if (diffDays <= config.lateResponseWindowDays) {
+      datasets.sessionsByDate[dateKey].forEach(session => matches.push(session));
+    }
+  });
+  return matches;
+}
+
+function buildDigitalResponseHash(values) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(values || []))).substring(0, 32);
+}
+
+function getExistingDigitalSyncKeys() {
+  ensureDigitalFormSyncSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const keys = {};
+  for (let i = 1; i < data.length; i++) {
+    const sourceWorkbookId = data[i][headers.indexOf('sourceWorkbookId')];
+    const sourceSheet = data[i][headers.indexOf('sourceSheetName')];
+    const sourceRow = data[i][headers.indexOf('sourceRowNumber')];
+    const hash = data[i][headers.indexOf('responseHash')];
+    keys[String(sourceWorkbookId) + '::' + String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
+  }
+  return keys;
+}
+
+function getDigitalSourceLink(workbookId, sheet, rowNumber) {
+  return 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + rowNumber + ':' + rowNumber;
+}
+
+function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config, site) {
+  const timestampCol = headers.indexOf(mapping.timestampColumn || 'Timestamp');
+  const nameCol = headers.indexOf(mapping.nameColumn || '');
+  const responseTimestamp = timestampCol >= 0 ? row[timestampCol] : '';
+  const rawName = nameCol >= 0 ? row[nameCol] : '';
+  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
+  const responseHash = buildDigitalResponseHash(row);
+  const sourceLink = getDigitalSourceLink(workbookId, sheet, rowNumber);
+  const normalizedName = normalizePersonNameForMatch(rawName);
+  const sessions = findSessionsForDigitalResponse(responseDate, datasets, config, mapping);
+  const rolloutIds = {};
+  sessions.forEach(session => rolloutIds[String(session.rolloutId)] = true);
+  const candidates = [];
+  Object.keys(rolloutIds).forEach(rolloutId => {
+    (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
+      const sameSite = !site || String(participant.site || '').toLowerCase() === String(site || '').toLowerCase();
+      if (sameSite && String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+    });
+  });
+  const presentParticipantIds = {};
+  if (config.preferPresentAttendance) {
+    sessions.forEach(session => {
+      Object.assign(presentParticipantIds, datasets.presentBySession[String(session.sessionId)] || {});
+    });
+  }
+  const match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
+  const participant = match.participant;
+  const selectedSession = sessions[0] || null;
+  const checklistKey = participant ? String(participant.participantId) + '|' + String(mapping.instrumentNumber) : '';
+  const checklist = checklistKey ? datasets.checklistByParticipantInstrument[checklistKey] : null;
+  let matchStatus = 'unmatched';
+  let notes = match.reason || '';
+  if (timestampCol === -1) notes = 'Timestamp column not found';
+  if (!mapping.nameColumn || nameCol === -1) notes = 'Name column not found';
+  else if (!sessions.length) notes = 'No DARTS session found for response date ' + (responseDate || '(blank)');
+  else if (!participant) notes = 'No participant candidate matched';
+  else if (!checklist) notes = 'Matched participant, but checklist item was not found';
+  else if (match.score >= config.autoMatchThreshold) matchStatus = 'auto_matched';
+  else if (match.score >= config.reviewMatchThreshold) matchStatus = 'needs_review';
+  else matchStatus = 'unmatched';
+
+  return {
+    sourceWorkbookId: workbookId,
+    sourceSheetName: sheet.getName(),
+    sourceRowNumber: rowNumber,
+    sourceTimestamp: responseTimestamp && !isNaN(new Date(responseTimestamp).getTime()) ? new Date(responseTimestamp).toISOString() : String(responseTimestamp || ''),
+    responseHash: responseHash,
+    rawName: rawName,
+    normalizedName: normalizedName,
+    instrumentNumber: mapping.instrumentNumber,
+    instrumentName: mapping.instrumentName,
+    candidateRolloutId: selectedSession ? selectedSession.rolloutId : '',
+    candidateSessionId: selectedSession ? selectedSession.sessionId : '',
+    participantId: participant ? participant.participantId : '',
+    participantName: participant ? participant.fullName : '',
+    checklistId: checklist ? checklist.row[datasets.checklistSnapshot.headers.indexOf('checklistId')] : '',
+    checklistRowIndex: checklist ? checklist.rowIndex : -1,
+    matchStatus: matchStatus,
+    confidenceScore: match.score || 0,
+    notes: notes,
+    sourceLink: sourceLink
+  };
+}
+
+function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
+  const checklistSnapshot = datasets.checklistSnapshot;
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const completedByCol = cHeaders.indexOf('completedBy');
+  const notesCol = cHeaders.indexOf('notes');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
+  const touchedParticipants = {};
+  let updated = 0;
+  matches.forEach(match => {
+    if (match.matchStatus !== 'auto_matched' || match.checklistRowIndex < 1) return;
+    const row = cData[match.checklistRowIndex];
+    if (!row) return;
+    if (String(row[statusCol] || '') === 'completed' && String(row[dataLinkCol] || '').indexOf(match.sourceLink) !== -1) {
+      match.matchStatus = 'duplicate';
+      return;
+    }
+    row[statusCol] = 'completed';
+    row[completedDateCol] = match.sourceTimestamp || new Date().toISOString();
+    row[completedByCol] = currentUserName || DIGITAL_FORM_SYNC_SYSTEM_USER;
+    const existingNotes = String(row[notesCol] || '').trim();
+    const syncNote = 'Auto-completed from Google Forms: ' + match.sourceSheetName + ' row ' + match.sourceRowNumber + ' (confidence ' + match.confidenceScore + '%).';
+    row[notesCol] = existingNotes ? (existingNotes + '\n' + syncNote) : syncNote;
+    if (dataLinkCol !== -1) row[dataLinkCol] = match.sourceLink;
+    touchedParticipants[String(match.participantId)] = true;
+    updated++;
+  });
+  if (updated > 0) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    invalidateSheetSnapshot('Checklist');
+    Object.keys(touchedParticipants).forEach(participantId => {
+      updateParticipantCompletion(participantId);
+      syncParticipantStatusFromChecklist(participantId);
+    });
+  }
+  return updated;
+}
+
+function appendDigitalSyncLogs(matches, dryRun, actorName) {
+  if (dryRun || !matches.length) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const rows = matches.map(match => {
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('syncId', generateUUID());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('responseHash', match.responseHash);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('participantId', match.participantId);
+    set('checklistId', match.checklistId);
+    set('matchStatus', match.matchStatus);
+    set('confidenceScore', match.confidenceScore);
+    set('matchedBy', actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+    set('matchedAt', new Date().toISOString());
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    return row;
+  });
+  appendRowsAsPlainText(sheet, rows);
+}
+
+function appendDigitalReviewQueue(matches, dryRun) {
+  if (dryRun) return 0;
+  const reviewMatches = matches.filter(match => match.matchStatus === 'needs_review' || match.matchStatus === 'unmatched');
+  if (!reviewMatches.length) return 0;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseMatchQueue');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const existing = {};
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    existing[String(data[i][headers.indexOf('sourceSheetName')]) + '::' + String(data[i][headers.indexOf('sourceRowNumber')]) + '::' + String(data[i][headers.indexOf('responseHash')])] = true;
+  }
+  const rows = [];
+  reviewMatches.forEach(match => {
+    const key = match.sourceSheetName + '::' + match.sourceRowNumber + '::' + match.responseHash;
+    if (existing[key]) return;
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('queueId', generateUUID());
+    set('createdAt', new Date().toISOString());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('suggestedParticipantId', match.participantId);
+    set('suggestedParticipantName', match.participantName);
+    set('confidenceScore', match.confidenceScore);
+    set('status', 'pending');
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    set('responseHash', match.responseHash);
+    rows.push(row);
+  });
+  appendRowsAsPlainText(sheet, rows);
+  return rows.length;
+}
+
+function runDigitalFormSync(token, options) {
+  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin', userId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID, username: DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const dryRun = !!(options && options.dryRun);
+  const force = !!(options && options.force);
+  const config = getDigitalFormSyncConfigInternal();
+  const workbookConfigs = [
+    { site: 'UGA', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.UGA },
+    { site: 'Missouri', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.Missouri }
+  ].filter(item => item.workbookId);
+  if (!workbookConfigs.length && config.masterWorkbookId) workbookConfigs.push({ site: '', workbookId: config.masterWorkbookId });
+  if (!workbookConfigs.length) return { success: false, message: 'At least one site master workbook is not configured' };
+  const datasets = buildDigitalSyncDatasets();
+  const existingKeys = getExistingDigitalSyncKeys();
+  const watermarks = getDigitalFormSyncWatermarksInternal();
+  const matches = [];
+  const errors = [];
+  const enabledMappings = (config.mappings || []).filter(mapping => mapping.enabled);
+
+  workbookConfigs.forEach(workbookConfig => {
+    let workbook;
+    try {
+      workbook = openDigitalFormWorkbook(workbookConfig.workbookId);
+    } catch (e) {
+      errors.push((workbookConfig.site || 'Master') + ' workbook: ' + e.message);
+      return;
+    }
+    enabledMappings.forEach(mapping => {
+      const sheet = workbook.getSheetByName(mapping.sheetName);
+      if (!sheet) { errors.push((workbookConfig.site || 'Master') + ' sheet not found: ' + mapping.sheetName); return; }
+      if (sheet.getLastRow() < 2) return;
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+      const lastRow = sheet.getLastRow();
+      const watermarkKey = (workbookConfig.site || workbookConfig.workbookId) + '::' + mapping.sheetName;
+      const watermark = watermarks[watermarkKey] || {};
+      const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
+      if (startRow > lastRow) return;
+      const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
+      values.forEach((row, offset) => {
+        const rowNumber = startRow + offset;
+        const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookConfig.workbookId, datasets, config, workbookConfig.site);
+        analysis.sourceSite = workbookConfig.site || '';
+        const existingKey = analysis.sourceWorkbookId + '::' + analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
+        if (existingKeys[existingKey] && !force) return;
+        matches.push(analysis);
+      });
+      if (!dryRun) {
+        watermarks[watermarkKey] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
+      }
+    });
+  });
+
+  const updatedCount = dryRun ? 0 : applyDigitalFormChecklistUpdates(matches, datasets, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  const queuedCount = appendDigitalReviewQueue(matches, dryRun);
+  appendDigitalSyncLogs(matches, dryRun, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  if (!dryRun) saveDigitalFormSyncWatermarksInternal(watermarks);
+
+  return {
+    success: true,
+    dryRun: dryRun,
+    processed: matches.length,
+    autoMatched: matches.filter(match => match.matchStatus === 'auto_matched').length,
+    needsReview: matches.filter(match => match.matchStatus === 'needs_review').length,
+    unmatched: matches.filter(match => match.matchStatus === 'unmatched').length,
+    duplicate: matches.filter(match => match.matchStatus === 'duplicate').length,
+    checklistUpdated: updatedCount,
+    queued: queuedCount,
+    errors: errors,
+    preview: matches.slice(0, 100)
+  };
+}
+
+function runDigitalFormSyncDryRun(token) {
+  return runDigitalFormSync(token, { dryRun: true, force: true });
+}
+
+function digitalFormSyncScheduledRun() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    const config = getDigitalFormSyncConfigInternal();
+    if (!config.enabled) return;
+    runDigitalFormSync(null, { dryRun: false });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getDigitalFormSyncTriggerSummary() {
+  const triggers = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun');
+  return { enabled: triggers.length > 0, count: triggers.length };
+}
+
+function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  if (enabled) {
+    const minutes = Math.max(5, Number(everyMinutes) || 10);
+    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
+  }
+  return { success: true, message: enabled ? 'Scheduled sync enabled' : 'Scheduled sync disabled', triggers: getDigitalFormSyncTriggerSummary() };
+}
+
+function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
+  const normalized = normalizePersonNameForMatch(alias);
+  if (!participantId || !normalized) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('participantId')]) === String(participantId) && String(data[i][headers.indexOf('normalizedAlias')]) === normalized) return;
+  }
+  const row = new Array(headers.length).fill('');
+  const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+  set('aliasId', generateUUID());
+  set('participantId', participantId);
+  set('alias', alias);
+  set('normalizedAlias', normalized);
+  set('createdAt', new Date().toISOString());
+  set('createdBy', createdBy || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  set('notes', notes || 'Created from Digital Forms Sync review');
+  appendRowsAsPlainText(sheet, [row]);
+}
+
+function reviewDigitalFormMatch(token, queueId, action, participantId) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const queueSheet = ss.getSheetByName('FormResponseMatchQueue');
+  const queueData = queueSheet.getDataRange().getValues();
+  const qHeaders = queueData[0] || [];
+  let rowIndex = -1;
+  let queueRow = null;
+  for (let i = 1; i < queueData.length; i++) {
+    if (String(queueData[i][qHeaders.indexOf('queueId')]) === String(queueId)) {
+      rowIndex = i + 1;
+      queueRow = queueData[i];
+      break;
+    }
+  }
+  if (!queueRow) return { success: false, message: 'Review item not found' };
+  if (action === 'ignore') {
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('ignored');
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
+    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
+    invalidateSheetSnapshot('FormResponseMatchQueue');
+    return { success: true, message: 'Response ignored' };
+  }
+  const targetParticipantId = participantId || queueRow[qHeaders.indexOf('suggestedParticipantId')];
+  if (!targetParticipantId) return { success: false, message: 'Participant ID is required to confirm this match' };
+  const instrumentNumber = queueRow[qHeaders.indexOf('instrumentNumber')];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  const participantCol = cHeaders.indexOf('participantId');
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  let checklistRowIndex = -1;
+  for (let i = 1; i < cData.length; i++) {
+    if (String(cData[i][participantCol]) === String(targetParticipantId) && String(cData[i][instrumentCol]) === String(instrumentNumber)) {
+      checklistRowIndex = i;
+      break;
+    }
+  }
+  if (checklistRowIndex === -1) return { success: false, message: 'Checklist item not found for selected participant' };
+  const match = {
+    matchStatus: 'auto_matched',
+    checklistRowIndex: checklistRowIndex,
+    participantId: targetParticipantId,
+    sourceTimestamp: queueRow[qHeaders.indexOf('sourceTimestamp')],
+    sourceSheetName: queueRow[qHeaders.indexOf('sourceSheetName')],
+    sourceRowNumber: queueRow[qHeaders.indexOf('sourceRowNumber')],
+    confidenceScore: queueRow[qHeaders.indexOf('confidenceScore')],
+    sourceLink: queueRow[qHeaders.indexOf('sourceLink')]
+  };
+  applyDigitalFormChecklistUpdates([match], buildDigitalSyncDatasets(), currentUser.fullName);
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('resolved');
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
+  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
+  invalidateSheetSnapshot('FormResponseMatchQueue');
+  if (getDigitalFormSyncConfigInternal().saveAliasesOnReview) {
+    saveParticipantAliasInternal(targetParticipantId, queueRow[qHeaders.indexOf('rawName')], currentUser.fullName, 'Confirmed from form response review');
+  }
+  return { success: true, message: 'Match confirmed and checklist updated' };
 }
 
 // ============================================
@@ -1638,6 +2954,8 @@ function initializeDatabase() {
     'attendanceId', 'sessionId', 'participantId', 'status', 'markedAt', 'markedBy', 'notes'
   ]);
 
+  ensureMediaRecordSheets();
+
   // Create ActivityLog sheet
   createSheetIfNotExists(ss, 'ActivityLog', [
     'logId', 'timestamp', 'userId', 'userName', 'action', 'targetType', 'targetId', 'details'
@@ -1652,6 +2970,8 @@ function initializeDatabase() {
   createSheetIfNotExists(ss, 'Config', [
     'key', 'value', 'description', 'updatedAt'
   ]);
+
+  ensureDigitalFormSyncSheets();
 
   Logger.log('Database initialized successfully!');
   return { success: true, message: 'Database initialized successfully!' };
@@ -2440,6 +3760,7 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
     const number = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
     if (!enabledMap[number]) {
       checklistSheet.deleteRow(i + 1);
+      invalidateSheetSnapshot('Checklist');
       deleted++;
     }
   }
@@ -2453,16 +3774,29 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
   }
 
   let added = 0;
+  const rowsToAppend = [];
   Object.keys(rolloutParticipantIds).forEach(participantId => {
     enabledItems.forEach(item => {
       const key = participantId + '|' + String(item.number);
       if (!existing[key]) {
-        checklistSheet.appendRow([generateUUID(), participantId, item.number, item.name, item.category, 'not_started', '', '', '', '']);
+        const row = new Array(cHeaders.length).fill('');
+        const setChecklistValue = (header, value) => {
+          const idx = cHeaders.indexOf(header);
+          if (idx !== -1) row[idx] = value;
+        };
+        setChecklistValue('checklistId', generateUUID());
+        setChecklistValue('participantId', participantId);
+        setChecklistValue('instrumentNumber', item.number);
+        setChecklistValue('instrumentName', item.name);
+        setChecklistValue('category', item.category);
+        setChecklistValue('status', 'not_started');
+        rowsToAppend.push(row);
         added++;
       }
     });
-    updateParticipantCompletion(participantId);
   });
+  appendRowsAsPlainText(checklistSheet, rowsToAppend);
+  Object.keys(rolloutParticipantIds).forEach(participantId => updateParticipantCompletion(participantId));
 
   return { added: added, deleted: deleted };
 }
@@ -2659,7 +3993,8 @@ function getSessionsByRollout(token, rolloutId) {
           goproLink: headers.indexOf('goproLink') !== -1 ? data[i][headers.indexOf('goproLink')] : '',
           tascamLink: headers.indexOf('tascamLink') !== -1 ? data[i][headers.indexOf('tascamLink')] : '',
           meetingOwlLink: headers.indexOf('meetingOwlLink') !== -1 ? data[i][headers.indexOf('meetingOwlLink')] : '',
-          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : ''
+          recordingLinksJson: headers.indexOf('recordingLinksJson') !== -1 ? data[i][headers.indexOf('recordingLinksJson')] : '',
+          fieldNotesLink: headers.indexOf('fieldNotesLink') !== -1 ? data[i][headers.indexOf('fieldNotesLink')] : ''
         });
       }
     }
@@ -2673,6 +4008,28 @@ function getSessionsByRollout(token, rolloutId) {
     Logger.log('Error stack: ' + error.stack);
     return { success: false, message: 'Error loading sessions: ' + error.toString() };
   }
+}
+
+function buildStudySessionRow(headers, data) {
+  const values = {
+    sessionId: data.sessionId || '',
+    rolloutId: data.rolloutId || '',
+    sessionNumber: data.sessionNumber || '',
+    sessionDate: data.sessionDate || '',
+    sessionName: data.sessionName || '',
+    status: data.status || 'scheduled',
+    createdAt: data.createdAt || '',
+    createdBy: data.createdBy || '',
+    goproLink: data.goproLink || '',
+    tascamLink: data.tascamLink || '',
+    meetingOwlLink: data.meetingOwlLink || '',
+    recordingLinksJson: data.recordingLinksJson || ''
+  };
+
+  return headers.map(header => {
+    const key = String(header || '').trim();
+    return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
+  });
 }
 
 /**
@@ -2694,16 +4051,17 @@ function createSession(token, sessionData) {
   const sessionDateText = normalizeSessionDateValue(sessionData.sessionDate);
 
   const nextRow = sessionsSheet.getLastRow() + 1;
-  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([[
-    sessionId,
-    sessionData.rolloutId,
-    sessionData.sessionNumber,
-    sessionDateText,
-    sessionData.sessionName || '',
-    'scheduled',
-    timestamp,
-    currentUser.userId
-  ]]);
+  const row = buildStudySessionRow(headers, {
+    sessionId: sessionId,
+    rolloutId: sessionData.rolloutId,
+    sessionNumber: sessionData.sessionNumber,
+    sessionDate: sessionDateText,
+    sessionName: sessionData.sessionName || '',
+    status: 'scheduled',
+    createdAt: timestamp,
+    createdBy: currentUser.userId
+  });
+  sessionsSheet.getRange(nextRow, 1, 1, headers.length).setValues([row]);
   if (sessionDateCol > 0) {
     setPlainTextCell(sessionsSheet, nextRow, sessionDateCol, sessionDateText);
   }
@@ -2738,16 +4096,16 @@ function batchCreateSessions(token, rolloutId, sessionsData) {
       sessionId: sessionId,
       sessionNumber: sessionData.sessionNumber
     });
-    return [
-      sessionId,
-      rolloutId,
-      sessionData.sessionNumber,
-      sessionDateText,
-      sessionData.sessionName || '',
-      'scheduled',
-      timestamp,
-      currentUser.userId
-    ];
+    return buildStudySessionRow(headers, {
+      sessionId: sessionId,
+      rolloutId: rolloutId,
+      sessionNumber: sessionData.sessionNumber,
+      sessionDate: sessionDateText,
+      sessionName: sessionData.sessionName || '',
+      status: 'scheduled',
+      createdAt: timestamp,
+      createdBy: currentUser.userId
+    });
   });
 
   if (rows.length > 0) {
@@ -3247,6 +4605,171 @@ const PARTICIPANT_PARENT_HEADERS = [
   'parent_guardian_dob'
 ];
 
+const ENROLLMENT_SYSTEM_HEADERS = [
+  'participantId', 'site', 'rolloutId', 'schoolName', 'period', 'year',
+  'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+];
+
+const DEFAULT_ENROLLMENT_FIELDS = [
+  { key: 'fullName', label: 'Participant Full Name', type: 'text', required: true, core: true, placeholder: "Enter participant's full name" },
+  { key: 'parent_guardian_names', label: 'Parent/Guardian Name(s)', type: 'text', required: false, core: true, placeholder: 'Enter parent/guardian names (comma-separated if multiple)' },
+  { key: 'parent_guardian_phone', label: 'Parent/Guardian Phone Number', type: 'phone', required: false, core: true, placeholder: '(706) 555-1234' },
+  { key: 'parent_guardian_address', label: 'Parent/Guardian Residential Address', type: 'textarea', required: false, core: true, placeholder: 'Enter parent/guardian address' },
+  { key: 'parent_guardian_email', label: 'Parent/Guardian Email Address', type: 'email', required: false, core: true, placeholder: 'parent@example.com' },
+  { key: 'parent_guardian_dob', label: 'Parent/Guardian Date of Birth', type: 'date', required: false, core: true, placeholder: '' }
+];
+
+function slugifyEnrollmentFieldKey(label) {
+  return 'custom_' + String(label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .substring(0, 50);
+}
+
+function normalizeEnrollmentField(field, index, usedKeys) {
+  const typeWhitelist = ['text', 'textarea', 'number', 'date', 'email', 'phone', 'select'];
+  const label = String((field && field.label) || '').trim();
+  if (!label) return null;
+
+  let key = String((field && field.key) || '').trim();
+  if (!key) key = slugifyEnrollmentFieldKey(label);
+  key = key.replace(/[^a-zA-Z0-9_]/g, '_');
+  if (!key) key = 'custom_field_' + (index + 1);
+  if (ENROLLMENT_SYSTEM_HEADERS.indexOf(key) !== -1 || key === 'cohortName' || key === 'rolloutName') {
+    key = 'custom_' + key;
+  }
+
+  const lowerUsed = usedKeys || {};
+  const baseKey = key;
+  let suffix = 2;
+  while (lowerUsed[key.toLowerCase()]) {
+    key = baseKey + '_' + suffix;
+    suffix++;
+  }
+  lowerUsed[key.toLowerCase()] = true;
+
+  const type = typeWhitelist.indexOf(String((field && field.type) || 'text')) !== -1
+    ? String(field.type)
+    : 'text';
+
+  return {
+    key: key,
+    label: label,
+    type: type,
+    required: !!(field && field.required),
+    core: !!(field && field.core),
+    placeholder: String((field && field.placeholder) || ''),
+    options: Array.isArray(field && field.options)
+      ? field.options.map(option => String(option || '').trim()).filter(Boolean)
+      : []
+  };
+}
+
+function getEnrollmentFieldsInternal() {
+  const used = {};
+  const defaults = DEFAULT_ENROLLMENT_FIELDS.map((field, idx) => normalizeEnrollmentField(field, idx, used)).filter(Boolean);
+  const defaultByKey = {};
+  defaults.forEach(field => defaultByKey[field.key] = field);
+
+  const configMap = getConfigMap();
+  const raw = configMap.ENROLLMENT_FIELDS;
+  if (!raw) return defaults;
+
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) return defaults;
+
+    const normalizedUsed = {};
+    const normalized = [];
+    parsed.forEach((field, idx) => {
+      const merged = defaultByKey[field && field.key]
+        ? Object.assign({}, defaultByKey[field.key], field, { key: field.key, core: true })
+        : field;
+      const normalizedField = normalizeEnrollmentField(merged, idx, normalizedUsed);
+      if (normalizedField) normalized.push(normalizedField);
+    });
+
+    if (!normalized.some(field => field.key === 'fullName')) {
+      normalized.unshift(Object.assign({}, defaultByKey.fullName));
+    }
+    normalized.forEach(field => {
+      if (field.key === 'fullName') {
+        field.required = true;
+        field.core = true;
+        field.type = 'text';
+      }
+    });
+    return normalized;
+  } catch (e) {
+    return defaults;
+  }
+}
+
+function getEnrollmentFields(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  return { success: true, fields: getEnrollmentFieldsInternal() };
+}
+
+function saveEnrollmentFields(token, fields) {
+  const currentUser = validateSession(token);
+  if (!canAccessEnrollmentFieldManager(currentUser)) return { success: false, message: 'Unauthorized' };
+  if (!Array.isArray(fields) || fields.length === 0) return { success: false, message: 'At least one enrollment field is required' };
+
+  const used = {};
+  const normalized = fields.map((field, idx) => normalizeEnrollmentField(field, idx, used)).filter(Boolean);
+  if (!normalized.some(field => field.key === 'fullName')) {
+    normalized.unshift(Object.assign({}, DEFAULT_ENROLLMENT_FIELDS[0]));
+  }
+  normalized.forEach(field => {
+    if (field.key === 'fullName') {
+      field.required = true;
+      field.core = true;
+      field.type = 'text';
+    }
+  });
+  if (normalized.length === 0) return { success: false, message: 'At least one valid enrollment field is required' };
+
+  upsertConfigValue('ENROLLMENT_FIELDS', JSON.stringify(normalized), 'Participant enrollment form fields');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (participantsSheet) ensureParticipantColumns(participantsSheet);
+
+  return { success: true, fields: normalized, message: 'Enrollment fields saved' };
+}
+
+function getEnrollmentFieldValueMapFromData(data) {
+  const values = Object.assign({}, (data && data.enrollmentFields) || {});
+  if (data && data.fullName !== undefined) values.fullName = data.fullName;
+  if (data && data.parentGuardianNames !== undefined) values.parent_guardian_names = data.parentGuardianNames;
+  if (data && data.parentGuardianPhone !== undefined) values.parent_guardian_phone = data.parentGuardianPhone;
+  if (data && data.parentGuardianAddress !== undefined) values.parent_guardian_address = data.parentGuardianAddress;
+  if (data && data.parentGuardianEmail !== undefined) values.parent_guardian_email = data.parentGuardianEmail;
+  if (data && data.parentGuardianDob !== undefined) values.parent_guardian_dob = data.parentGuardianDob;
+  return values;
+}
+
+function validateEnrollmentFieldValues(fields, values) {
+  const errors = [];
+  fields.forEach(field => {
+    const value = String(values[field.key] || '').trim();
+    if (field.required && !value) {
+      errors.push(field.label + ' is required');
+      return;
+    }
+    if (!value) return;
+    if (field.type === 'email' && !isValidEmail(value)) errors.push(field.label + ' is invalid');
+    if (field.type === 'date' && !isValidDateValue(value)) errors.push(field.label + ' is invalid');
+    if (field.type === 'phone') {
+      const digits = normalizePhoneDigits(value);
+      if (digits.length < 10 || digits.length > 15) errors.push(field.label + ' must include 10 to 15 digits');
+    }
+  });
+  return errors;
+}
+
 function ensureParticipantColumns(participantsSheet) {
   const requiredHeaders = [
     'participantId', 'fullName',
@@ -3255,6 +4778,12 @@ function ensureParticipantColumns(participantsSheet) {
     'site', 'rolloutId', 'schoolName', 'period', 'year',
     'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
   ];
+
+  getEnrollmentFieldsInternal().forEach(field => {
+    if (requiredHeaders.indexOf(field.key) === -1 && ENROLLMENT_SYSTEM_HEADERS.indexOf(field.key) === -1) {
+      requiredHeaders.push(field.key);
+    }
+  });
 
   const headerRange = participantsSheet.getRange(1, 1, 1, participantsSheet.getLastColumn() || 1);
   const headers = headerRange.getValues()[0].filter(Boolean);
@@ -3307,14 +4836,22 @@ function setCellAsPlainText(sheet, rowIndex, columnIndex, value) {
   const range = sheet.getRange(rowIndex, columnIndex, 1, 1);
   range.setNumberFormat('@');
   range.setValue(value);
+  invalidateSheetSnapshot(sheet.getName());
+}
+
+function appendRowsAsPlainText(sheet, rows) {
+  if (!sheet || !Array.isArray(rows) || rows.length === 0) return 0;
+  const startRow = sheet.getLastRow() + 1;
+  const columnCount = rows[0].length;
+  const range = sheet.getRange(startRow, 1, rows.length, columnCount);
+  range.setNumberFormat('@');
+  range.setValues(rows);
+  invalidateSheetSnapshot(sheet.getName());
+  return startRow;
 }
 
 function appendParticipantRowAsText(participantsSheet, rowValues) {
-  const rowIndex = participantsSheet.getLastRow() + 1;
-  const range = participantsSheet.getRange(rowIndex, 1, 1, rowValues.length);
-  range.setNumberFormat('@');
-  range.setValues([rowValues]);
-  return rowIndex;
+  return appendRowsAsPlainText(participantsSheet, [rowValues]);
 }
 
 function normalizePhoneDigits(phone) {
@@ -3357,6 +4894,13 @@ function buildParticipantRow(headers, data) {
   setValue('status', data.status);
   setValue('notes', data.notes || '');
   setValue('completionPercentage', data.completionPercentage || 0);
+
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(data);
+  getEnrollmentFieldsInternal().forEach(field => {
+    if (enrollmentValues[field.key] !== undefined) {
+      setValue(field.key, enrollmentValues[field.key]);
+    }
+  });
 
   return row;
 }
@@ -3445,6 +4989,10 @@ function getAllParticipants(token, filters) {
       participant.parentGuardianAddress = getHeaderValue(row, headers, 'parent_guardian_address');
       participant.parentGuardianEmail = getHeaderValue(row, headers, 'parent_guardian_email');
       participant.parentGuardianDob = getHeaderValue(row, headers, 'parent_guardian_dob');
+      participant.enrollmentFields = {};
+      getEnrollmentFieldsInternal().forEach(field => {
+        participant.enrollmentFields[field.key] = getHeaderValue(row, headers, field.key);
+      });
     }
 
     participants.push(participant);
@@ -3499,6 +5047,10 @@ function getParticipantById(token, participantId) {
         participant.parentGuardianAddress = getHeaderValue(pData[i], pHeaders, 'parent_guardian_address');
         participant.parentGuardianEmail = getHeaderValue(pData[i], pHeaders, 'parent_guardian_email');
         participant.parentGuardianDob = getHeaderValue(pData[i], pHeaders, 'parent_guardian_dob');
+        participant.enrollmentFields = {};
+        getEnrollmentFieldsInternal().forEach(field => {
+          participant.enrollmentFields[field.key] = getHeaderValue(pData[i], pHeaders, field.key);
+        });
       }
       break;
     }
@@ -3550,35 +5102,30 @@ function enrollParticipant(token, participantData) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  if (!participantData || !participantData.fullName || !participantData.fullName.trim()) {
-    return { success: false, message: 'Participant full name is required' };
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
+  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
+  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
+  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  if (enrollmentErrors.length) {
+    return { success: false, message: enrollmentErrors.join('; ') };
   }
-  if (!participantData.rolloutId) {
+  if (!participantData || !participantData.rolloutId) {
     return { success: false, message: 'Study cohort is required' };
   }
 
-  const parentEmail = (participantData.parentGuardianEmail || '').trim();
-  const parentDob = (participantData.parentGuardianDob || '').trim();
-  const parentPhone = (participantData.parentGuardianPhone || '').trim();
-
-  if (parentEmail && !isValidEmail(parentEmail)) {
-    return { success: false, message: 'Parent/guardian email is invalid' };
-  }
-  if (parentDob && !isValidDateValue(parentDob)) {
-    return { success: false, message: 'Parent/guardian date of birth is invalid' };
-  }
-  if (parentPhone) {
-    const digits = normalizePhoneDigits(parentPhone);
-    if (digits.length < 10 || digits.length > 15) {
-      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
-    }
-  }
+  const parentEmail = enrollmentValues.parent_guardian_email;
+  const parentDob = enrollmentValues.parent_guardian_dob;
+  const parentPhone = enrollmentValues.parent_guardian_phone;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
   const participantHeaders = ensureParticipantColumns(participantsSheet);
-  ensureChecklistColumns(checklistSheet);
+  const checklistHeaders = ensureChecklistColumns(checklistSheet);
 
   // Get cohort info
   const cohort = getRolloutById(participantData.rolloutId);
@@ -3603,10 +5150,11 @@ function enrollParticipant(token, participantData) {
   // Add participant
   const row = buildParticipantRow(participantHeaders, {
     participantId: participantId,
-    fullName: participantData.fullName,
-    parentGuardianNames: participantData.parentGuardianNames,
+    fullName: enrollmentValues.fullName,
+    enrollmentFields: enrollmentValues,
+    parentGuardianNames: enrollmentValues.parent_guardian_names,
     parentGuardianPhone: parentPhone,
-    parentGuardianAddress: participantData.parentGuardianAddress,
+    parentGuardianAddress: enrollmentValues.parent_guardian_address,
     parentGuardianEmail: parentEmail,
     parentGuardianDob: parentDob,
     site: cohort.site,
@@ -3622,25 +5170,26 @@ function enrollParticipant(token, participantData) {
   });
   appendParticipantRowAsText(participantsSheet, row);
 
-  // Create checklist items for rollout-configured protocol items
-  getRolloutProtocolItemsInternal(participantData.rolloutId).forEach(instrument => {
+  // Create checklist items for rollout-configured protocol items in one bulk write.
+  const checklistRows = getRolloutProtocolItemsInternal(participantData.rolloutId).map(instrument => {
     const checklistId = generateUUID();
-    checklistSheet.appendRow([
-      checklistId,
-      participantId,
-      instrument.number,
-      instrument.name,
-      instrument.category,
-      'not_started',
-      '',
-      '',
-      '',
-      ''
-    ]);
+    const checklistRow = new Array(checklistHeaders.length).fill('');
+    const setChecklistValue = (header, value) => {
+      const idx = checklistHeaders.indexOf(header);
+      if (idx !== -1) checklistRow[idx] = value;
+    };
+    setChecklistValue('checklistId', checklistId);
+    setChecklistValue('participantId', participantId);
+    setChecklistValue('instrumentNumber', instrument.number);
+    setChecklistValue('instrumentName', instrument.name);
+    setChecklistValue('category', instrument.category);
+    setChecklistValue('status', 'not_started');
+    return checklistRow;
   });
+  appendRowsAsPlainText(checklistSheet, checklistRows);
 
   logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT', 'participant', participantId,
-    'Enrolled: ' + participantData.fullName);
+    'Enrolled: ' + enrollmentValues.fullName);
 
   return {
     success: true,
@@ -3674,22 +5223,21 @@ function updateParticipant(token, participantId, participantData) {
   const headers = participantSnapshot.headers;
   const data = participantSnapshot.data;
 
-  const parentEmail = (participantData.parentGuardianEmail || '').trim();
-  const parentDob = (participantData.parentGuardianDob || '').trim();
-  const parentPhone = (participantData.parentGuardianPhone || '').trim();
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
+  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
+  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
+  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
 
-  if (parentEmail && !isValidEmail(parentEmail)) {
-    return { success: false, message: 'Parent/guardian email is invalid' };
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  if (enrollmentErrors.length) {
+    return { success: false, message: enrollmentErrors.join('; ') };
   }
-  if (parentDob && !isValidDateValue(parentDob)) {
-    return { success: false, message: 'Parent/guardian date of birth is invalid' };
-  }
-  if (parentPhone) {
-    const digits = normalizePhoneDigits(parentPhone);
-    if (digits.length < 10 || digits.length > 15) {
-      return { success: false, message: 'Parent/guardian phone must include 10 to 15 digits' };
-    }
-  }
+
+  const parentEmail = enrollmentValues.parent_guardian_email;
+  const parentDob = enrollmentValues.parent_guardian_dob;
+  const parentPhone = enrollmentValues.parent_guardian_phone;
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
@@ -3698,45 +5246,29 @@ function updateParticipant(token, participantId, participantData) {
         return { success: false, message: 'Unauthorized for this site' };
       }
 
-      if (participantData.fullName) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('fullName') + 1, participantData.fullName);
-      }
-      if (participantData.parentGuardianNames !== undefined) {
-        const idx = headers.indexOf('parent_guardian_names');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianNames);
-        }
-      }
-      if (participantData.parentGuardianPhone !== undefined) {
-        const idx = headers.indexOf('parent_guardian_phone');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentPhone);
-        }
-      }
-      if (participantData.parentGuardianAddress !== undefined) {
-        const idx = headers.indexOf('parent_guardian_address');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, participantData.parentGuardianAddress);
-        }
-      }
-      if (participantData.parentGuardianEmail !== undefined) {
-        const idx = headers.indexOf('parent_guardian_email');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentEmail);
-        }
-      }
-      if (participantData.parentGuardianDob !== undefined) {
-        const idx = headers.indexOf('parent_guardian_dob');
-        if (idx !== -1) {
-          setCellAsPlainText(participantsSheet, i + 1, idx + 1, parentDob);
-        }
-      }
-      if (participantData.status) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('status') + 1, participantData.status);
-      }
-      if (participantData.notes !== undefined) {
-        setCellAsPlainText(participantsSheet, i + 1, headers.indexOf('notes') + 1, participantData.notes);
-      }
+      const rowValues = data[i].slice(0, headers.length);
+      while (rowValues.length < headers.length) rowValues.push('');
+      const setRowValue = (header, value) => {
+        const idx = headers.indexOf(header);
+        if (idx !== -1) rowValues[idx] = value;
+      };
+
+      if (participantData.fullName) setRowValue('fullName', participantData.fullName);
+      if (participantData.parentGuardianNames !== undefined) setRowValue('parent_guardian_names', participantData.parentGuardianNames);
+      if (participantData.parentGuardianPhone !== undefined) setRowValue('parent_guardian_phone', parentPhone);
+      if (participantData.parentGuardianAddress !== undefined) setRowValue('parent_guardian_address', participantData.parentGuardianAddress);
+      if (participantData.parentGuardianEmail !== undefined) setRowValue('parent_guardian_email', parentEmail);
+      if (participantData.parentGuardianDob !== undefined) setRowValue('parent_guardian_dob', parentDob);
+      enrollmentFields.forEach(field => {
+        if (enrollmentValues[field.key] !== undefined) setRowValue(field.key, enrollmentValues[field.key]);
+      });
+      if (participantData.status) setRowValue('status', participantData.status);
+      if (participantData.notes !== undefined) setRowValue('notes', participantData.notes);
+
+      const targetRange = participantsSheet.getRange(i + 1, 1, 1, headers.length);
+      targetRange.setNumberFormat('@');
+      targetRange.setValues([rowValues]);
+      invalidateSheetSnapshot('Participants');
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_PARTICIPANT', 'participant', participantId,
         'Updated participant info');
@@ -3787,6 +5319,7 @@ function deleteParticipant(token, participantId) {
   }
 
   participantsSheet.deleteRow(rowIndex);
+  invalidateSheetSnapshot('Participants');
 
   if (checklistSheet) {
     const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
@@ -3855,36 +5388,41 @@ function generateEnrollmentTemplate(token) {
   const templateSheet = tempSs.getSheets()[0];
   templateSheet.setName('Template');
 
-  // Headers
-  const headerValues = [
-    'fullName',
-    'parent_guardian_names',
-    'parent_guardian_phone',
-    'parent_guardian_address',
-    'parent_guardian_email',
-    'parent_guardian_dob',
-    'cohortName'
-  ];
+  // Headers are generated from the live enrollment-field configuration.
+  const enrollmentFields = getEnrollmentFieldsInternal();
+  const headerValues = enrollmentFields.map(field => field.key).concat(['cohortName']);
   templateSheet.getRange(1, 1, 1, headerValues.length).setValues([headerValues]);
   templateSheet.getRange(1, 1, 1, headerValues.length)
     .setFontWeight('bold')
     .setBackground('#f1f5f9');
+  enrollmentFields.forEach((field, index) => {
+    templateSheet.getRange(1, index + 1).setNote(
+      field.label + (field.required ? ' (required)' : ' (optional)') +
+      (field.type ? ' — ' + field.type : '')
+    );
+  });
+  templateSheet.getRange(1, headerValues.length).setNote('Choose the cohort/rollout for each participant (required).');
 
   // Helper sheet with cohort list
   const helperSheet = tempSs.insertSheet('Cohorts');
-  helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
-    cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
-  );
+  if (cohorts.length > 0) {
+    helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
+      cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+    );
+  }
   helperSheet.hideSheet();
 
   // Data validation for cohort dropdown (apply to reasonable range)
   const lastRow = Math.max(2, cohorts.length + 5);
-  const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
-  const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInRange(validationRange, true)
-    .setAllowInvalid(false)
-    .build();
-  templateSheet.getRange(2, 7, lastRow, 1).setDataValidation(rule);
+  const cohortColumnIndex = headerValues.indexOf('cohortName') + 1;
+  if (cohorts.length > 0) {
+    const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(validationRange, true)
+      .setAllowInvalid(false)
+      .build();
+    templateSheet.getRange(2, cohortColumnIndex, lastRow, 1).setDataValidation(rule);
+  }
 
   // Auto-size
   templateSheet.autoResizeColumns(1, headerValues.length);
@@ -3942,12 +5480,15 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const headers = rows[0].map(h => h.trim());
+  const enrollmentFields = getEnrollmentFieldsInternal();
   const hasCohortName = headers.indexOf('cohortName') !== -1;
   const hasRolloutName = headers.indexOf('rolloutName') !== -1;
   const missing = [];
-  if (headers.indexOf('fullName') === -1) {
-    missing.push('fullName');
-  }
+  enrollmentFields.forEach(field => {
+    if (field.required && headers.indexOf(field.key) === -1) {
+      missing.push(field.key);
+    }
+  });
   if (!hasCohortName && !hasRolloutName) {
     missing.push('cohortName');
   }
@@ -3955,7 +5496,6 @@ function importParticipantsCSV(token, fileData) {
     return { success: false, message: 'Missing required columns: ' + missing.join(', ') };
   }
 
-  const idx = name => headers.indexOf(name);
   const getValue = (row, name) => {
     const index = headers.indexOf(name);
     return index === -1 ? '' : (row[index] || '');
@@ -3998,6 +5538,9 @@ function importParticipantsCSV(token, fileData) {
   }
 
   const participantHeaders = ensureParticipantColumns(participantsSheet);
+  const checklistHeaders = ensureChecklistColumns(checklistSheet);
+  const participantRowsToAppend = [];
+  const checklistRowsToAppend = [];
 
   const summary = {
     processed: 0,
@@ -4011,13 +5554,17 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const fullName = (getValue(row, 'fullName') || '').trim();
+    const enrollmentValues = {};
+    enrollmentFields.forEach(field => {
+      enrollmentValues[field.key] = (getValue(row, field.key) || '').trim();
+    });
+    const fullName = String(enrollmentValues.fullName || '').trim();
     const rolloutName = (getValue(row, cohortColumn) || '').trim();
-    const parentGuardianNames = (getValue(row, 'parent_guardian_names') || '').trim();
-    const parentGuardianPhone = (getValue(row, 'parent_guardian_phone') || '').trim();
-    const parentGuardianAddress = (getValue(row, 'parent_guardian_address') || '').trim();
-    const parentGuardianEmail = (getValue(row, 'parent_guardian_email') || '').trim();
-    const parentGuardianDob = (getValue(row, 'parent_guardian_dob') || '').trim();
+    const parentGuardianNames = String(enrollmentValues.parent_guardian_names || '').trim();
+    const parentGuardianPhone = String(enrollmentValues.parent_guardian_phone || '').trim();
+    const parentGuardianAddress = String(enrollmentValues.parent_guardian_address || '').trim();
+    const parentGuardianEmail = String(enrollmentValues.parent_guardian_email || '').trim();
+    const parentGuardianDob = String(enrollmentValues.parent_guardian_dob || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -4026,13 +5573,12 @@ function importParticipantsCSV(token, fileData) {
 
     summary.processed++;
 
-    if (!fullName) {
-      summary.errors.push({ row: rowNumber, message: 'Full name is required' });
-      summary.skipped++;
-      continue;
-    }
+    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
     if (!rolloutName) {
-      summary.errors.push({ row: rowNumber, message: 'cohortName is required' });
+      rowErrors.push('cohortName is required');
+    }
+    if (rowErrors.length) {
+      summary.errors.push({ row: rowNumber, message: rowErrors.join('; ') });
       summary.skipped++;
       continue;
     }
@@ -4041,25 +5587,6 @@ function importParticipantsCSV(token, fileData) {
       summary.errors.push({ row: rowNumber, message: 'Cohort not found or not accessible: ' + rolloutName });
       summary.skipped++;
       continue;
-    }
-
-    if (parentGuardianEmail && !isValidEmail(parentGuardianEmail)) {
-      summary.errors.push({ row: rowNumber, message: 'Parent/guardian email is invalid' });
-      summary.skipped++;
-      continue;
-    }
-    if (parentGuardianDob && !isValidDateValue(parentGuardianDob)) {
-      summary.errors.push({ row: rowNumber, message: 'Parent/guardian date of birth is invalid' });
-      summary.skipped++;
-      continue;
-    }
-    if (parentGuardianPhone) {
-      const digits = normalizePhoneDigits(parentGuardianPhone);
-      if (digits.length < 10 || digits.length > 15) {
-        summary.errors.push({ row: rowNumber, message: 'Parent/guardian phone must include 10 to 15 digits' });
-        summary.skipped++;
-        continue;
-      }
     }
 
     // Create new participant (participantId auto-generated)
@@ -4075,6 +5602,7 @@ function importParticipantsCSV(token, fileData) {
     const rowValues = buildParticipantRow(participantHeaders, {
       participantId: newParticipantId,
       fullName: fullName,
+      enrollmentFields: enrollmentValues,
       parentGuardianNames: parentGuardianNames,
       parentGuardianPhone: parentGuardianPhone,
       parentGuardianAddress: parentGuardianAddress,
@@ -4091,22 +5619,22 @@ function importParticipantsCSV(token, fileData) {
       notes: '',
       completionPercentage: 0
     });
-    appendParticipantRowAsText(participantsSheet, rowValues);
+    participantRowsToAppend.push(rowValues);
 
     getRolloutProtocolItemsInternal(cohort.rolloutId).forEach(instrument => {
       const checklistId = generateUUID();
-      checklistSheet.appendRow([
-        checklistId,
-        newParticipantId,
-        instrument.number,
-        instrument.name,
-        instrument.category,
-        'not_started',
-        '',
-        '',
-        '',
-        ''
-      ]);
+      const checklistRow = new Array(checklistHeaders.length).fill('');
+      const setChecklistValue = (header, value) => {
+        const idx = checklistHeaders.indexOf(header);
+        if (idx !== -1) checklistRow[idx] = value;
+      };
+      setChecklistValue('checklistId', checklistId);
+      setChecklistValue('participantId', newParticipantId);
+      setChecklistValue('instrumentNumber', instrument.number);
+      setChecklistValue('instrumentName', instrument.name);
+      setChecklistValue('category', instrument.category);
+      setChecklistValue('status', 'not_started');
+      checklistRowsToAppend.push(checklistRow);
     });
 
     logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT_BULK', 'participant', newParticipantId,
@@ -4114,6 +5642,9 @@ function importParticipantsCSV(token, fileData) {
 
     summary.created++;
   }
+
+  appendRowsAsPlainText(participantsSheet, participantRowsToAppend);
+  appendRowsAsPlainText(checklistSheet, checklistRowsToAppend);
 
   return {
     success: true,
@@ -4142,23 +5673,30 @@ function updateChecklistItem(token, checklistId, updateData) {
     return { success: false, message: 'Required sheets not found' };
   }
 
-  const headers = ensureChecklistColumns(checklistSheet);
-  const data = checklistSheet.getRange(1, 1, checklistSheet.getLastRow(), headers.length).getValues();
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const headers = checklistSnapshot.headers;
+  const data = checklistSnapshot.data;
 
-  // Build participant site map for authorization checks
+  // Build participant site map for authorization checks from the cached participant snapshot.
   const participantSiteMap = {};
-  if (participantsSheet) {
-    const pData = participantsSheet.getDataRange().getValues();
-    const pHeaders = pData[0];
-    for (let i = 1; i < pData.length; i++) {
-      participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
-    }
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const pData = participantSnapshot.data;
+  const pHeaders = participantSnapshot.headers;
+  for (let i = 1; i < pData.length; i++) {
+    participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
   }
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('checklistId')] === checklistId) {
-      const participantId = data[i][headers.indexOf('participantId')];
-      const instrumentName = data[i][headers.indexOf('instrumentName')];
+      const rowValues = data[i].slice(0, headers.length);
+      while (rowValues.length < headers.length) rowValues.push('');
+      const getRowValue = header => rowValues[headers.indexOf(header)];
+      const setRowValue = (header, value) => {
+        const idx = headers.indexOf(header);
+        if (idx !== -1) rowValues[idx] = value;
+      };
+      const participantId = getRowValue('participantId');
+      const instrumentName = getRowValue('instrumentName');
       const participantSite = participantSiteMap[participantId];
 
       if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
@@ -4174,30 +5712,33 @@ function updateChecklistItem(token, checklistId, updateData) {
 
       // Update status
       if (updateData.status) {
-        checklistSheet.getRange(i + 1, headers.indexOf('status') + 1).setValue(updateData.status);
+        setRowValue('status', updateData.status);
         updateDetails.push('status -> ' + updateData.status);
 
         // If marking as completed, set the date and user
         if (updateData.status === 'completed') {
-          checklistSheet.getRange(i + 1, headers.indexOf('completedDate') + 1).setValue(new Date().toISOString());
-          checklistSheet.getRange(i + 1, headers.indexOf('completedBy') + 1).setValue(currentUser.fullName);
+          setRowValue('completedDate', new Date().toISOString());
+          setRowValue('completedBy', currentUser.fullName);
         } else {
           // Clear completion info if status changed to not_started or missing
-          checklistSheet.getRange(i + 1, headers.indexOf('completedDate') + 1).setValue('');
-          checklistSheet.getRange(i + 1, headers.indexOf('completedBy') + 1).setValue('');
+          setRowValue('completedDate', '');
+          setRowValue('completedBy', '');
         }
       }
 
       // Update notes
       if (updateData.notes !== undefined) {
-        checklistSheet.getRange(i + 1, headers.indexOf('notes') + 1).setValue(updateData.notes);
+        setRowValue('notes', updateData.notes);
         updateDetails.push('notes updated');
       }
 
       if (updateData.dataLink !== undefined) {
-        checklistSheet.getRange(i + 1, headers.indexOf('dataLink') + 1).setValue(updateData.dataLink);
+        setRowValue('dataLink', updateData.dataLink);
         updateDetails.push(updateData.dataLink ? 'data link saved' : 'data link removed');
       }
+
+      checklistSheet.getRange(i + 1, 1, 1, headers.length).setValues([rowValues]);
+      invalidateSheetSnapshot('Checklist');
 
       // Update participant's completion percentage
       updateParticipantCompletion(participantId);
@@ -4296,6 +5837,7 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
   });
   if (hasChanges) {
     participantSnapshot.sheet.getRange(1, 1, pData.length, pHeaders.length).setValues(pData);
+    invalidateSheetSnapshot('Participants');
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
@@ -4599,6 +6141,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
 
   if (hasChanges) {
     checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    invalidateSheetSnapshot('Checklist');
   }
 
   Object.keys(touchedParticipants).forEach(pid => {
@@ -5392,6 +6935,17 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
     cohorts
   );
 
+  const operations = buildOperationsSummary(
+    effectiveSite,
+    effectiveCohort,
+    cohorts,
+    participantsBySite,
+    participantsByCohort,
+    sessionsByCohort,
+    attendanceMap,
+    checklistSheet
+  );
+
   const aboutSummary = buildAboutSummary(
     effectiveSite,
     effectiveCohort,
@@ -5422,9 +6976,334 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       protocol: protocolSummary,
       attention: attentionItems,
       comparison: comparison,
+      operations: operations,
       about: aboutSummary
     }
   };
+}
+
+
+function buildOperationsSummary(
+  effectiveSite,
+  effectiveCohort,
+  cohorts,
+  participantsBySite,
+  participantsByCohort,
+  sessionsByCohort,
+  attendanceMap,
+  checklistSheet
+) {
+  const today = getDateOnly(new Date());
+  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
+  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
+
+  const cohortOperations = visibleCohorts.map(cohort => {
+    const participants = participantsByCohort[cohort.rolloutId] || [];
+    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
+    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
+    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
+
+    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
+    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
+      session,
+      participants,
+      attendanceMap,
+      today,
+      protocolSummary,
+      sessionProtocolMap[session.sessionId]
+    ));
+    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
+    const completedOrLastSessions = sessionProgress
+      .filter(session => session.sessionDate)
+      .slice()
+      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
+    const lastSession = completedOrLastSessions[0] || null;
+
+    return {
+      rolloutId: cohort.rolloutId,
+      site: cohort.site,
+      label: formatCohortDisplayLabel(cohort),
+      schoolName: cohort.schoolName,
+      period: cohort.period,
+      year: cohort.year,
+      sourceStatus: cohort.status,
+      lifecycle: lifecycle,
+      participantCount: participants.length,
+      activeParticipants: participants.filter(p => p.status === 'active').length,
+      completedParticipants: participants.filter(p => p.status === 'completed').length,
+      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
+      totalSessions: sessionProgress.length,
+      nextSession: nextSession,
+      lastSession: lastSession,
+      lastSessionDate: lastSession ? lastSession.sessionDate : '',
+      sessions: sessionProgress
+    };
+  });
+
+  const sites = ['UGA', 'Missouri'].map(site => {
+    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
+    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
+    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    return {
+      site: site,
+      cohortCount: siteCohorts.length,
+      participantCount: participants.length,
+      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
+      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
+      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      cohorts: siteCohorts
+    };
+  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
+
+  const upcomingCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'upcoming')
+    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
+    .slice(0, 6);
+
+  const activeCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'inProgress')
+    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
+
+  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'completed')
+    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
+    .slice(0, 1);
+
+  return {
+    sites: sites,
+    cohorts: cohortOperations,
+    lifecycleCounts: lifecycleCounts,
+    activeCohorts: activeCohorts,
+    recentCompletedCohorts: recentCompletedCohorts,
+    upcomingCohorts: upcomingCohorts,
+    totalCohorts: cohortOperations.length
+  };
+}
+
+function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
+  let present = 0;
+  let absent = 0;
+  let excused = 0;
+  let notMarked = 0;
+  const records = attendanceMap[session.sessionId] || {};
+
+  participants.forEach(participant => {
+    const status = records[participant.participantId];
+    if (status === 'present') present++;
+    else if (status === 'absent') absent++;
+    else if (status === 'excused') excused++;
+    else notMarked++;
+  });
+
+  const participantCount = participants.length;
+  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
+  const markedCount = present + absent + excused;
+  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
+  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+  const timing = resolveSessionTiming(session, sessionDateOnly, today);
+
+  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
+
+  return {
+    sessionId: session.sessionId,
+    sessionNumber: session.sessionNumber,
+    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
+    sessionDate: session.sessionDate,
+    sourceStatus: session.status,
+    timing: timing,
+    present: present,
+    absent: absent,
+    excused: excused,
+    notMarked: notMarked,
+    markedCount: markedCount,
+    participantCount: participantCount,
+    attendanceRate: attendanceRate,
+    markedRate: markedRate,
+    protocolCompletion: protocolSummary.completionRate,
+    protocolDayCompleted: protocolDaySummary.completed || 0,
+    protocolDayTotal: protocolDaySummary.total || 0,
+    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
+    protocolDayItems: protocolDaySummary.items || []
+  };
+}
+
+function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
+  const summaries = {};
+  (sessions || []).forEach(session => {
+    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
+  });
+
+  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
+    return summaries;
+  }
+
+  const participantIds = new Set(participants.map(p => String(p.participantId)));
+  const participantRolloutMap = {};
+  const rolloutAllowedNumbersMap = {};
+  participants.forEach(participant => {
+    const participantId = String(participant.participantId);
+    const rolloutId = String(participant.rolloutId || '');
+    participantRolloutMap[participantId] = rolloutId;
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
+        allowed[String(item.number)] = true;
+      });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
+  });
+
+  const sessionIdsByDate = {};
+  sessions.forEach(session => {
+    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!sessionDateOnly) return;
+    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
+    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
+  });
+
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const participantCol = cHeaders.indexOf('participantId');
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const instrumentNameCol = cHeaders.indexOf('instrumentName');
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const totalsByInstrument = {};
+  const namesByInstrument = {};
+  const completedBySession = {};
+
+  Object.keys(summaries).forEach(sessionId => {
+    completedBySession[sessionId] = {};
+  });
+
+  for (let i = 1; i < cData.length; i++) {
+    const participantId = String(cData[i][participantCol]);
+    if (!participantIds.has(participantId)) continue;
+
+    const rolloutId = participantRolloutMap[participantId] || '';
+    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+    const instrumentNumber = String(cData[i][instrumentCol]);
+    if (!allowedMap[instrumentNumber]) continue;
+
+    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
+    namesByInstrument[instrumentNumber] = instrumentName;
+    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
+
+    const status = cData[i][statusCol];
+    if (status !== 'completed') continue;
+
+    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
+    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
+    matchingSessionIds.forEach(sessionId => {
+      if (!completedBySession[sessionId]) return;
+      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
+    });
+  }
+
+  Object.keys(summaries).forEach(sessionId => {
+    const completedMap = completedBySession[sessionId] || {};
+    const items = Object.keys(completedMap)
+      .map(instrumentNumber => {
+        const total = totalsByInstrument[instrumentNumber] || participants.length;
+        const completed = completedMap[instrumentNumber] || 0;
+        return {
+          number: Number(instrumentNumber),
+          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
+          completed: completed,
+          total: total,
+          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
+        };
+      })
+      .filter(item => item.completed > 0)
+      .sort((a, b) => a.number - b.number);
+
+    summaries[sessionId].items = items;
+    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
+    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
+    summaries[sessionId].completionRate = summaries[sessionId].total > 0
+      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
+      : 0;
+  });
+
+  return summaries;
+}
+
+function resolveCohortLifecycle(cohort, sessions, today) {
+  if (!sessions || sessions.length === 0) {
+    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
+  }
+
+  const datedSessions = sessions
+    .map(session => getDateOnly(parseSessionDate(session.sessionDate)))
+    .filter(Boolean);
+
+  const completedByStatus = sessions.filter(session => String(session.status || '').toLowerCase() === 'completed').length;
+  if (completedByStatus === sessions.length) {
+    return { key: 'completed', label: 'Completed', tone: 'success', detail: 'All sessions marked complete' };
+  }
+
+  if (datedSessions.length === sessions.length) {
+    const firstDate = datedSessions[0];
+    const lastDate = datedSessions[datedSessions.length - 1];
+    if (firstDate > today) {
+      return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Starts ' + formatDashboardDate(firstDate) };
+    }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
+  }
+
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
+
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
+
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
+
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
+
+function compareDateStrings(a, b) {
+  const aDate = getDateOnly(parseSessionDate(a));
+  const bDate = getDateOnly(parseSessionDate(b));
+  if (!aDate && !bDate) return 0;
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  return aDate.localeCompare(bDate);
+}
+
+function getDateOnly(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function formatDashboardDate(dateString) {
+  if (!dateString) return 'TBD';
+  const parsed = parseSessionDate(dateString);
+  if (!parsed) return dateString;
+  return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'MMM d, yyyy');
 }
 
 function buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort) {
@@ -5584,10 +7463,18 @@ function countCompletedSessions(sessionsByCohort) {
   return completed;
 }
 
+function parseDateOnlyString(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0);
+}
+
 function parseSessionDate(dateValue) {
   if (!dateValue) return null;
   const normalized = normalizeSessionDateValue(dateValue);
   if (!normalized) return null;
+  const dateOnly = parseDateOnlyString(normalized);
+  if (dateOnly) return dateOnly;
   const parsed = new Date(normalized);
   return isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -5968,17 +7855,12 @@ function exportParticipantsCSV(token, filters) {
   const participants = result.participants;
 
   // Create CSV content
-  const includeParentFields = currentUser.role !== 'viewer';
+  const includeEnrollmentFields = currentUser.role !== 'viewer';
+  const enrollmentFields = getEnrollmentFieldsInternal().filter(field => field.key !== 'fullName');
   const headers = ['Participant ID', 'Full Name'];
 
-  if (includeParentFields) {
-    headers.push(
-      'Parent/Guardian Name(s)',
-      'Parent/Guardian Phone',
-      'Parent/Guardian Address',
-      'Parent/Guardian Email',
-      'Parent/Guardian DOB'
-    );
+  if (includeEnrollmentFields) {
+    enrollmentFields.forEach(field => headers.push(field.label));
   }
 
   headers.push('Site', 'School', 'Period', 'Year', 'Enrollment Date', 'Status', 'Completion %', 'Notes');
@@ -5991,14 +7873,11 @@ function exportParticipantsCSV(token, filters) {
       '"' + (p.fullName || '').replace(/"/g, '""') + '"'
     ];
 
-    if (includeParentFields) {
-      row.push(
-        '"' + (p.parentGuardianNames || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianPhone || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianAddress || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianEmail || '').replace(/"/g, '""') + '"',
-        '"' + (p.parentGuardianDob || '').replace(/"/g, '""') + '"'
-      );
+    if (includeEnrollmentFields) {
+      enrollmentFields.forEach(field => {
+        const value = p.enrollmentFields && p.enrollmentFields[field.key] !== undefined ? p.enrollmentFields[field.key] : '';
+        row.push('"' + String(value || '').replace(/"/g, '""') + '"');
+      });
     }
 
     row.push(
@@ -6968,7 +8847,9 @@ function normalizeSessionDateValue(value) {
     if (isNaN(value.getTime())) return '';
     return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
-  return String(value);
+  const text = String(value).trim();
+  const dateOnlyMatch = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return dateOnlyMatch ? dateOnlyMatch[1] : text;
 }
 
 /**
@@ -7003,7 +8884,7 @@ function verifyPassword(password, storedPassword) {
  */
 function formatDate(dateString) {
   if (!dateString) return '';
-  const date = new Date(dateString);
+  const date = parseDateOnlyString(dateString) || new Date(dateString);
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
