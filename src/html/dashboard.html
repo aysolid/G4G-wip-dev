@@ -5705,7 +5705,7 @@
                         <td>
                           <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
                             ${item.driveUrl ? `<a class="btn btn-sm btn-secondary" href="${escapeHtml(item.driveUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-icons">open_in_new</span>Open</a>` : ''}
-                            <button class="btn btn-sm btn-primary" onclick="openFinalShowcaseModal(${JSON.stringify(p.participantId)})"><span class="material-icons">edit</span>Edit</button>
+                            <button class="btn btn-sm btn-primary" onclick='openFinalShowcaseModal(${JSON.stringify(p.participantId)})'><span class="material-icons">edit</span>Edit</button>
                           </div>
                         </td>
                       </tr>`;
@@ -5765,7 +5765,7 @@
                         <td>
                           <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
                             ${item.driveUrl ? `<a class="btn btn-sm btn-secondary" href="${escapeHtml(item.driveUrl)}" target="_blank" rel="noopener noreferrer"><span class="material-icons">open_in_new</span>Open</a>` : ''}
-                            <button class="btn btn-sm btn-primary" onclick="openPlaytestingRecordingsModal(${JSON.stringify(p.participantId)})"><span class="material-icons">edit</span>Edit</button>
+                            <button class="btn btn-sm btn-primary" onclick='openPlaytestingRecordingsModal(${JSON.stringify(p.participantId)})'><span class="material-icons">edit</span>Edit</button>
                           </div>
                         </td>
                       </tr>`;
@@ -7742,6 +7742,18 @@ After setup, use Preview Sync to test mappings, then enable scheduled syncing. T
 
       if (isSectionVisible('fieldNotes')) {
         loadFieldNotesSection();
+      }
+
+      if (isSectionVisible('finalShowcase')) {
+        loadFinalShowcaseSection();
+      }
+
+      if (isSectionVisible('playtestingRecordings')) {
+        loadPlaytestingRecordingsSection();
+      }
+
+      if (isSectionVisible('cohortMediaGallery')) {
+        loadCohortMediaGallerySection();
       }
 
       if (!isSectionVisible('dashboard') && !isSectionVisible('participants')) {
