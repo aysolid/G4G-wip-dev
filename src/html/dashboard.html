@@ -7420,13 +7420,17 @@
         }).join('');
       };
       const mappingRows = ['UGA', 'Missouri'].map(site => `
-        <details class="digital-sync-site-panel" ${site === 'UGA' ? 'open' : ''} style="border:1px solid var(--gray-200); border-radius:14px; padding:0.75rem; background:#fff;">
-          <summary style="cursor:pointer; font-weight:800; display:flex; justify-content:space-between; align-items:center;">
-            <span>${site} Protocol-to-Form Mappings</span>
-            <span style="font-size:0.78rem; color:var(--gray-500);">${(tabsBySite[site] || []).length} tabs loaded</span>
-          </summary>
-          <div style="display:grid; gap:0.65rem; margin-top:0.75rem;">${renderMappingRowsForSite(site)}</div>
-        </details>
+        <section class="digital-sync-site-panel" data-site-panel="${escapeHtml(site)}" style="border:2px solid ${site === 'UGA' ? 'rgba(37,99,235,0.35)' : 'rgba(245,158,11,0.35)'}; border-radius:16px; padding:1rem; background:#fff; box-shadow:0 8px 24px rgba(15,23,42,0.05);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:0.85rem;">
+            <div>
+              <div style="font-size:0.78rem; letter-spacing:0.08em; text-transform:uppercase; color:${site === 'UGA' ? '#2563eb' : '#b45309'}; font-weight:800;">${site} Workbook</div>
+              <h4 style="margin:0.15rem 0 0; font-size:1rem;">${site} Protocol-to-Form Mappings</h4>
+              <div style="font-size:0.8rem; color:var(--gray-500); margin-top:0.2rem;">Configure response tab, timestamp column, and participant-name column for ${site} only.</div>
+            </div>
+            <span class="badge badge-info">${(tabsBySite[site] || []).length} tabs loaded</span>
+          </div>
+          <div style="display:grid; gap:0.65rem;">${renderMappingRowsForSite(site)}</div>
+        </section>
       `).join('');
       const queue = data.queue || [];
       const queueHtml = queue.length ? queue.map(item => `
@@ -7504,7 +7508,7 @@
             <div class="alert alert-info" style="margin:1rem 0 0;">
 After setup, use Preview Sync to test each site's mappings, then enable scheduled syncing. The scheduled job checks both configured site workbooks every 10 minutes, uses site-specific protocol mappings, filters matches by site, and uses watermarks so already-processed response rows are skipped. Timestamp/session-date matching is tried first; if enabled, recent completed cohort fallback is used only when the primary match is missing or low-confidence.
             </div>
-            <h4 style="margin:1.25rem 0 0.75rem;">Protocol-to-Form Mappings</h4>
+            <h4 style="margin:1.25rem 0 0.75rem;">Site-Specific Protocol-to-Form Mappings</h4>
             <div id="digitalSyncMappings" style="display:grid; gap:0.65rem;">${mappingRows}</div>
             <div id="digitalSyncPreview" style="margin-top:1rem;"></div>
             <h4 style="margin:1.5rem 0 0.75rem;">Match Review Queue</h4>
