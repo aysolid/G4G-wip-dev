@@ -1933,6 +1933,20 @@ const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
 const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
 const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
 const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
+const LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
+const LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
+const LESSON_JOURNAL_EXPORT_SOURCES = [
+  { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
+  { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
+  { key: 'lesson_2_journal', label: 'Lesson 2 Journal', defaultSheetName: 'Lesson 2 Journal' },
+  { key: 'lesson_3_journal', label: 'Lesson 3 Journal', defaultSheetName: 'Lesson 3 Journal' },
+  { key: 'lesson_4_journal', label: 'Lesson 4 Journal', defaultSheetName: 'Lesson 4 Journal' },
+  { key: 'lesson_5_journal', label: 'Lesson 5 Journal', defaultSheetName: 'Lesson 5 Journal' },
+  { key: 'lesson_6_journal', label: 'Lesson 6 Journal', defaultSheetName: 'Lesson 6 Journal' },
+  { key: 'lesson_7_journal', label: 'Lesson 7 Journal', defaultSheetName: 'Lesson 7 Journal' },
+  { key: 'lesson_8_journal', label: 'Lesson 8 Journal', defaultSheetName: 'Lesson 8 Journal' },
+  { key: 'peer_playtesting_feedback', label: 'Peer Playtesting Feedback', defaultSheetName: 'Peer Playtesting Feedback' }
+];
 
 function isDigitalFormSyncSuperAdmin(user) {
   if (!user || user.role !== 'admin') return false;
@@ -1947,6 +1961,10 @@ function getDigitalFormSyncAllowedAdminIdsInternal() {
 
 function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
   return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function getLessonJournalExportAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(LESSON_JOURNAL_EXPORT_ACCESS_KEY);
 }
 
 function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
@@ -1987,6 +2005,10 @@ function canAccessEnrollmentFieldManager(user) {
   return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
 }
 
+function canConfigureLessonJournalExport(user) {
+  return isUserAllowedForSensitiveFeature(user, LESSON_JOURNAL_EXPORT_ACCESS_KEY);
+}
+
 function getDigitalFormSyncAccessControlForUser(user) {
   return {
     hasAccess: canAccessDigitalFormSync(user),
@@ -2002,6 +2024,15 @@ function getEnrollmentFieldManagerAccessControlForUser(user) {
     isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
     superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
     allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
+  };
+}
+
+function getLessonJournalExportAccessControlForUser(user) {
+  return {
+    hasAccess: canConfigureLessonJournalExport(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getLessonJournalExportAllowedAdminIdsInternal()
   };
 }
 
@@ -2065,14 +2096,17 @@ function getAdminFeatureAccessData(token) {
   const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
   const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
   const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
+  const lessonJournalAllowed = getLessonJournalExportAllowedAdminIdsInternal();
   return {
     success: true,
     isSuperAdmin: isSuperAdmin,
     digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
     enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
+    lessonJournalExport: getLessonJournalExportAccessControlForUser(currentUser),
     adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
       digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
-      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1
+      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1,
+      lessonJournalExportAccess: user.isSuperAdmin || lessonJournalAllowed.indexOf(String(user.userId || '').trim()) !== -1
     })) : []
   };
 }
@@ -2080,7 +2114,7 @@ function getAdminFeatureAccessData(token) {
 function saveAdminFeatureAccess(token, access) {
   const currentUser = validateSession(token);
   if (!isDigitalFormSyncSuperAdmin(currentUser)) {
-    return { success: false, message: 'Only david can manage access to sensitive admin features.' };
+    return { success: false, message: 'Only the primary administrator can manage access to sensitive admin features.' };
   }
   const payload = access || {};
   saveSensitiveFeatureAllowedAdminIdsInternal(
@@ -2092,6 +2126,11 @@ function saveAdminFeatureAccess(token, access) {
     ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
     payload.enrollmentFieldManagerAdminIds || [],
     'Admin users allowed to manage Enrollment Field Manager'
+  );
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    LESSON_JOURNAL_EXPORT_ACCESS_KEY,
+    payload.lessonJournalExportAdminIds || [],
+    'Admin users allowed to configure Lesson Journal Export'
   );
   return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
 }
@@ -7975,6 +8014,396 @@ function getRecentActivity(token, limit) {
 // ============================================
 // EXPORT FUNCTIONS
 // ============================================
+
+/**
+ * Lesson Journal Export configuration and workbook generation
+ */
+function getDefaultLessonJournalExportConfig() {
+  const siteConfig = {};
+  ['UGA', 'Missouri'].forEach(site => {
+    siteConfig[site] = LESSON_JOURNAL_EXPORT_SOURCES.map(source => ({
+      key: source.key,
+      label: source.label,
+      enabled: true,
+      sheetName: source.defaultSheetName,
+      timestampColumn: 'Timestamp',
+      nameColumn: '',
+      columns: []
+    }));
+  });
+  return {
+    duplicateMode: 'latest',
+    includeSourceLinks: false,
+    sites: siteConfig
+  };
+}
+
+function normalizeLessonJournalExportConfig(config) {
+  const defaults = getDefaultLessonJournalExportConfig();
+  const input = config || {};
+  const normalized = {
+    duplicateMode: ['latest', 'first'].indexOf(String(input.duplicateMode || 'latest')) !== -1 ? String(input.duplicateMode || 'latest') : 'latest',
+    includeSourceLinks: !!input.includeSourceLinks,
+    sites: { UGA: [], Missouri: [] }
+  };
+  ['UGA', 'Missouri'].forEach(site => {
+    const siteInput = input.sites && Array.isArray(input.sites[site]) ? input.sites[site] : [];
+    const byKey = {};
+    siteInput.forEach(source => {
+      const key = String(source.key || '').trim();
+      if (key) byKey[key] = source;
+    });
+    normalized.sites[site] = defaults.sites[site].map(defaultSource => {
+      const source = byKey[defaultSource.key] || {};
+      const columns = Array.isArray(source.columns) ? source.columns : [];
+      return {
+        key: defaultSource.key,
+        label: String(source.label || defaultSource.label).trim(),
+        enabled: source.enabled !== false,
+        sheetName: String(source.sheetName || defaultSource.sheetName || '').trim(),
+        timestampColumn: String(source.timestampColumn || 'Timestamp').trim() || 'Timestamp',
+        nameColumn: String(source.nameColumn || '').trim(),
+        columns: columns.map(column => ({
+          sourceColumn: String(column.sourceColumn || '').trim(),
+          exportLabel: String(column.exportLabel || column.sourceColumn || '').trim(),
+          enabled: column.enabled !== false
+        })).filter(column => column.sourceColumn)
+      };
+    });
+  });
+  return normalized;
+}
+
+function getLessonJournalExportConfigInternal() {
+  const configMap = getConfigMap();
+  const raw = configMap[LESSON_JOURNAL_EXPORT_CONFIG_KEY];
+  if (!raw) return getDefaultLessonJournalExportConfig();
+  try {
+    return normalizeLessonJournalExportConfig(JSON.parse(raw));
+  } catch (e) {
+    return getDefaultLessonJournalExportConfig();
+  }
+}
+
+function getLessonJournalExportAdminData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canConfigureLessonJournalExport(currentUser)) {
+    return {
+      success: true,
+      restricted: true,
+      message: 'Lesson Journal Export configuration is restricted. Ask the primary administrator to grant access.',
+      accessControl: getLessonJournalExportAccessControlForUser(currentUser)
+    };
+  }
+  const digitalConfig = getDigitalFormSyncConfigInternal();
+  const tabsBySite = {};
+  let workbookError = '';
+  ['UGA', 'Missouri'].forEach(site => {
+    const workbookId = digitalConfig.masterWorkbookIds && digitalConfig.masterWorkbookIds[site];
+    if (!workbookId) {
+      tabsBySite[site] = [];
+      return;
+    }
+    try {
+      tabsBySite[site] = getWorkbookTabsForDigitalSync(workbookId);
+    } catch (e) {
+      tabsBySite[site] = [];
+      workbookError += (workbookError ? '; ' : '') + site + ': ' + e.message;
+    }
+  });
+  return {
+    success: true,
+    config: getLessonJournalExportConfigInternal(),
+    sources: LESSON_JOURNAL_EXPORT_SOURCES,
+    tabsBySite: tabsBySite,
+    workbookError: workbookError,
+    accessControl: getLessonJournalExportAccessControlForUser(currentUser)
+  };
+}
+
+function saveLessonJournalExportConfig(token, config) {
+  const currentUser = validateSession(token);
+  if (!canConfigureLessonJournalExport(currentUser)) {
+    return { success: false, message: 'Only the primary administrator or explicitly authorized admins can configure Lesson Journal Export.' };
+  }
+  const normalized = normalizeLessonJournalExportConfig(config || {});
+  upsertConfigValue(LESSON_JOURNAL_EXPORT_CONFIG_KEY, JSON.stringify(normalized), 'Lesson Journal Export column and sheet mappings');
+  return { success: true, message: 'Lesson Journal Export configuration saved', config: normalized };
+}
+
+function getLessonJournalWorkbookIdForSite(site) {
+  const digitalConfig = getDigitalFormSyncConfigInternal();
+  const normalizedSite = String(site || '').toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
+  return digitalConfig.masterWorkbookIds && digitalConfig.masterWorkbookIds[normalizedSite]
+    ? digitalConfig.masterWorkbookIds[normalizedSite]
+    : digitalConfig.masterWorkbookId;
+}
+
+function makeSafeExportSheetName(name, used) {
+  var base = String(name || 'Sheet').replace(/[\\/?*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!base) base = 'Sheet';
+  base = base.substring(0, 31);
+  var candidate = base;
+  var n = 2;
+  while (used[candidate]) {
+    var suffix = ' (' + n + ')';
+    candidate = base.substring(0, Math.max(1, 31 - suffix.length)) + suffix;
+    n++;
+  }
+  used[candidate] = true;
+  return candidate;
+}
+
+function findLessonJournalNameColumn(headers, configured) {
+  if (configured && headers.indexOf(configured) !== -1) return configured;
+  const candidates = ['My name is', 'What is your name?', 'Name', 'Full Name', 'Participant Name', "My child's name is"];
+  for (var i = 0; i < candidates.length; i++) {
+    const exact = headers.find(header => String(header || '').trim().toLowerCase() === candidates[i].toLowerCase());
+    if (exact) return exact;
+  }
+  return headers.find(header => /name/i.test(String(header || ''))) || '';
+}
+
+function getExportCellValue(row, headers, headerName) {
+  const index = headers.indexOf(headerName);
+  if (index === -1) return '';
+  const value = row[index];
+  if (value instanceof Date) return formatDate(value);
+  return value === null || value === undefined ? '' : value;
+}
+
+function chooseLessonJournalResponse(existing, candidate, duplicateMode) {
+  if (!existing) return candidate;
+  const existingTime = parseSessionDate(existing.timestamp) || new Date(0);
+  const candidateTime = parseSessionDate(candidate.timestamp) || new Date(0);
+  if (duplicateMode === 'first') return candidateTime < existingTime ? candidate : existing;
+  return candidateTime >= existingTime ? candidate : existing;
+}
+
+function findBestLessonJournalParticipant(rawName, candidates) {
+  let best = { participant: null, score: 0 };
+  candidates.forEach(participant => {
+    const score = fuzzyStringScore(rawName, participant.fullName);
+    if (score > best.score) best = { participant: participant, score: score };
+  });
+  return best;
+}
+
+function exportLessonJournalWorkbook(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+
+  filters = filters || {};
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
+    filters.site = currentUser.site;
+  }
+
+  const participantResult = getAllParticipants(token, filters);
+  if (!participantResult.success) return participantResult;
+  const participants = participantResult.participants || [];
+  if (!participants.length) return { success: false, message: 'No participants found for selected filters' };
+
+  const exportConfig = getLessonJournalExportConfigInternal();
+  const participantsBySite = {};
+  participants.forEach(participant => {
+    const site = String(participant.site || '');
+    if (!participantsBySite[site]) participantsBySite[site] = [];
+    participantsBySite[site].push(participant);
+  });
+
+  const spreadsheet = SpreadsheetApp.create('Lesson Journal Export ' + new Date().toISOString());
+  const defaultSheet = spreadsheet.getSheets()[0];
+  defaultSheet.setName('Summary');
+  const usedSheetNames = { Summary: true };
+  const notes = [];
+  const wideRowsByParticipant = {};
+  const wideHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'];
+  const wideHeaderSeen = {};
+  wideHeaders.forEach(header => { wideHeaderSeen[header] = true; });
+
+  participants.forEach(participant => {
+    wideRowsByParticipant[participant.participantId] = {
+      meta: [participant.fullName, participant.participantId, participant.site, participant.schoolName + ' (' + participant.period + ' ' + participant.year + ')'],
+      values: {}
+    };
+  });
+
+  const summary = {};
+  participants.forEach(p => {
+    summary[p.participantId] = {
+      participantName: p.fullName,
+      participantId: p.participantId,
+      site: p.site,
+      cohort: p.schoolName + ' (' + p.period + ' ' + p.year + ')',
+      completed: {},
+      duplicateCounts: {}
+    };
+  });
+
+  Object.keys(participantsBySite).forEach(site => {
+    const normalizedSite = String(site).toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
+    const workbookId = getLessonJournalWorkbookIdForSite(normalizedSite);
+    if (!workbookId) {
+      notes.push(['Warning', normalizedSite, '', 'No master workbook configured for site']);
+      return;
+    }
+
+    let workbook;
+    try {
+      workbook = openDigitalFormWorkbook(workbookId);
+    } catch (e) {
+      notes.push(['Error', normalizedSite, '', 'Unable to open master workbook: ' + e.message]);
+      return;
+    }
+
+    const siteSources = (exportConfig.sites && exportConfig.sites[normalizedSite]) || [];
+    const siteParticipants = participantsBySite[site] || [];
+    const candidates = siteParticipants;
+
+    siteSources.filter(source => source.enabled !== false && source.sheetName).forEach(source => {
+      const sheet = workbook.getSheetByName(source.sheetName);
+      if (!sheet || sheet.getLastRow() < 2) {
+        notes.push(['Warning', normalizedSite, source.label, 'Response tab is missing or has no response rows: ' + source.sheetName]);
+        return;
+      }
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0] || [];
+      const timestampColumn = headers.indexOf(source.timestampColumn) !== -1 ? source.timestampColumn : (headers[0] || 'Timestamp');
+      const nameColumn = findLessonJournalNameColumn(headers, source.nameColumn);
+      if (!nameColumn) {
+        notes.push(['Warning', normalizedSite, source.label, 'No participant-name column configured or detected']);
+        return;
+      }
+      let columns = (source.columns || []).filter(column => column.enabled !== false && headers.indexOf(column.sourceColumn) !== -1);
+      if (!columns.length) {
+        columns = headers
+          .filter(header => header && header !== timestampColumn && header !== nameColumn)
+          .map(header => ({ sourceColumn: header, exportLabel: header, enabled: true }));
+        notes.push(['Info', normalizedSite, source.label, 'No configured columns found; exported all non-name, non-timestamp columns']);
+      } else {
+        (source.columns || []).forEach(column => {
+          if (column.enabled !== false && headers.indexOf(column.sourceColumn) === -1) {
+            notes.push(['Warning', normalizedSite, source.label, 'Configured column not found: ' + column.sourceColumn]);
+          }
+        });
+      }
+
+      const responseByParticipant = {};
+      const duplicateCounts = {};
+      for (var i = 1; i < data.length; i++) {
+        const row = data[i];
+        const rawName = getExportCellValue(row, headers, nameColumn);
+        const best = findBestLessonJournalParticipant(rawName, candidates);
+        if (!best.participant || best.score < 60) {
+          if (rawName) notes.push(['Info', normalizedSite, source.label, 'Unmatched response row ' + (i + 1) + ' for name "' + rawName + '"']);
+          continue;
+        }
+        const pid = best.participant.participantId;
+        const response = {
+          participant: best.participant,
+          row: row,
+          rowNumber: i + 1,
+          rawName: rawName,
+          score: best.score,
+          timestamp: headers.indexOf(timestampColumn) === -1 ? '' : row[headers.indexOf(timestampColumn)]
+        };
+        duplicateCounts[pid] = (duplicateCounts[pid] || 0) + 1;
+        responseByParticipant[pid] = chooseLessonJournalResponse(responseByParticipant[pid], response, exportConfig.duplicateMode);
+      }
+
+      const tabHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort', 'Response Timestamp', 'Raw Form Name', 'Match %'].concat(columns.map(column => column.exportLabel || column.sourceColumn));
+      if (exportConfig.includeSourceLinks) tabHeaders.push('Source Row');
+      const tabRows = siteParticipants.map(participant => {
+        const response = responseByParticipant[participant.participantId];
+        const cohort = participant.schoolName + ' (' + participant.period + ' ' + participant.year + ')';
+        const row = [participant.fullName, participant.participantId, participant.site, cohort];
+        if (!response) {
+          row.push('', '', '');
+          columns.forEach(() => row.push(''));
+          if (exportConfig.includeSourceLinks) row.push('');
+          return row;
+        }
+        summary[participant.participantId].completed[source.label] = true;
+        summary[participant.participantId].duplicateCounts[source.label] = duplicateCounts[participant.participantId] || 0;
+        row.push(response.timestamp, response.rawName, response.score);
+        columns.forEach(column => row.push(getExportCellValue(response.row, headers, column.sourceColumn)));
+        if (exportConfig.includeSourceLinks) {
+          row.push('https://docs.google.com/spreadsheets/d/' + extractSpreadsheetId(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + response.rowNumber + ':' + response.rowNumber);
+        }
+        columns.forEach(column => {
+          const wideHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
+          if (!wideHeaderSeen[wideHeader]) {
+            wideHeaders.push(wideHeader);
+            wideHeaderSeen[wideHeader] = true;
+          }
+          wideRowsByParticipant[participant.participantId].values[wideHeader] = getExportCellValue(response.row, headers, column.sourceColumn);
+        });
+        return row;
+      });
+
+      const tab = spreadsheet.insertSheet(makeSafeExportSheetName(normalizedSite + ' ' + source.label, usedSheetNames));
+      tab.getRange(1, 1, 1, tabHeaders.length).setValues([tabHeaders]);
+      if (tabRows.length) tab.getRange(2, 1, tabRows.length, tabHeaders.length).setValues(tabRows);
+      tab.getRange(1, 1, 1, tabHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+      tab.setFrozenRows(1);
+      tab.setColumnWidths(1, tabHeaders.length, 170);
+    });
+  });
+
+  const summaryHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => source.label));
+  const summaryRows = participants.map(participant => {
+    const entry = summary[participant.participantId];
+    return [entry.participantName, entry.participantId, entry.site, entry.cohort].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => entry.completed[source.label] ? 'Completed' : 'Missing'));
+  });
+  defaultSheet.getRange(1, 1, 1, summaryHeaders.length).setValues([summaryHeaders]);
+  if (summaryRows.length) defaultSheet.getRange(2, 1, summaryRows.length, summaryHeaders.length).setValues(summaryRows);
+  defaultSheet.getRange(1, 1, 1, summaryHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
+  defaultSheet.setFrozenRows(1);
+  defaultSheet.setColumnWidths(1, summaryHeaders.length, 160);
+
+  const wideSheet = spreadsheet.insertSheet(makeSafeExportSheetName('Wide Consolidated', usedSheetNames));
+  const wideRows = participants.map(participant => {
+    const entry = wideRowsByParticipant[participant.participantId];
+    return entry.meta.concat(wideHeaders.slice(4).map(header => entry.values[header] || ''));
+  });
+  wideSheet.getRange(1, 1, 1, wideHeaders.length).setValues([wideHeaders]);
+  if (wideRows.length) wideSheet.getRange(2, 1, wideRows.length, wideHeaders.length).setValues(wideRows);
+  wideSheet.getRange(1, 1, 1, wideHeaders.length).setBackground('#0f766e').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+  wideSheet.setFrozenRows(1);
+  wideSheet.setColumnWidths(1, wideHeaders.length, 170);
+
+  const notesSheet = spreadsheet.insertSheet(makeSafeExportSheetName('Export Notes', usedSheetNames));
+  const noteRows = [
+    ['Info', 'Export', '', 'Generated at ' + new Date().toISOString()],
+    ['Info', 'Filter', '', 'Site: ' + (filters.site || 'All') + '; Cohort: ' + (filters.rolloutId || 'All')]
+  ].concat(notes);
+  notesSheet.getRange(1, 1, 1, 4).setValues([['Severity', 'Site/Area', 'Sheet', 'Message']]);
+  notesSheet.getRange(2, 1, noteRows.length, 4).setValues(noteRows);
+  notesSheet.getRange(1, 1, 1, 4).setBackground('#334155').setFontColor('#ffffff').setFontWeight('bold');
+  notesSheet.setColumnWidths(1, 4, 220);
+
+  SpreadsheetApp.flush();
+  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
+  const response = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+    return { success: false, message: 'Failed to generate Lesson Journal Export: ' + response.getContentText() };
+  }
+  const blob = response.getBlob().setName('lesson_journal_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
+  const base64 = Utilities.base64Encode(blob.getBytes());
+  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
+  return {
+    success: true,
+    file: base64,
+    mimeType: MimeType.MICROSOFT_EXCEL,
+    filename: blob.getName(),
+    downloadMessage: 'Lesson Journal Export downloaded'
+  };
+}
 
 /**
  * Export participants data to CSV format

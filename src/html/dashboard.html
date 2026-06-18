@@ -3492,7 +3492,7 @@
     function renderAdminFeatureAccessManager(data) {
       if (!data || !data.isSuperAdmin) return '';
       const rows = (data.adminUsers || []).map(user => `
-        <div class="feature-access-row" data-user-id="${escapeHtml(user.userId || '')}" style="display:grid; grid-template-columns:1fr auto auto; gap:0.9rem; align-items:center; padding:0.8rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+        <div class="feature-access-row" data-user-id="${escapeHtml(user.userId || '')}" style="display:grid; grid-template-columns:1fr auto auto auto; gap:0.9rem; align-items:center; padding:0.8rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
           <div>
             <strong>${escapeHtml(user.fullName || user.username || user.userId)}</strong>
             <div style="font-size:0.75rem; color:var(--gray-500);">${escapeHtml(user.username || '')} · ${escapeHtml(user.site || 'All sites')} · ${escapeHtml(user.userId || '')}</div>
@@ -3505,6 +3505,10 @@
             <input type="checkbox" class="feature-access-enrollment" ${user.enrollmentFieldManagerAccess ? 'checked' : ''} ${user.isSuperAdmin ? 'disabled' : ''}>
             Enrollment Fields
           </label>
+          <label style="display:flex; gap:0.4rem; align-items:center;">
+            <input type="checkbox" class="feature-access-lesson-journal" ${user.lessonJournalExportAccess ? 'checked' : ''} ${user.isSuperAdmin ? 'disabled' : ''}>
+            Journal Export Config
+          </label>
         </div>
       `).join('');
       return `
@@ -3513,7 +3517,7 @@
             <h3 class="card-title"><span class="material-icons">admin_panel_settings</span> Sensitive Feature Access</h3>
           </div>
           <div class="card-body">
-            <p style="color: var(--gray-600); margin-bottom: 1rem;">David can grant specific admins access to Digital Forms Sync and Enrollment Field Manager. David always keeps access to both features.</p>
+            <p style="color: var(--gray-600); margin-bottom: 1rem;">The primary administrator can grant specific admins access to Digital Forms Sync, Enrollment Field Manager, and Lesson Journal Export configuration. The primary administrator always keeps access.</p>
             <div id="sensitiveFeatureAccessRows" style="display:grid; gap:0.65rem;">${rows || '<p style="color: var(--gray-500);">No active admin users found.</p>'}</div>
             <button class="btn btn-primary" style="margin-top:1rem;" type="button" onclick="saveAdminFeatureAccessConfig()">
               <span class="material-icons">save</span>
@@ -3675,6 +3679,7 @@
     function collectAdminFeatureAccessConfig() {
       const digitalFormsSyncAdminIds = [];
       const enrollmentFieldManagerAdminIds = [];
+      const lessonJournalExportAdminIds = [];
       Array.from(document.querySelectorAll('.feature-access-row')).forEach(row => {
         const userId = row.dataset.userId;
         if (!userId) return;
@@ -3684,8 +3689,11 @@
         if (row.querySelector('.feature-access-enrollment').checked || row.querySelector('.feature-access-enrollment').disabled) {
           enrollmentFieldManagerAdminIds.push(userId);
         }
+        if (row.querySelector('.feature-access-lesson-journal').checked || row.querySelector('.feature-access-lesson-journal').disabled) {
+          lessonJournalExportAdminIds.push(userId);
+        }
       });
-      return { digitalFormsSyncAdminIds, enrollmentFieldManagerAdminIds };
+      return { digitalFormsSyncAdminIds, enrollmentFieldManagerAdminIds, lessonJournalExportAdminIds };
     }
 
     function saveAdminFeatureAccessConfig() {
@@ -3694,6 +3702,7 @@
           showToast(result.message || (result.success ? 'Feature access updated' : 'Unable to update feature access'), result.success ? 'success' : 'error');
           if (result.success) {
             loadAdminFeatureAccessSettings();
+            loadLessonJournalExportSettings();
             loadDigitalFormSyncSettings();
           }
         })
@@ -7180,6 +7189,19 @@
                   Export
                 </button>
               </div>
+              <div style="padding: 1rem; background: var(--gray-50); border-radius: var(--border-radius); display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+                <div>
+                  <div style="font-weight: 500;">Lesson Journal Export</div>
+                  <div style="font-size: 0.8rem; color: var(--gray-500);">Consolidated Google Forms lesson journal responses as XLSX</div>
+                </div>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                  ${currentUser && currentUser.role === 'admin' ? '<button class="btn btn-secondary" onclick="openLessonJournalExportConfig()"><span class="material-icons">tune</span> Configure</button>' : ''}
+                  <button class="btn btn-primary" onclick="exportLessonJournals()">
+                    <span class="material-icons">download</span>
+                    Export
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -7237,6 +7259,16 @@
         });
     }
 
+    function exportLessonJournals() {
+      google.script.run
+        .withSuccessHandler(downloadFileFromResult)
+        .withFailureHandler(handleError)
+        .exportLessonJournalWorkbook(sessionToken, {
+          site: currentSiteFilter,
+          rolloutId: currentRolloutFilter
+        });
+    }
+
     function downloadCSV(result) {
       if (result.success) {
         const blob = new Blob([result.csv], { type: 'text/csv' });
@@ -7284,6 +7316,227 @@
       }
 
       showToast('Nothing to download', 'error');
+    }
+
+
+    // ============================================
+    // LESSON JOURNAL EXPORT SETTINGS
+    // ============================================
+    function renderLessonJournalExportLoading() {
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">table_view</span> Lesson Journal Export Builder</h3>
+          </div>
+          <div class="card-body"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+      `;
+    }
+
+    function openLessonJournalExportConfig() {
+      showSection('settings');
+      setTimeout(loadLessonJournalExportSettings, 200);
+      setTimeout(function() {
+        const el = document.getElementById('lessonJournalExportSettings');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 350);
+    }
+
+    function loadLessonJournalExportSettings() {
+      const target = document.getElementById('lessonJournalExportSettings');
+      if (!target || !currentUser || currentUser.role !== 'admin') return;
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result || !result.success) {
+            target.innerHTML = `<div class="alert alert-error">${escapeHtml(result && result.message ? result.message : 'Unable to load Lesson Journal Export settings')}</div>`;
+            return;
+          }
+          if (result.restricted) {
+            target.innerHTML = renderLessonJournalExportRestricted(result);
+            return;
+          }
+          target.innerHTML = renderLessonJournalExportSettings(result);
+        })
+        .withFailureHandler(function(error) {
+          target.innerHTML = `<div class="alert alert-error">${escapeHtml(error && error.message ? error.message : error)}</div>`;
+        })
+        .getLessonJournalExportAdminData(sessionToken);
+    }
+
+    function renderLessonJournalExportRestricted(data) {
+      return `
+        <div class="card" style="max-width: 980px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title"><span class="material-icons">lock</span> Lesson Journal Export Builder</h3>
+          </div>
+          <div class="card-body">
+            <div class="alert alert-warning">${escapeHtml(data.message || 'Ask the primary administrator to grant access.')}</div>
+            <p style="color:var(--gray-600); margin:0.75rem 0 0;">Every user can run the Lesson Journal Export, but only the primary administrator or explicitly authorized admins can configure which Google Forms columns appear in the workbook.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLessonJournalExportSettings(data) {
+      const config = data.config || {};
+      const tabsBySite = data.tabsBySite || {};
+      window.lessonJournalExportTabsBySiteCache = tabsBySite;
+      const sites = config.sites || {};
+      const workbookWarning = data.workbookError ? `<div class="alert alert-warning" style="margin: 0.75rem 0;">Workbook warning: ${escapeHtml(data.workbookError)}</div>` : '';
+      const renderSite = site => {
+        const tabs = tabsBySite[site] || [];
+        const tabNames = tabs.map(tab => tab.name);
+        const sources = sites[site] || [];
+        const rows = sources.map(source => renderLessonJournalExportSource(site, source, tabs, tabNames)).join('');
+        return `
+          <section style="border:2px solid ${site === 'UGA' ? 'rgba(37,99,235,0.35)' : 'rgba(245,158,11,0.35)'}; border-radius:16px; padding:1rem; background:#fff;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:0.85rem;">
+              <div>
+                <div style="font-size:0.78rem; letter-spacing:0.08em; text-transform:uppercase; color:${site === 'UGA' ? '#2563eb' : '#b45309'}; font-weight:800;">${site} Workbook</div>
+                <h4 style="margin:0.15rem 0 0; font-size:1rem;">${site} Lesson Journal Export Columns</h4>
+                <div style="font-size:0.8rem; color:var(--gray-500); margin-top:0.2rem;">Choose response tabs, name/timestamp columns, and columns that should appear in the XLSX export for ${site}.</div>
+              </div>
+              <span class="badge badge-info">${tabs.length} tabs loaded</span>
+            </div>
+            <div style="display:grid; gap:0.75rem;">${rows}</div>
+          </section>
+        `;
+      };
+      return `
+        <div class="card" style="max-width: 1180px; margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title"><span class="material-icons">table_view</span> Lesson Journal Export Builder</h3>
+              <div style="font-size:0.85rem; color:var(--gray-500);">Configure which Google Forms journal columns appear in the Lesson Journal Export. The export button remains available to all users.</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:0.8rem;">
+              <label><input type="checkbox" id="journalExportIncludeSourceLinks" ${config.includeSourceLinks ? 'checked' : ''}> Include source row links</label>
+              <label>Duplicate response rule:
+                <select class="form-select" id="journalExportDuplicateMode" style="display:inline-block; width:auto; margin-left:0.4rem;">
+                  <option value="latest" ${config.duplicateMode === 'latest' ? 'selected' : ''}>Latest response wins</option>
+                  <option value="first" ${config.duplicateMode === 'first' ? 'selected' : ''}>First response wins</option>
+                </select>
+              </label>
+            </div>
+            ${workbookWarning}
+            <div class="alert alert-info" style="margin-bottom:1rem;">The workbook includes Summary, Wide Consolidated, lesson-specific tabs, and Export Notes for missing columns or unmatched responses.</div>
+            <div id="lessonJournalExportSites" style="display:grid; gap:1rem;">${['UGA', 'Missouri'].map(renderSite).join('')}</div>
+            <button class="btn btn-primary" style="margin-top:1rem;" onclick="saveLessonJournalExportConfig()">
+              <span class="material-icons">save</span>
+              Save Lesson Journal Export Configuration
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLessonJournalExportSource(site, source, tabs, tabNames) {
+      const selectedTab = tabs.find(tab => tab.name === source.sheetName);
+      const headers = selectedTab ? selectedTab.headers : [];
+      const tabOptions = [''].concat(tabNames).map(name => `<option value="${escapeHtml(name)}" ${name === source.sheetName ? 'selected' : ''}>${name ? escapeHtml(name) : 'Select response tab...'}</option>`).join('');
+      const columnOptions = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+      const timestampOptions = source.timestampColumn && headers.indexOf(source.timestampColumn) === -1
+        ? `<option value="${escapeHtml(source.timestampColumn)}" selected>${escapeHtml(source.timestampColumn)}</option>` + columnOptions
+        : columnOptions;
+      const nameOptions = source.nameColumn && headers.indexOf(source.nameColumn) === -1
+        ? `<option value="${escapeHtml(source.nameColumn)}" selected>${escapeHtml(source.nameColumn)}</option>` + columnOptions
+        : columnOptions;
+      const columns = (source.columns || []).map(column => renderLessonJournalExportColumn(column, headers)).join('');
+      return `
+        <div class="lesson-journal-source" data-site="${escapeHtml(site)}" data-key="${escapeHtml(source.key)}" data-label="${escapeHtml(source.label)}" style="border:1px solid var(--gray-200); border-radius:14px; padding:0.9rem; background:var(--gray-50);">
+          <div style="display:grid; grid-template-columns:auto 1.2fr 1.1fr 1fr 1fr auto; gap:0.75rem; align-items:end;">
+            <label class="form-label" style="margin:0; display:flex; gap:0.35rem; align-items:center;"><input type="checkbox" class="journal-export-enabled" ${source.enabled !== false ? 'checked' : ''}> Enabled</label>
+            <div><div style="font-weight:700;">${escapeHtml(source.label)}</div><div style="font-size:0.75rem; color:var(--gray-500);">${escapeHtml(source.key)}</div></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Response Tab</label><select class="form-select journal-export-sheet" onchange="updateLessonJournalColumnOptions(this.closest('.lesson-journal-source'))">${tabOptions}</select></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Timestamp Column</label><select class="form-select journal-export-timestamp"><option value="Timestamp">Timestamp</option>${timestampOptions}</select></div>
+            <div class="form-group" style="margin:0;"><label class="form-label">Name Column</label><select class="form-select journal-export-name"><option value="">Auto-detect name column</option>${nameOptions}</select></div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="addLessonJournalExportColumn(this.closest('.lesson-journal-source'))"><span class="material-icons">add</span> Column</button>
+          </div>
+          <div style="margin-top:0.75rem;"><div style="font-size:0.8rem; font-weight:700; color:var(--gray-600); margin-bottom:0.4rem;">Selected Export Columns</div><div class="journal-export-columns" style="display:grid; gap:0.45rem;">${columns || '<div style="font-size:0.8rem; color:var(--gray-500);">No columns selected. If left empty, export uses all non-name, non-timestamp columns.</div>'}</div></div>
+        </div>`;
+    }
+
+    function renderLessonJournalExportColumn(column, headers) {
+      const headerList = (headers || []).slice();
+      if (column.sourceColumn && headerList.indexOf(column.sourceColumn) === -1) headerList.unshift(column.sourceColumn);
+      const options = [''].concat(headerList).map(header => `<option value="${escapeHtml(header)}" ${header === (column.sourceColumn || '') ? 'selected' : ''}>${header ? escapeHtml(header) : 'Select source column...'}</option>`).join('');
+      return `
+        <div class="journal-export-column" style="display:grid; grid-template-columns:auto 1.4fr 1.4fr auto; gap:0.5rem; align-items:end; padding:0.55rem; border:1px solid var(--gray-200); border-radius:10px; background:#fff;">
+          <label class="form-label" style="margin:0; display:flex; gap:0.35rem; align-items:center;"><input type="checkbox" class="journal-column-enabled" ${column.enabled !== false ? 'checked' : ''}> Include</label>
+          <div class="form-group" style="margin:0;"><label class="form-label">Source Column</label><select class="form-select journal-column-source" onchange="syncLessonJournalExportLabel(this)">${options}</select></div>
+          <div class="form-group" style="margin:0;"><label class="form-label">Export Label</label><input class="form-input journal-column-label" value="${escapeHtml(column.exportLabel || column.sourceColumn || '')}" placeholder="Column name in export"></div>
+          <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.journal-export-column').remove()"><span class="material-icons">delete</span></button>
+        </div>`;
+    }
+
+    function updateLessonJournalColumnOptions(sourceRow) {
+      if (!sourceRow) return;
+      const site = sourceRow.dataset.site || 'UGA';
+      const sheetName = sourceRow.querySelector('.journal-export-sheet').value;
+      const tabs = (window.lessonJournalExportTabsBySiteCache && window.lessonJournalExportTabsBySiteCache[site]) || [];
+      const tab = tabs.find(t => t.name === sheetName);
+      const headers = tab ? tab.headers : [];
+      const options = headers.map(header => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join('');
+      sourceRow.querySelector('.journal-export-timestamp').innerHTML = '<option value="Timestamp">Timestamp</option>' + options;
+      sourceRow.querySelector('.journal-export-name').innerHTML = '<option value="">Auto-detect name column</option>' + options;
+      sourceRow.querySelectorAll('.journal-column-source').forEach(select => {
+        const current = select.value;
+        select.innerHTML = '<option value="">Select source column...</option>' + options;
+        select.value = headers.indexOf(current) !== -1 ? current : '';
+      });
+    }
+
+    function addLessonJournalExportColumn(sourceRow) {
+      const container = sourceRow.querySelector('.journal-export-columns');
+      const site = sourceRow.dataset.site || 'UGA';
+      const sheetName = sourceRow.querySelector('.journal-export-sheet').value;
+      const tabs = (window.lessonJournalExportTabsBySiteCache && window.lessonJournalExportTabsBySiteCache[site]) || [];
+      const tab = tabs.find(t => t.name === sheetName);
+      const headers = tab ? tab.headers : [];
+      container.insertAdjacentHTML('beforeend', renderLessonJournalExportColumn({ enabled: true, sourceColumn: '', exportLabel: '' }, headers));
+    }
+
+    function syncLessonJournalExportLabel(select) {
+      const row = select.closest('.journal-export-column');
+      const label = row.querySelector('.journal-column-label');
+      if (label && !label.value.trim()) label.value = select.value;
+    }
+
+    function collectLessonJournalExportConfig() {
+      const sites = { UGA: [], Missouri: [] };
+      Array.from(document.querySelectorAll('.lesson-journal-source')).forEach(row => {
+        const columns = Array.from(row.querySelectorAll('.journal-export-column')).map(col => ({
+          enabled: col.querySelector('.journal-column-enabled').checked,
+          sourceColumn: col.querySelector('.journal-column-source').value,
+          exportLabel: col.querySelector('.journal-column-label').value.trim()
+        })).filter(column => column.sourceColumn);
+        sites[row.dataset.site].push({
+          key: row.dataset.key,
+          label: row.dataset.label,
+          enabled: row.querySelector('.journal-export-enabled').checked,
+          sheetName: row.querySelector('.journal-export-sheet').value,
+          timestampColumn: row.querySelector('.journal-export-timestamp').value || 'Timestamp',
+          nameColumn: row.querySelector('.journal-export-name').value,
+          columns
+        });
+      });
+      return {
+        includeSourceLinks: document.getElementById('journalExportIncludeSourceLinks').checked,
+        duplicateMode: document.getElementById('journalExportDuplicateMode').value,
+        sites
+      };
+    }
+
+    function saveLessonJournalExportConfig() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showToast(result.message || (result.success ? 'Lesson Journal Export configuration saved' : 'Unable to save configuration'), result.success ? 'success' : 'error');
+          if (result.success) loadLessonJournalExportSettings();
+        })
+        .withFailureHandler(handleError)
+        .saveLessonJournalExportConfig(sessionToken, collectLessonJournalExportConfig());
     }
 
 
@@ -7729,9 +7982,11 @@ After setup, use Preview Sync to test each site's mappings, then enable schedule
         </div>
         ${currentUser && currentUser.role === 'admin' ? '<div id="enrollmentFieldManagerSettings">' + renderEnrollmentSettingsLoading() + '</div>' : ''}
         ${currentUser && currentUser.role === 'admin' ? '<div id="sensitiveFeatureAccessSettings"></div>' : ''}
+        ${currentUser && currentUser.role === 'admin' ? '<div id="lessonJournalExportSettings">' + renderLessonJournalExportLoading() + '</div>' : ''}
         ${currentUser && currentUser.role === 'admin' ? '<div id="digitalFormSyncSettings">' + renderDigitalFormSyncLoading() + '</div>' : ''}
       `;
       loadAdminFeatureAccessSettings();
+      loadLessonJournalExportSettings();
       loadDigitalFormSyncSettings();
     }
 
