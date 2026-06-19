@@ -2981,6 +2981,1116 @@ function digitalFormSyncScheduledRun() {
   }
 }
 
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
+      sheet.getRange(i + 1, fieldNotesIdx + 1).setValue(String(link || '').trim());
+      invalidateSheetSnapshot('StudySessions');
+      return { success: true, message: 'Field notes link saved' };
+    }
+  }
+  return { success: false, message: 'Session not found' };
+}
+
+function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+  if (enabled) {
+    const minutes = Math.max(5, Number(everyMinutes) || 10);
+    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
+  }
+  return { success: true, message: enabled ? 'Scheduled sync enabled' : 'Scheduled sync disabled', triggers: getDigitalFormSyncTriggerSummary() };
+}
+
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
+}
+
+
+// ============================================
+// DIGITAL GOOGLE FORMS PROTOCOL SYNC
+// ============================================
+
+const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
+const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
+const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
+const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
+const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
+const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
+const LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
+const LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
+const LESSON_JOURNAL_EXPORT_SOURCES = [
+  { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
+  { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
+  { key: 'lesson_2_journal', label: 'Lesson 2 Journal', defaultSheetName: 'Lesson 2 Journal' },
+  { key: 'lesson_3_journal', label: 'Lesson 3 Journal', defaultSheetName: 'Lesson 3 Journal' },
+  { key: 'lesson_4_journal', label: 'Lesson 4 Journal', defaultSheetName: 'Lesson 4 Journal' },
+  { key: 'lesson_5_journal', label: 'Lesson 5 Journal', defaultSheetName: 'Lesson 5 Journal' },
+  { key: 'lesson_6_journal', label: 'Lesson 6 Journal', defaultSheetName: 'Lesson 6 Journal' },
+  { key: 'lesson_7_journal', label: 'Lesson 7 Journal', defaultSheetName: 'Lesson 7 Journal' },
+  { key: 'lesson_8_journal', label: 'Lesson 8 Journal', defaultSheetName: 'Lesson 8 Journal' },
+  { key: 'peer_playtesting_feedback', label: 'Peer Playtesting Feedback', defaultSheetName: 'Peer Playtesting Feedback' }
+];
+
+function isDigitalFormSyncSuperAdmin(user) {
+  if (!user || user.role !== 'admin') return false;
+  const userId = String(user.userId || '').trim();
+  const username = String(user.username || '').trim().toLowerCase();
+  return userId === DIGITAL_FORM_SYNC_SUPER_ADMIN_ID || username === DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME;
+}
+
+function getDigitalFormSyncAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function getLessonJournalExportAllowedAdminIdsInternal() {
+  return getSensitiveFeatureAllowedAdminIdsInternal(LESSON_JOURNAL_EXPORT_ACCESS_KEY);
+}
+
+function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  const configMap = getConfigMap();
+  const raw = configMap[configKey];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      const ids = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.allowedAdminIds) ? parsed.allowedAdminIds : []);
+      ids.forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    } catch (e) {
+      String(raw).split(',').forEach(id => {
+        const clean = String(id || '').trim();
+        if (clean) allowed[clean] = true;
+      });
+    }
+  }
+  return Object.keys(allowed);
+}
+
+function isUserAllowedForSensitiveFeature(user, configKey) {
+  if (!user || user.role !== 'admin') return false;
+  if (isDigitalFormSyncSuperAdmin(user)) return true;
+  const userId = String(user.userId || '').trim();
+  return !!userId && getSensitiveFeatureAllowedAdminIdsInternal(configKey).indexOf(userId) !== -1;
+}
+
+function canAccessDigitalFormSync(user) {
+  return isUserAllowedForSensitiveFeature(user, DIGITAL_FORM_SYNC_ACCESS_KEY);
+}
+
+function canAccessEnrollmentFieldManager(user) {
+  return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
+}
+
+function canConfigureLessonJournalExport(user) {
+  return isUserAllowedForSensitiveFeature(user, LESSON_JOURNAL_EXPORT_ACCESS_KEY);
+}
+
+function getDigitalFormSyncAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessDigitalFormSync(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getDigitalFormSyncAllowedAdminIdsInternal()
+  };
+}
+
+function getEnrollmentFieldManagerAccessControlForUser(user) {
+  return {
+    hasAccess: canAccessEnrollmentFieldManager(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
+  };
+}
+
+function getLessonJournalExportAccessControlForUser(user) {
+  return {
+    hasAccess: canConfigureLessonJournalExport(user),
+    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
+    allowedAdminIds: getLessonJournalExportAllowedAdminIdsInternal()
+  };
+}
+
+function getAdminUsersForDigitalFormSyncAccess() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Users');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0] || [];
+  const idx = header => headers.indexOf(header);
+  const allowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  return values.slice(1)
+    .map(row => ({
+      userId: row[idx('userId')] || '',
+      username: row[idx('username')] || '',
+      fullName: row[idx('fullName')] || row[idx('name')] || '',
+      role: row[idx('role')] || '',
+      site: row[idx('site')] || '',
+      status: row[idx('status')] || ''
+    }))
+    .filter(user => String(user.role).toLowerCase() === 'admin' && String(user.status || 'active').toLowerCase() !== 'inactive')
+    .map(user => Object.assign({}, user, {
+      isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
+      hasAccess: isDigitalFormSyncSuperAdmin(user) || allowed.indexOf(String(user.userId || '').trim()) !== -1
+    }));
+}
+
+function saveDigitalFormSyncAccess(token, adminUserIds) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only the primary Digital Forms Sync administrator can manage access.' };
+  }
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(DIGITAL_FORM_SYNC_ACCESS_KEY, JSON.stringify(Object.keys(allowed)), 'Admin users allowed to manage Digital Forms Sync');
+  return {
+    success: true,
+    message: 'Digital Forms Sync access updated',
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: getAdminUsersForDigitalFormSyncAccess()
+  };
+}
+
+function saveSensitiveFeatureAllowedAdminIdsInternal(configKey, adminUserIds, description) {
+  const allowed = {};
+  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
+  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
+    const clean = String(id || '').trim();
+    if (clean) allowed[clean] = true;
+  });
+  upsertConfigValue(configKey, JSON.stringify(Object.keys(allowed)), description);
+}
+
+function getAdminFeatureAccessData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
+  const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
+  const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
+  const lessonJournalAllowed = getLessonJournalExportAllowedAdminIdsInternal();
+  return {
+    success: true,
+    isSuperAdmin: isSuperAdmin,
+    digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
+    enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
+    lessonJournalExport: getLessonJournalExportAccessControlForUser(currentUser),
+    adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
+      digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
+      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1,
+      lessonJournalExportAccess: user.isSuperAdmin || lessonJournalAllowed.indexOf(String(user.userId || '').trim()) !== -1
+    })) : []
+  };
+}
+
+function saveAdminFeatureAccess(token, access) {
+  const currentUser = validateSession(token);
+  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
+    return { success: false, message: 'Only the primary administrator can manage access to sensitive admin features.' };
+  }
+  const payload = access || {};
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    DIGITAL_FORM_SYNC_ACCESS_KEY,
+    payload.digitalFormsSyncAdminIds || [],
+    'Admin users allowed to manage Digital Forms Sync'
+  );
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
+    payload.enrollmentFieldManagerAdminIds || [],
+    'Admin users allowed to manage Enrollment Field Manager'
+  );
+  saveSensitiveFeatureAllowedAdminIdsInternal(
+    LESSON_JOURNAL_EXPORT_ACCESS_KEY,
+    payload.lessonJournalExportAdminIds || [],
+    'Admin users allowed to configure Lesson Journal Export'
+  );
+  return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
+}
+
+function ensureDigitalFormSyncSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createSheetIfNotExists(ss, 'FormResponseSyncLog', [
+    'syncId', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'responseHash', 'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName',
+    'candidateRolloutId', 'candidateSessionId', 'participantId', 'checklistId', 'matchStatus',
+    'confidenceScore', 'matchedBy', 'matchedAt', 'notes', 'sourceLink'
+  ]);
+  createSheetIfNotExists(ss, 'FormResponseMatchQueue', [
+    'queueId', 'createdAt', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
+    'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName', 'candidateRolloutId',
+    'candidateSessionId', 'suggestedParticipantId', 'suggestedParticipantName', 'confidenceScore',
+    'status', 'reviewedBy', 'reviewedAt', 'notes', 'sourceLink', 'responseHash'
+  ]);
+  createSheetIfNotExists(ss, 'ParticipantAliases', [
+    'aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'
+  ]);
+}
+
+function getDefaultDigitalFormSyncConfig() {
+  return {
+    enabled: false,
+    masterWorkbookId: '',
+    masterWorkbookIds: { UGA: '', Missouri: '' },
+    autoMatchThreshold: 90,
+    reviewMatchThreshold: 70,
+    lateResponseWindowDays: 0,
+    enableRecentCompletedFallback: false,
+    recentCompletedFallbackDays: 30,
+    recentCompletedFallbackMaxCohorts: 1,
+    allowRecentCompletedAutoMatch: false,
+    preferPresentAttendance: true,
+    updateMissingChecklistItems: true,
+    saveAliasesOnReview: true,
+    mappings: [],
+    siteMappings: { UGA: [], Missouri: [] }
+  };
+}
+
+function extractSpreadsheetId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match) return match[1];
+  return raw.replace(/[?#].*$/, '');
+}
+
+function normalizeDigitalFormSyncConfig(config) {
+  const defaults = getDefaultDigitalFormSyncConfig();
+  const input = config || {};
+  const normalized = Object.assign({}, defaults, input);
+  const workbookIdsInput = input.masterWorkbookIds || {};
+  const legacyWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
+  normalized.masterWorkbookIds = {
+    UGA: extractSpreadsheetId(workbookIdsInput.UGA || workbookIdsInput.uga || input.ugaMasterWorkbookId || ''),
+    Missouri: extractSpreadsheetId(workbookIdsInput.Missouri || workbookIdsInput.missouri || input.missouriMasterWorkbookId || '')
+  };
+  if (legacyWorkbookId && !normalized.masterWorkbookIds.UGA && !normalized.masterWorkbookIds.Missouri) {
+    normalized.masterWorkbookIds.UGA = legacyWorkbookId;
+  }
+  normalized.masterWorkbookId = normalized.masterWorkbookIds.UGA || normalized.masterWorkbookIds.Missouri || legacyWorkbookId;
+  normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
+  normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
+  normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
+  normalized.enableRecentCompletedFallback = !!normalized.enableRecentCompletedFallback;
+  normalized.recentCompletedFallbackDays = Math.max(0, Number(normalized.recentCompletedFallbackDays) || defaults.recentCompletedFallbackDays);
+  normalized.recentCompletedFallbackMaxCohorts = Math.max(1, Number(normalized.recentCompletedFallbackMaxCohorts) || defaults.recentCompletedFallbackMaxCohorts);
+  normalized.allowRecentCompletedAutoMatch = !!normalized.allowRecentCompletedAutoMatch;
+
+  const normalizeMapping = mapping => ({
+    enabled: !!mapping.enabled,
+    instrumentNumber: String(mapping.instrumentNumber || '').trim(),
+    instrumentName: String(mapping.instrumentName || '').trim(),
+    sheetName: String(mapping.sheetName || '').trim(),
+    timestampColumn: String(mapping.timestampColumn || 'Timestamp').trim() || 'Timestamp',
+    nameColumn: String(mapping.nameColumn || '').trim(),
+    allowLateResponses: mapping.allowLateResponses !== false
+  });
+  const legacyMappings = Array.isArray(input.mappings) ? input.mappings.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
+  const inputSiteMappings = input.siteMappings || {};
+  normalized.siteMappings = { UGA: [], Missouri: [] };
+  ['UGA', 'Missouri'].forEach(site => {
+    const siteInput = inputSiteMappings[site] || inputSiteMappings[String(site).toLowerCase()] || null;
+    normalized.siteMappings[site] = Array.isArray(siteInput) && siteInput.length
+      ? siteInput.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName)
+      : legacyMappings.slice();
+  });
+  normalized.mappings = legacyMappings.length ? legacyMappings : (normalized.siteMappings.UGA || []);
+  return normalized;
+}
+
+function getDigitalFormMappingsForSite(config, site) {
+  const normalizedSite = String(site || '').toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
+  const siteMappings = config && config.siteMappings && Array.isArray(config.siteMappings[normalizedSite]) ? config.siteMappings[normalizedSite] : [];
+  return siteMappings.length ? siteMappings : ((config && config.mappings) || []);
+}
+
+function getDigitalFormSyncConfigInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_CONFIG_KEY]) return getDefaultDigitalFormSyncConfig();
+  try {
+    return normalizeDigitalFormSyncConfig(JSON.parse(configMap[DIGITAL_FORM_SYNC_CONFIG_KEY] || '{}'));
+  } catch (e) {
+    return getDefaultDigitalFormSyncConfig();
+  }
+}
+
+function getDigitalFormSyncWatermarksInternal() {
+  const configMap = getConfigMap();
+  if (!configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY]) return {};
+  try { return JSON.parse(configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY] || '{}') || {}; } catch (e) { return {}; }
+}
+
+function saveDigitalFormSyncWatermarksInternal(watermarks) {
+  upsertConfigValue(DIGITAL_FORM_SYNC_WATERMARKS_KEY, JSON.stringify(watermarks || {}), 'Per-form response sync watermarks');
+}
+
+function saveDigitalFormSyncConfig(token, config) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const normalized = normalizeDigitalFormSyncConfig(config || {});
+  upsertConfigValue(DIGITAL_FORM_SYNC_CONFIG_KEY, JSON.stringify(normalized), 'Google Forms digital protocol sync configuration');
+  return { success: true, message: 'Digital Forms Sync configuration saved', config: normalized };
+}
+
+function getDigitalFormSyncConfig(token) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  return { success: true, config: getDigitalFormSyncConfigInternal(), accessControl: getDigitalFormSyncAccessControlForUser(currentUser) };
+}
+
+function openDigitalFormWorkbook(workbookId) {
+  const id = extractSpreadsheetId(workbookId);
+  if (!id) throw new Error('Master workbook ID is required');
+  return SpreadsheetApp.openById(id);
+}
+
+function getWorkbookTabsForDigitalSync(workbookId) {
+  const workbook = openDigitalFormWorkbook(workbookId);
+  return workbook.getSheets().map(sheet => ({
+    name: sheet.getName(),
+    sheetId: sheet.getSheetId(),
+    lastRow: sheet.getLastRow(),
+    headers: sheet.getLastRow() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean) : []
+  }));
+}
+
+function testDigitalFormWorkbook(token, workbookId) {
+  const currentUser = validateSession(token);
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  try {
+    const tabs = getWorkbookTabsForDigitalSync(workbookId);
+    return { success: true, message: 'Connected to master workbook', tabs: tabs };
+  } catch (error) {
+    return { success: false, message: 'Unable to connect: ' + error.message };
+  }
+}
+
+function getDigitalFormSyncAdminData(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
+  if (!canAccessDigitalFormSync(currentUser)) {
+    return {
+      success: true,
+      restricted: true,
+      message: 'Digital Forms Sync is restricted. Ask the primary administrator to grant access.',
+      accessControl: getDigitalFormSyncAccessControlForUser(currentUser)
+    };
+  }
+  ensureDigitalFormSyncSheets();
+  const config = getDigitalFormSyncConfigInternal();
+  let tabs = [];
+  let workbookError = '';
+  const tabsBySite = {};
+  ['UGA', 'Missouri'].forEach(site => {
+    const workbookId = config.masterWorkbookIds && config.masterWorkbookIds[site];
+    if (!workbookId) return;
+    try {
+      tabsBySite[site] = getWorkbookTabsForDigitalSync(workbookId);
+      if (!tabs.length) tabs = tabsBySite[site];
+    } catch (e) {
+      tabsBySite[site] = [];
+      workbookError += (workbookError ? '; ' : '') + site + ': ' + e.message;
+    }
+  });
+  if (!tabs.length && config.masterWorkbookId) {
+    try {
+      tabs = getWorkbookTabsForDigitalSync(config.masterWorkbookId);
+      if (!tabsBySite.UGA || !tabsBySite.UGA.length) tabsBySite.UGA = tabs;
+    } catch (e) {
+      workbookError += (workbookError ? '; ' : '') + e.message;
+    }
+  }
+  return {
+    success: true,
+    config: config,
+    tabs: tabs,
+    tabsBySite: tabsBySite,
+    workbookError: workbookError,
+    protocolItems: getGlobalProtocolItems(),
+    queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
+    triggers: getDigitalFormSyncTriggerSummary(),
+    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
+    adminUsers: isDigitalFormSyncSuperAdmin(currentUser) ? getAdminUsersForDigitalFormSyncAccess() : []
+  };
+}
+
+function normalizePersonNameForMatch(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshteinDistance(a, b) {
+  a = String(a || '');
+  b = String(b || '');
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = [];
+  const curr = [];
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyStringScore(a, b) {
+  const left = normalizePersonNameForMatch(a);
+  const right = normalizePersonNameForMatch(b);
+  if (!left || !right) return 0;
+  if (left === right) return 100;
+  const distance = levenshteinDistance(left, right);
+  const maxLen = Math.max(left.length, right.length) || 1;
+  return Math.max(0, Math.round((1 - distance / maxLen) * 100));
+}
+
+function scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds) {
+  const entered = normalizePersonNameForMatch(rawName);
+  const fullName = normalizePersonNameForMatch(participant.fullName);
+  if (!entered || !fullName) return { score: 0, reason: 'Missing name' };
+  const enteredTokens = entered.split(' ').filter(Boolean);
+  const fullTokens = fullName.split(' ').filter(Boolean);
+  let score = fuzzyStringScore(entered, fullName);
+  let reason = 'Fuzzy full-name comparison';
+  if (entered === fullName) {
+    score = 100;
+    reason = 'Exact full-name match';
+  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
+    score = Math.max(score, 82);
+    reason = 'First-name match';
+  } else if (enteredTokens.length >= 2 && fullTokens.length >= 2 && enteredTokens[0] === fullTokens[0] && enteredTokens[enteredTokens.length - 1] === fullTokens[fullTokens.length - 1]) {
+    score = Math.max(score, 95);
+    reason = 'First and last name match';
+  } else if (enteredTokens[0] && fullTokens[0] && enteredTokens[0] === fullTokens[0]) {
+    score = Math.max(score, 74);
+    reason = 'Shared first name with fuzzy remainder';
+  }
+
+  const aliasList = aliases[String(participant.participantId)] || [];
+  aliasList.forEach(alias => {
+    const aliasScore = fuzzyStringScore(entered, alias.normalizedAlias || alias.alias);
+    if (aliasScore > score) {
+      score = aliasScore;
+      reason = 'Participant alias match';
+    }
+  });
+
+  if (presentParticipantIds && presentParticipantIds[String(participant.participantId)] && score > 0) {
+    score = Math.min(100, score + 5);
+    reason += ' + present attendance';
+  }
+  return { score: score, reason: reason };
+}
+
+function chooseBestParticipantMatch(rawName, candidates, aliases, presentParticipantIds) {
+  const scored = candidates.map(participant => {
+    const scoredMatch = scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds);
+    return Object.assign({}, participant, { score: scoredMatch.score, reason: scoredMatch.reason });
+  }).sort((a, b) => b.score - a.score || String(a.fullName || '').localeCompare(String(b.fullName || '')));
+
+  const best = scored[0] || null;
+  const second = scored[1] || null;
+  if (!best) return { participant: null, score: 0, reason: 'No candidate participants' };
+
+  const enteredTokens = normalizePersonNameForMatch(rawName).split(' ').filter(Boolean);
+  if (enteredTokens.length === 1) {
+    const sameFirstName = scored.filter(candidate => normalizePersonNameForMatch(candidate.fullName).split(' ')[0] === enteredTokens[0]);
+    if (sameFirstName.length > 1) {
+      return { participant: best, score: Math.min(best.score, 69), reason: 'First name is not unique in candidate cohort' };
+    }
+  }
+
+  if (second && best.score - second.score < 8 && best.score < 95) {
+    return { participant: best, score: Math.min(best.score, 79), reason: 'Close competing participant match' };
+  }
+  return { participant: best, score: best.score, reason: best.reason };
+}
+
+function getDigitalFormMatchQueueInternal(options) {
+  ensureDigitalFormSyncSheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('FormResponseMatchQueue');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const statusFilter = options && options.status;
+  const limit = Number(options && options.limit) || 100;
+  const rows = [];
+  for (let i = data.length - 1; i >= 1 && rows.length < limit; i--) {
+    const row = data[i];
+    const status = row[headers.indexOf('status')];
+    if (statusFilter && status !== statusFilter) continue;
+    rows.push({
+      queueId: row[headers.indexOf('queueId')],
+      createdAt: row[headers.indexOf('createdAt')],
+      sourceSheetName: row[headers.indexOf('sourceSheetName')],
+      sourceRowNumber: row[headers.indexOf('sourceRowNumber')],
+      sourceTimestamp: row[headers.indexOf('sourceTimestamp')],
+      rawName: row[headers.indexOf('rawName')],
+      instrumentNumber: row[headers.indexOf('instrumentNumber')],
+      instrumentName: row[headers.indexOf('instrumentName')],
+      candidateRolloutId: row[headers.indexOf('candidateRolloutId')],
+      candidateSessionId: row[headers.indexOf('candidateSessionId')],
+      suggestedParticipantId: row[headers.indexOf('suggestedParticipantId')],
+      suggestedParticipantName: row[headers.indexOf('suggestedParticipantName')],
+      confidenceScore: row[headers.indexOf('confidenceScore')],
+      status: status,
+      notes: row[headers.indexOf('notes')],
+      sourceLink: row[headers.indexOf('sourceLink')]
+    });
+  }
+  return rows;
+}
+
+function buildDigitalSyncDatasets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const sessionsSnapshot = getSheetSnapshot('StudySessions');
+  const attendanceSnapshot = getSheetSnapshot('SessionAttendance');
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const aliasSheet = ss.getSheetByName('ParticipantAliases');
+  const aliases = {};
+  if (aliasSheet && aliasSheet.getLastRow() > 1) {
+    const aliasData = aliasSheet.getDataRange().getValues();
+    const aliasHeaders = aliasData[0] || [];
+    for (let i = 1; i < aliasData.length; i++) {
+      const pid = String(aliasData[i][aliasHeaders.indexOf('participantId')] || '');
+      if (!pid) continue;
+      aliases[pid] = aliases[pid] || [];
+      aliases[pid].push({ alias: aliasData[i][aliasHeaders.indexOf('alias')], normalizedAlias: aliasData[i][aliasHeaders.indexOf('normalizedAlias')] });
+    }
+  }
+
+  const rolloutsSnapshot = getSheetSnapshot('StudyRollouts');
+  const rHeaders = rolloutsSnapshot.headers;
+  const rolloutsById = {};
+  for (let i = 1; i < rolloutsSnapshot.data.length; i++) {
+    const row = rolloutsSnapshot.data[i];
+    const rollout = {
+      rolloutId: row[rHeaders.indexOf('rolloutId')],
+      site: row[rHeaders.indexOf('site')],
+      schoolName: row[rHeaders.indexOf('schoolName')],
+      period: row[rHeaders.indexOf('period')],
+      year: row[rHeaders.indexOf('year')],
+      status: row[rHeaders.indexOf('status')]
+    };
+    if (rollout.rolloutId) rolloutsById[String(rollout.rolloutId)] = rollout;
+  }
+
+  const pHeaders = participantsSnapshot.headers;
+  const participants = [];
+  const participantsByRollout = {};
+  for (let i = 1; i < participantsSnapshot.data.length; i++) {
+    const row = participantsSnapshot.data[i];
+    const participant = {
+      participantId: row[pHeaders.indexOf('participantId')],
+      fullName: row[pHeaders.indexOf('fullName')],
+      site: row[pHeaders.indexOf('site')],
+      rolloutId: row[pHeaders.indexOf('rolloutId')],
+      status: row[pHeaders.indexOf('status')]
+    };
+    if (!participant.participantId) continue;
+    participants.push(participant);
+    participantsByRollout[String(participant.rolloutId)] = participantsByRollout[String(participant.rolloutId)] || [];
+    participantsByRollout[String(participant.rolloutId)].push(participant);
+  }
+
+  const sHeaders = sessionsSnapshot.headers;
+  const sessionsByDate = {};
+  const sessionById = {};
+  const rolloutSessionBounds = {};
+  for (let i = 1; i < sessionsSnapshot.data.length; i++) {
+    const row = sessionsSnapshot.data[i];
+    const session = {
+      sessionId: row[sHeaders.indexOf('sessionId')],
+      rolloutId: row[sHeaders.indexOf('rolloutId')],
+      sessionNumber: row[sHeaders.indexOf('sessionNumber')],
+      sessionDate: normalizeSessionDateValue(row[sHeaders.indexOf('sessionDate')]),
+      status: row[sHeaders.indexOf('status')]
+    };
+    const dateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!dateOnly) continue;
+    session.dateOnly = dateOnly;
+    sessionById[String(session.sessionId)] = session;
+    sessionsByDate[dateOnly] = sessionsByDate[dateOnly] || [];
+    sessionsByDate[dateOnly].push(session);
+    const rolloutIdKey = String(session.rolloutId || '');
+    rolloutSessionBounds[rolloutIdKey] = rolloutSessionBounds[rolloutIdKey] || { firstDate: dateOnly, lastDate: dateOnly, sessionCount: 0 };
+    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].firstDate) < 0) rolloutSessionBounds[rolloutIdKey].firstDate = dateOnly;
+    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].lastDate) > 0) rolloutSessionBounds[rolloutIdKey].lastDate = dateOnly;
+    rolloutSessionBounds[rolloutIdKey].sessionCount++;
+  }
+
+  const completedRolloutsBySite = {};
+  const todayKey = getDateOnly(new Date());
+  Object.keys(rolloutsById).forEach(rolloutId => {
+    const bounds = rolloutSessionBounds[rolloutId];
+    if (!bounds || !bounds.lastDate) return;
+    if (compareDateStrings(bounds.lastDate, todayKey) > 0) return;
+    const rollout = Object.assign({}, rolloutsById[rolloutId], bounds);
+    const siteKey = String(rollout.site || '').toLowerCase();
+    completedRolloutsBySite[siteKey] = completedRolloutsBySite[siteKey] || [];
+    completedRolloutsBySite[siteKey].push(rollout);
+  });
+  Object.keys(completedRolloutsBySite).forEach(siteKey => completedRolloutsBySite[siteKey].sort((a, b) => compareDateStrings(b.lastDate, a.lastDate)));
+
+  const aHeaders = attendanceSnapshot.headers;
+  const presentBySession = {};
+  for (let i = 1; i < attendanceSnapshot.data.length; i++) {
+    const row = attendanceSnapshot.data[i];
+    if (String(row[aHeaders.indexOf('status')] || '') !== 'present') continue;
+    const sessionId = String(row[aHeaders.indexOf('sessionId')] || '');
+    presentBySession[sessionId] = presentBySession[sessionId] || {};
+    presentBySession[sessionId][String(row[aHeaders.indexOf('participantId')] || '')] = true;
+  }
+
+  const cHeaders = checklistSnapshot.headers;
+  const checklistByParticipantInstrument = {};
+  for (let i = 1; i < checklistSnapshot.data.length; i++) {
+    const row = checklistSnapshot.data[i];
+    const key = String(row[cHeaders.indexOf('participantId')]) + '|' + String(row[cHeaders.indexOf('instrumentNumber')]);
+    checklistByParticipantInstrument[key] = { rowIndex: i, row: row };
+  }
+
+  return {
+    participants: participants,
+    participantsByRollout: participantsByRollout,
+    rolloutsById: rolloutsById,
+    completedRolloutsBySite: completedRolloutsBySite,
+    sessionsByDate: sessionsByDate,
+    sessionById: sessionById,
+    presentBySession: presentBySession,
+    aliases: aliases,
+    checklistSnapshot: checklistSnapshot,
+    checklistByParticipantInstrument: checklistByParticipantInstrument
+  };
+}
+
+function getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping) {
+  if (!responseDate) return { sessions: [], strategy: 'no_timestamp', notes: 'No response date available' };
+  const exact = datasets.sessionsByDate[responseDate] || [];
+  if (exact.length) return { sessions: exact, strategy: 'session_date', notes: 'Matched by exact session date ' + responseDate };
+  if (!mapping.allowLateResponses || !config.lateResponseWindowDays) {
+    return { sessions: [], strategy: 'no_session', notes: 'No DARTS session found for response date ' + responseDate };
+  }
+  const target = parseDateOnlyString(responseDate);
+  if (!target) return { sessions: [], strategy: 'no_timestamp', notes: 'Response date could not be parsed' };
+  const matches = [];
+  Object.keys(datasets.sessionsByDate).forEach(dateKey => {
+    const sessionDate = parseDateOnlyString(dateKey);
+    if (!sessionDate) return;
+    const diffDays = Math.abs(Math.round((target.getTime() - sessionDate.getTime()) / 86400000));
+    if (diffDays <= config.lateResponseWindowDays) {
+      datasets.sessionsByDate[dateKey].forEach(session => matches.push(session));
+    }
+  });
+  return matches.length
+    ? { sessions: matches, strategy: 'late_window', notes: 'Matched by late response window around ' + responseDate }
+    : { sessions: [], strategy: 'no_session', notes: 'No DARTS session found within late-response window for ' + responseDate };
+}
+
+function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
+  return getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping).sessions;
+}
+
+function getRecentCompletedFallbackCandidates(responseDate, site, datasets, config) {
+  if (!config.enableRecentCompletedFallback) return { candidates: [], rollout: null, strategy: '', notes: '' };
+  const siteKey = String(site || '').toLowerCase();
+  if (!siteKey) return { candidates: [], rollout: null, strategy: '', notes: '' };
+  const responseDateKey = responseDate || getDateOnly(new Date());
+  const responseDateObj = parseDateOnlyString(responseDateKey);
+  const maxCohorts = Math.max(1, Number(config.recentCompletedFallbackMaxCohorts) || 1);
+  const graceDays = Math.max(0, Number(config.recentCompletedFallbackDays) || 0);
+  const recentRollouts = (datasets.completedRolloutsBySite[siteKey] || []).filter(rollout => {
+    if (!responseDateObj || !rollout.lastDate) return true;
+    if (compareDateStrings(rollout.lastDate, responseDateKey) > 0) return false;
+    const lastDate = parseDateOnlyString(rollout.lastDate);
+    if (!lastDate) return true;
+    const diffDays = Math.round((responseDateObj.getTime() - lastDate.getTime()) / 86400000);
+    return diffDays >= 0 && diffDays <= graceDays;
+  }).slice(0, maxCohorts);
+  const candidates = [];
+  recentRollouts.forEach(rollout => {
+    (datasets.participantsByRollout[String(rollout.rolloutId)] || []).forEach(participant => {
+      if (String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+    });
+  });
+  const rollout = recentRollouts[0] || null;
+  return {
+    candidates: candidates,
+    rollout: rollout,
+    strategy: candidates.length ? 'recent_completed_cohort' : '',
+    notes: candidates.length && rollout ? 'Fallback searched recent completed cohort: ' + rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')' : ''
+  };
+}
+
+function buildDigitalResponseHash(values) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(values || []))).substring(0, 32);
+}
+
+function getExistingDigitalSyncKeys() {
+  ensureDigitalFormSyncSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const keys = {};
+  for (let i = 1; i < data.length; i++) {
+    const sourceWorkbookId = data[i][headers.indexOf('sourceWorkbookId')];
+    const sourceSheet = data[i][headers.indexOf('sourceSheetName')];
+    const sourceRow = data[i][headers.indexOf('sourceRowNumber')];
+    const hash = data[i][headers.indexOf('responseHash')];
+    keys[String(sourceWorkbookId) + '::' + String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
+  }
+  return keys;
+}
+
+function getDigitalSourceLink(workbookId, sheet, rowNumber) {
+  return 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + rowNumber + ':' + rowNumber;
+}
+
+function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config, site) {
+  const timestampCol = headers.indexOf(mapping.timestampColumn || 'Timestamp');
+  const nameCol = headers.indexOf(mapping.nameColumn || '');
+  const responseTimestamp = timestampCol >= 0 ? row[timestampCol] : '';
+  const rawName = nameCol >= 0 ? row[nameCol] : '';
+  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
+  const responseHash = buildDigitalResponseHash(row);
+  const sourceLink = getDigitalSourceLink(workbookId, sheet, rowNumber);
+  const normalizedName = normalizePersonNameForMatch(rawName);
+  const sessionMatch = getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping);
+  const sessions = sessionMatch.sessions || [];
+  const rolloutIds = {};
+  sessions.forEach(session => rolloutIds[String(session.rolloutId)] = true);
+  let candidates = [];
+  Object.keys(rolloutIds).forEach(rolloutId => {
+    (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
+      const sameSite = !site || String(participant.site || '').toLowerCase() === String(site || '').toLowerCase();
+      if (sameSite && String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
+    });
+  });
+  const presentParticipantIds = {};
+  if (config.preferPresentAttendance) {
+    sessions.forEach(session => {
+      Object.assign(presentParticipantIds, datasets.presentBySession[String(session.sessionId)] || {});
+    });
+  }
+  let match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
+  let participant = match.participant;
+  let selectedSession = sessions[0] || null;
+  let matchStrategy = sessionMatch.strategy || 'session_date';
+  let strategyNotes = sessionMatch.notes || '';
+  let fallbackUsed = false;
+
+  if ((!participant || (match.score || 0) < config.reviewMatchThreshold) && config.enableRecentCompletedFallback) {
+    const fallback = getRecentCompletedFallbackCandidates(responseDate, site, datasets, config);
+    if (fallback.candidates.length) {
+      const fallbackMatch = chooseBestParticipantMatch(rawName, fallback.candidates, datasets.aliases, {});
+      if (!participant || fallbackMatch.score > (match.score || 0)) {
+        candidates = fallback.candidates;
+        match = fallbackMatch;
+        participant = match.participant;
+        selectedSession = null;
+        matchStrategy = fallback.strategy;
+        strategyNotes = fallback.notes;
+        fallbackUsed = true;
+      }
+    }
+  }
+
+  const checklistKey = participant ? String(participant.participantId) + '|' + String(mapping.instrumentNumber) : '';
+  const checklist = checklistKey ? datasets.checklistByParticipantInstrument[checklistKey] : null;
+  let matchStatus = 'unmatched';
+  let notes = match.reason || '';
+  const canAutoMatch = matchStrategy !== 'recent_completed_cohort' || config.allowRecentCompletedAutoMatch;
+  if (timestampCol === -1) notes = 'Timestamp column not found';
+  if (!mapping.nameColumn || nameCol === -1) notes = 'Name column not found';
+  else if (!sessions.length && !fallbackUsed) notes = strategyNotes || ('No DARTS session found for response date ' + (responseDate || '(blank)'));
+  else if (!participant) notes = 'No participant candidate matched';
+  else if (!checklist) notes = 'Matched participant, but checklist item was not found';
+  else if (match.score >= config.autoMatchThreshold && canAutoMatch) matchStatus = 'auto_matched';
+  else if (match.score >= config.reviewMatchThreshold) matchStatus = 'needs_review';
+  else matchStatus = 'unmatched';
+  if (strategyNotes) notes = notes ? notes + ' — ' + strategyNotes : strategyNotes;
+  if (matchStrategy === 'recent_completed_cohort' && !config.allowRecentCompletedAutoMatch && matchStatus === 'needs_review') {
+    notes += ' — Recent completed cohort fallback is configured for review-first matching.';
+  }
+
+  return {
+    sourceWorkbookId: workbookId,
+    sourceSheetName: sheet.getName(),
+    sourceRowNumber: rowNumber,
+    sourceTimestamp: responseTimestamp && !isNaN(new Date(responseTimestamp).getTime()) ? new Date(responseTimestamp).toISOString() : String(responseTimestamp || ''),
+    responseHash: responseHash,
+    rawName: rawName,
+    normalizedName: normalizedName,
+    instrumentNumber: mapping.instrumentNumber,
+    instrumentName: mapping.instrumentName,
+    candidateRolloutId: selectedSession ? selectedSession.rolloutId : (participant ? participant.rolloutId : ''),
+    candidateSessionId: selectedSession ? selectedSession.sessionId : '',
+    participantId: participant ? participant.participantId : '',
+    participantName: participant ? participant.fullName : '',
+    checklistId: checklist ? checklist.row[datasets.checklistSnapshot.headers.indexOf('checklistId')] : '',
+    checklistRowIndex: checklist ? checklist.rowIndex : -1,
+    matchStatus: matchStatus,
+    confidenceScore: match.score || 0,
+    matchedBy: matchStrategy,
+    notes: notes,
+    sourceLink: sourceLink
+  };
+}
+
+function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
+  const checklistSnapshot = datasets.checklistSnapshot;
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const completedByCol = cHeaders.indexOf('completedBy');
+  const notesCol = cHeaders.indexOf('notes');
+  const dataLinkCol = cHeaders.indexOf('dataLink');
+  const touchedParticipants = {};
+  let updated = 0;
+  matches.forEach(match => {
+    if (match.matchStatus !== 'auto_matched' || match.checklistRowIndex < 1) return;
+    const row = cData[match.checklistRowIndex];
+    if (!row) return;
+    if (String(row[statusCol] || '') === 'completed' && String(row[dataLinkCol] || '').indexOf(match.sourceLink) !== -1) {
+      match.matchStatus = 'duplicate';
+      return;
+    }
+    row[statusCol] = 'completed';
+    row[completedDateCol] = match.sourceTimestamp || new Date().toISOString();
+    row[completedByCol] = currentUserName || DIGITAL_FORM_SYNC_SYSTEM_USER;
+    const existingNotes = String(row[notesCol] || '').trim();
+    const syncNote = 'Auto-completed from Google Forms: ' + match.sourceSheetName + ' row ' + match.sourceRowNumber + ' (confidence ' + match.confidenceScore + '%).';
+    row[notesCol] = existingNotes ? (existingNotes + '\n' + syncNote) : syncNote;
+    if (dataLinkCol !== -1) row[dataLinkCol] = match.sourceLink;
+    touchedParticipants[String(match.participantId)] = true;
+    updated++;
+  });
+  if (updated > 0) {
+    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    invalidateSheetSnapshot('Checklist');
+    Object.keys(touchedParticipants).forEach(participantId => {
+      updateParticipantCompletion(participantId);
+      syncParticipantStatusFromChecklist(participantId);
+    });
+  }
+  return updated;
+}
+
+function appendDigitalSyncLogs(matches, dryRun, actorName) {
+  if (dryRun || !matches.length) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const rows = matches.map(match => {
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('syncId', generateUUID());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('responseHash', match.responseHash);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('participantId', match.participantId);
+    set('checklistId', match.checklistId);
+    set('matchStatus', match.matchStatus);
+    set('confidenceScore', match.confidenceScore);
+    set('matchedBy', match.matchedBy || actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+    set('matchedAt', new Date().toISOString());
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    return row;
+  });
+  appendRowsAsPlainText(sheet, rows);
+}
+
+function appendDigitalReviewQueue(matches, dryRun) {
+  if (dryRun) return 0;
+  const reviewMatches = matches.filter(match => match.matchStatus === 'needs_review' || match.matchStatus === 'unmatched');
+  if (!reviewMatches.length) return 0;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseMatchQueue');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const existing = {};
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    existing[String(data[i][headers.indexOf('sourceSheetName')]) + '::' + String(data[i][headers.indexOf('sourceRowNumber')]) + '::' + String(data[i][headers.indexOf('responseHash')])] = true;
+  }
+  const rows = [];
+  reviewMatches.forEach(match => {
+    const key = match.sourceSheetName + '::' + match.sourceRowNumber + '::' + match.responseHash;
+    if (existing[key]) return;
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('queueId', generateUUID());
+    set('createdAt', new Date().toISOString());
+    set('sourceWorkbookId', match.sourceWorkbookId);
+    set('sourceSheetName', match.sourceSheetName);
+    set('sourceRowNumber', match.sourceRowNumber);
+    set('sourceTimestamp', match.sourceTimestamp);
+    set('rawName', match.rawName);
+    set('normalizedName', match.normalizedName);
+    set('instrumentNumber', match.instrumentNumber);
+    set('instrumentName', match.instrumentName);
+    set('candidateRolloutId', match.candidateRolloutId);
+    set('candidateSessionId', match.candidateSessionId);
+    set('suggestedParticipantId', match.participantId);
+    set('suggestedParticipantName', match.participantName);
+    set('confidenceScore', match.confidenceScore);
+    set('status', 'pending');
+    set('notes', match.notes);
+    set('sourceLink', match.sourceLink);
+    set('responseHash', match.responseHash);
+    rows.push(row);
+  });
+  appendRowsAsPlainText(sheet, rows);
+  return rows.length;
+}
+
+function runDigitalFormSync(token, options) {
+  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin', userId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID, username: DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME };
+  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
+  ensureDigitalFormSyncSheets();
+  const dryRun = !!(options && options.dryRun);
+  const force = !!(options && options.force);
+  const config = getDigitalFormSyncConfigInternal();
+  const workbookConfigs = [
+    { site: 'UGA', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.UGA },
+    { site: 'Missouri', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.Missouri }
+  ].filter(item => item.workbookId);
+  if (!workbookConfigs.length && config.masterWorkbookId) workbookConfigs.push({ site: '', workbookId: config.masterWorkbookId });
+  if (!workbookConfigs.length) return { success: false, message: 'At least one site master workbook is not configured' };
+  const datasets = buildDigitalSyncDatasets();
+  const existingKeys = getExistingDigitalSyncKeys();
+  const watermarks = getDigitalFormSyncWatermarksInternal();
+  const matches = [];
+  const errors = [];
+  workbookConfigs.forEach(workbookConfig => {
+    const enabledMappings = getDigitalFormMappingsForSite(config, workbookConfig.site).filter(mapping => mapping.enabled);
+
+    let workbook;
+    try {
+      workbook = openDigitalFormWorkbook(workbookConfig.workbookId);
+    } catch (e) {
+      errors.push((workbookConfig.site || 'Master') + ' workbook: ' + e.message);
+      return;
+    }
+    enabledMappings.forEach(mapping => {
+      const sheet = workbook.getSheetByName(mapping.sheetName);
+      if (!sheet) { errors.push((workbookConfig.site || 'Master') + ' sheet not found: ' + mapping.sheetName); return; }
+      if (sheet.getLastRow() < 2) return;
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+      const lastRow = sheet.getLastRow();
+      const watermarkKey = (workbookConfig.site || workbookConfig.workbookId) + '::' + mapping.sheetName;
+      const watermark = watermarks[watermarkKey] || {};
+      const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
+      if (startRow > lastRow) return;
+      const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
+      values.forEach((row, offset) => {
+        const rowNumber = startRow + offset;
+        const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookConfig.workbookId, datasets, config, workbookConfig.site);
+        analysis.sourceSite = workbookConfig.site || '';
+        const existingKey = analysis.sourceWorkbookId + '::' + analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
+        if (existingKeys[existingKey] && !force) return;
+        matches.push(analysis);
+      });
+      if (!dryRun) {
+        watermarks[watermarkKey] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
+      }
+    });
+  });
+
+  const updatedCount = dryRun ? 0 : applyDigitalFormChecklistUpdates(matches, datasets, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  const queuedCount = appendDigitalReviewQueue(matches, dryRun);
+  appendDigitalSyncLogs(matches, dryRun, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
+  if (!dryRun) saveDigitalFormSyncWatermarksInternal(watermarks);
+
+  return {
+    success: true,
+    dryRun: dryRun,
+    processed: matches.length,
+    autoMatched: matches.filter(match => match.matchStatus === 'auto_matched').length,
+    needsReview: matches.filter(match => match.matchStatus === 'needs_review').length,
+    unmatched: matches.filter(match => match.matchStatus === 'unmatched').length,
+    duplicate: matches.filter(match => match.matchStatus === 'duplicate').length,
+    checklistUpdated: updatedCount,
+    queued: queuedCount,
+    errors: errors,
+    preview: matches.slice(0, 100)
+  };
+}
+
+function runDigitalFormSyncDryRun(token) {
+  return runDigitalFormSync(token, { dryRun: true, force: true });
+}
+
+function digitalFormSyncScheduledRun() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    const config = getDigitalFormSyncConfigInternal();
+    if (!config.enabled) return;
+    runDigitalFormSync(null, { dryRun: false });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function getDigitalFormSyncTriggerSummary() {
   const triggers = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun');
   return { enabled: triggers.length > 0, count: triggers.length };
@@ -7487,6 +8597,330 @@ function formatDashboardDate(dateString) {
   return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'MMM d, yyyy');
 }
 
+
+function buildOperationsSummary(
+  effectiveSite,
+  effectiveCohort,
+  cohorts,
+  participantsBySite,
+  participantsByCohort,
+  sessionsByCohort,
+  attendanceMap,
+  checklistSheet
+) {
+  const today = getDateOnly(new Date());
+  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
+  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
+
+  const cohortOperations = visibleCohorts.map(cohort => {
+    const participants = participantsByCohort[cohort.rolloutId] || [];
+    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
+    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
+    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
+
+    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
+    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
+      session,
+      participants,
+      attendanceMap,
+      today,
+      protocolSummary,
+      sessionProtocolMap[session.sessionId]
+    ));
+    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
+    const completedOrLastSessions = sessionProgress
+      .filter(session => session.sessionDate)
+      .slice()
+      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
+    const lastSession = completedOrLastSessions[0] || null;
+
+    return {
+      rolloutId: cohort.rolloutId,
+      site: cohort.site,
+      label: formatCohortDisplayLabel(cohort),
+      schoolName: cohort.schoolName,
+      period: cohort.period,
+      year: cohort.year,
+      sourceStatus: cohort.status,
+      lifecycle: lifecycle,
+      participantCount: participants.length,
+      activeParticipants: participants.filter(p => p.status === 'active').length,
+      completedParticipants: participants.filter(p => p.status === 'completed').length,
+      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
+      totalSessions: sessionProgress.length,
+      nextSession: nextSession,
+      lastSession: lastSession,
+      lastSessionDate: lastSession ? lastSession.sessionDate : '',
+      sessions: sessionProgress
+    };
+  });
+
+  const sites = ['UGA', 'Missouri'].map(site => {
+    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
+    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
+    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
+    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
+    return {
+      site: site,
+      cohortCount: siteCohorts.length,
+      participantCount: participants.length,
+      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
+      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
+      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
+      averageAttendance: attendanceSummary.averageAttendance,
+      protocolCompletion: protocolSummary.completionRate,
+      cohorts: siteCohorts
+    };
+  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
+
+  const upcomingCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'upcoming')
+    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
+    .slice(0, 6);
+
+  const activeCohorts = cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'inProgress')
+    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
+
+  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
+    .filter(cohort => cohort.lifecycle.key === 'completed')
+    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
+    .slice(0, 1);
+
+  return {
+    sites: sites,
+    cohorts: cohortOperations,
+    lifecycleCounts: lifecycleCounts,
+    activeCohorts: activeCohorts,
+    recentCompletedCohorts: recentCompletedCohorts,
+    upcomingCohorts: upcomingCohorts,
+    totalCohorts: cohortOperations.length
+  };
+}
+
+function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
+  let present = 0;
+  let absent = 0;
+  let excused = 0;
+  let notMarked = 0;
+  const records = attendanceMap[session.sessionId] || {};
+
+  participants.forEach(participant => {
+    const status = records[participant.participantId];
+    if (status === 'present') present++;
+    else if (status === 'absent') absent++;
+    else if (status === 'excused') excused++;
+    else notMarked++;
+  });
+
+  const participantCount = participants.length;
+  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
+  const markedCount = present + absent + excused;
+  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
+  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+  const timing = resolveSessionTiming(session, sessionDateOnly, today);
+
+  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
+
+  return {
+    sessionId: session.sessionId,
+    sessionNumber: session.sessionNumber,
+    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
+    sessionDate: session.sessionDate,
+    sourceStatus: session.status,
+    timing: timing,
+    present: present,
+    absent: absent,
+    excused: excused,
+    notMarked: notMarked,
+    markedCount: markedCount,
+    participantCount: participantCount,
+    attendanceRate: attendanceRate,
+    markedRate: markedRate,
+    protocolCompletion: protocolSummary.completionRate,
+    protocolDayCompleted: protocolDaySummary.completed || 0,
+    protocolDayTotal: protocolDaySummary.total || 0,
+    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
+    protocolDayItems: protocolDaySummary.items || []
+  };
+}
+
+function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
+  const summaries = {};
+  (sessions || []).forEach(session => {
+    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
+  });
+
+  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
+    return summaries;
+  }
+
+  const participantIds = new Set(participants.map(p => String(p.participantId)));
+  const participantRolloutMap = {};
+  const rolloutAllowedNumbersMap = {};
+  participants.forEach(participant => {
+    const participantId = String(participant.participantId);
+    const rolloutId = String(participant.rolloutId || '');
+    participantRolloutMap[participantId] = rolloutId;
+    if (!rolloutAllowedNumbersMap[rolloutId]) {
+      const allowed = {};
+      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
+        allowed[String(item.number)] = true;
+      });
+      rolloutAllowedNumbersMap[rolloutId] = allowed;
+    }
+  });
+
+  const sessionIdsByDate = {};
+  sessions.forEach(session => {
+    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
+    if (!sessionDateOnly) return;
+    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
+    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
+  });
+
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
+  const participantCol = cHeaders.indexOf('participantId');
+  const instrumentCol = cHeaders.indexOf('instrumentNumber');
+  const instrumentNameCol = cHeaders.indexOf('instrumentName');
+  const statusCol = cHeaders.indexOf('status');
+  const completedDateCol = cHeaders.indexOf('completedDate');
+  const totalsByInstrument = {};
+  const namesByInstrument = {};
+  const completedBySession = {};
+
+  Object.keys(summaries).forEach(sessionId => {
+    completedBySession[sessionId] = {};
+  });
+
+  for (let i = 1; i < cData.length; i++) {
+    const participantId = String(cData[i][participantCol]);
+    if (!participantIds.has(participantId)) continue;
+
+    const rolloutId = participantRolloutMap[participantId] || '';
+    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
+    const instrumentNumber = String(cData[i][instrumentCol]);
+    if (!allowedMap[instrumentNumber]) continue;
+
+    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
+    namesByInstrument[instrumentNumber] = instrumentName;
+    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
+
+    const status = cData[i][statusCol];
+    if (status !== 'completed') continue;
+
+    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
+    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
+    matchingSessionIds.forEach(sessionId => {
+      if (!completedBySession[sessionId]) return;
+      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
+    });
+  }
+
+  Object.keys(summaries).forEach(sessionId => {
+    const completedMap = completedBySession[sessionId] || {};
+    const items = Object.keys(completedMap)
+      .map(instrumentNumber => {
+        const total = totalsByInstrument[instrumentNumber] || participants.length;
+        const completed = completedMap[instrumentNumber] || 0;
+        return {
+          number: Number(instrumentNumber),
+          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
+          completed: completed,
+          total: total,
+          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
+        };
+      })
+      .filter(item => item.completed > 0)
+      .sort((a, b) => a.number - b.number);
+
+    summaries[sessionId].items = items;
+    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
+    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
+    summaries[sessionId].completionRate = summaries[sessionId].total > 0
+      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
+      : 0;
+  });
+
+  return summaries;
+}
+
+function resolveCohortLifecycle(cohort, sessions, today) {
+  if (!sessions || sessions.length === 0) {
+    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
+  }
+
+  const datedSessions = sessions
+    .map(session => getDateOnly(parseSessionDate(session.sessionDate)))
+    .filter(Boolean);
+
+  const completedByStatus = sessions.filter(session => String(session.status || '').toLowerCase() === 'completed').length;
+  if (completedByStatus === sessions.length) {
+    return { key: 'completed', label: 'Completed', tone: 'success', detail: 'All sessions marked complete' };
+  }
+
+  if (datedSessions.length === sessions.length) {
+    const firstDate = datedSessions[0];
+    const lastDate = datedSessions[datedSessions.length - 1];
+    if (firstDate > today) {
+      return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Starts ' + formatDashboardDate(firstDate) };
+    }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
+  }
+
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
+
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
+
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
+
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
+
+function compareDateStrings(a, b) {
+  const aDate = getDateOnly(parseSessionDate(a));
+  const bDate = getDateOnly(parseSessionDate(b));
+  if (!aDate && !bDate) return 0;
+  if (!aDate) return 1;
+  if (!bDate) return -1;
+  return aDate.localeCompare(bDate);
+}
+
+function getDateOnly(date) {
+  if (!date || isNaN(date.getTime())) return '';
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function formatDashboardDate(dateString) {
+  if (!dateString) return 'TBD';
+  const parsed = parseSessionDate(dateString);
+  if (!parsed) return dateString;
+  return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'MMM d, yyyy');
+}
+
 function buildLandingContextLine(currentCohort, effectiveSite, effectiveCohort) {
   if (currentCohort) {
     const label = formatCohortDisplayLabel(currentCohort);
@@ -8181,12 +9615,150 @@ function chooseLessonJournalResponse(existing, candidate, duplicateMode) {
   return candidateTime >= existingTime ? candidate : existing;
 }
 
-function findBestLessonJournalParticipant(rawName, candidates) {
-  let best = { participant: null, score: 0 };
-  candidates.forEach(participant => {
-    const score = fuzzyStringScore(rawName, participant.fullName);
-    if (score > best.score) best = { participant: participant, score: score };
+function loadParticipantAliasesForLessonJournalExport() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const aliases = {};
+  if (!sheet || sheet.getLastRow() < 2) return aliases;
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const participantCol = headers.indexOf('participantId');
+  const aliasCol = headers.indexOf('alias');
+  const normalizedCol = headers.indexOf('normalizedAlias');
+  if (participantCol === -1 || aliasCol === -1) return aliases;
+  for (var i = 1; i < data.length; i++) {
+    const participantId = String(data[i][participantCol] || '').trim();
+    const alias = String(data[i][aliasCol] || '').trim();
+    if (!participantId || !alias) continue;
+    aliases[participantId] = aliases[participantId] || [];
+    aliases[participantId].push({
+      alias: alias,
+      normalizedAlias: normalizedCol === -1 ? normalizePersonNameForMatch(alias) : data[i][normalizedCol]
+    });
+  }
+  return aliases;
+}
+
+function buildLessonJournalExportSessionContext(participants) {
+  const participantIds = {};
+  const rolloutIds = {};
+  participants.forEach(participant => {
+    participantIds[String(participant.participantId || '')] = true;
+    if (participant.rolloutId) rolloutIds[String(participant.rolloutId)] = true;
   });
+
+  const context = {
+    aliases: loadParticipantAliasesForLessonJournalExport(),
+    participantIds: participantIds,
+    rolloutBounds: {},
+    sessionDatesByRollout: {}
+  };
+
+  const sessionsSnapshot = getSheetSnapshot('StudySessions');
+  const headers = sessionsSnapshot.headers || [];
+  const rolloutCol = headers.indexOf('rolloutId');
+  const dateCol = headers.indexOf('sessionDate');
+  if (rolloutCol === -1 || dateCol === -1) return context;
+
+  for (var i = 1; i < sessionsSnapshot.data.length; i++) {
+    const row = sessionsSnapshot.data[i];
+    const rolloutId = String(row[rolloutCol] || '');
+    if (!rolloutIds[rolloutId]) continue;
+    const dateOnly = getDateOnly(parseSessionDate(normalizeSessionDateValue(row[dateCol])));
+    if (!dateOnly) continue;
+    context.sessionDatesByRollout[rolloutId] = context.sessionDatesByRollout[rolloutId] || {};
+    context.sessionDatesByRollout[rolloutId][dateOnly] = true;
+    context.rolloutBounds[rolloutId] = context.rolloutBounds[rolloutId] || { firstDate: dateOnly, lastDate: dateOnly };
+    if (compareDateStrings(dateOnly, context.rolloutBounds[rolloutId].firstDate) < 0) context.rolloutBounds[rolloutId].firstDate = dateOnly;
+    if (compareDateStrings(dateOnly, context.rolloutBounds[rolloutId].lastDate) > 0) context.rolloutBounds[rolloutId].lastDate = dateOnly;
+  }
+
+  return context;
+}
+
+function getLessonJournalDateContext(participant, responseDate, context) {
+  if (!responseDate || !participant || !participant.rolloutId) {
+    return { scoreAdjustment: 0, reason: 'No response timestamp/date available' };
+  }
+  const rolloutId = String(participant.rolloutId);
+  const sessionDates = context.sessionDatesByRollout[rolloutId] || {};
+  const bounds = context.rolloutBounds[rolloutId];
+  if (sessionDates[responseDate]) {
+    return { scoreAdjustment: 5, reason: 'Response timestamp falls on a session date for this cohort' };
+  }
+  if (bounds && compareDateStrings(responseDate, bounds.firstDate) >= 0 && compareDateStrings(responseDate, bounds.lastDate) <= 0) {
+    return { scoreAdjustment: 3, reason: 'Response timestamp falls within this cohort session-date range' };
+  }
+  if (bounds && compareDateStrings(responseDate, bounds.lastDate) > 0) {
+    const responseObj = parseDateOnlyString(responseDate);
+    const lastObj = parseDateOnlyString(bounds.lastDate);
+    if (responseObj && lastObj) {
+      const diffDays = Math.round((responseObj.getTime() - lastObj.getTime()) / 86400000);
+      if (diffDays >= 0 && diffDays <= 30) {
+        return { scoreAdjustment: 1, reason: 'Response was submitted after the cohort ended, but within 30 days' };
+      }
+    }
+  }
+  return { scoreAdjustment: -8, reason: 'Response timestamp is outside this cohort session-date range' };
+}
+
+function findBestLessonJournalParticipant(rawName, candidates, context, responseTimestamp) {
+  const normalizedRaw = normalizePersonNameForMatch(rawName);
+  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
+  if (!normalizedRaw) return { participant: null, score: 0, reason: 'Missing response name', dateReason: '' };
+
+  const rawAsId = String(rawName || '').trim().toLowerCase();
+  const idMatch = candidates.find(participant => String(participant.participantId || '').trim().toLowerCase() === rawAsId);
+  if (idMatch) {
+    return { participant: idMatch, score: 100, reason: 'Exact participant ID match', dateReason: getLessonJournalDateContext(idMatch, responseDate, context).reason };
+  }
+
+  const exactFullName = candidates.find(participant => normalizePersonNameForMatch(participant.fullName) === normalizedRaw);
+  if (exactFullName) {
+    const dateContext = getLessonJournalDateContext(exactFullName, responseDate, context);
+    return { participant: exactFullName, score: Math.min(100, 96 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact full-name match', dateReason: dateContext.reason };
+  }
+
+  const aliases = context.aliases || {};
+  for (var i = 0; i < candidates.length; i++) {
+    const participant = candidates[i];
+    const aliasList = aliases[String(participant.participantId)] || [];
+    for (var a = 0; a < aliasList.length; a++) {
+      const aliasName = aliasList[a].normalizedAlias || aliasList[a].alias;
+      if (normalizePersonNameForMatch(aliasName) === normalizedRaw) {
+        const dateContext = getLessonJournalDateContext(participant, responseDate, context);
+        return { participant: participant, score: Math.min(100, 98 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact participant alias match', dateReason: dateContext.reason };
+      }
+    }
+  }
+
+  const rawTokens = normalizedRaw.split(' ').filter(Boolean);
+  if (rawTokens.length === 1) {
+    const firstNameMatches = candidates.filter(participant => normalizePersonNameForMatch(participant.fullName).split(' ')[0] === rawTokens[0]);
+    if (firstNameMatches.length === 1) {
+      const dateContext = getLessonJournalDateContext(firstNameMatches[0], responseDate, context);
+      return { participant: firstNameMatches[0], score: Math.min(100, 90 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Unique first-name match within selected cohort', dateReason: dateContext.reason };
+    }
+    if (firstNameMatches.length > 1) {
+      return { participant: firstNameMatches[0], score: 59, reason: 'Ambiguous first-name match within selected cohort', dateReason: '' };
+    }
+  }
+
+  const scored = candidates.map(participant => {
+    const base = scoreParticipantNameMatch(rawName, participant, aliases, {});
+    const dateContext = getLessonJournalDateContext(participant, responseDate, context);
+    return {
+      participant: participant,
+      score: Math.max(0, Math.min(100, base.score + dateContext.scoreAdjustment)),
+      reason: base.reason,
+      dateReason: dateContext.reason
+    };
+  }).sort((a, b) => b.score - a.score || String(a.participant.fullName || '').localeCompare(String(b.participant.fullName || '')));
+
+  const best = scored[0] || { participant: null, score: 0, reason: 'No candidate participants', dateReason: '' };
+  const second = scored[1] || null;
+  if (second && best.score - second.score < 8 && best.score < 95) {
+    return Object.assign({}, best, { score: Math.min(best.score, 59), reason: best.reason + ' (ambiguous close match)' });
+  }
   return best;
 }
 
@@ -8205,6 +9777,7 @@ function exportLessonJournalWorkbook(token, filters) {
   if (!participants.length) return { success: false, message: 'No participants found for selected filters' };
 
   const exportConfig = getLessonJournalExportConfigInternal();
+  const matchContext = buildLessonJournalExportSessionContext(participants);
   const participantsBySite = {};
   participants.forEach(participant => {
     const site = String(participant.site || '');
@@ -8213,17 +9786,17 @@ function exportLessonJournalWorkbook(token, filters) {
   });
 
   const spreadsheet = SpreadsheetApp.create('Lesson Journal Export ' + new Date().toISOString());
-  const defaultSheet = spreadsheet.getSheets()[0];
-  defaultSheet.setName('Summary');
-  const usedSheetNames = { Summary: true };
+  const lessonSheet = spreadsheet.getSheets()[0];
+  lessonSheet.setName('Lesson Journals');
+  const usedSheetNames = { 'Lesson Journals': true };
   const notes = [];
-  const wideRowsByParticipant = {};
-  const wideHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'];
-  const wideHeaderSeen = {};
-  wideHeaders.forEach(header => { wideHeaderSeen[header] = true; });
+  const lessonRowsByParticipant = {};
+  const lessonHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'];
+  const lessonHeaderSeen = {};
+  lessonHeaders.forEach(header => { lessonHeaderSeen[header] = true; });
 
   participants.forEach(participant => {
-    wideRowsByParticipant[participant.participantId] = {
+    lessonRowsByParticipant[participant.participantId] = {
       meta: [participant.fullName, participant.participantId, participant.site, participant.schoolName + ' (' + participant.period + ' ' + participant.year + ')'],
       values: {}
     };
@@ -8237,6 +9810,7 @@ function exportLessonJournalWorkbook(token, filters) {
       site: p.site,
       cohort: p.schoolName + ' (' + p.period + ' ' + p.year + ')',
       completed: {},
+      matchMethods: {},
       duplicateCounts: {}
     };
   });
@@ -8289,14 +9863,33 @@ function exportLessonJournalWorkbook(token, filters) {
         });
       }
 
+      columns.forEach(column => {
+        const lessonHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
+        if (!lessonHeaderSeen[lessonHeader]) {
+          lessonHeaders.push(lessonHeader);
+          lessonHeaderSeen[lessonHeader] = true;
+        }
+      });
+      if (exportConfig.includeSourceLinks) {
+        const sourceLinkHeader = source.label + ' - Source Row';
+        if (!lessonHeaderSeen[sourceLinkHeader]) {
+          lessonHeaders.push(sourceLinkHeader);
+          lessonHeaderSeen[sourceLinkHeader] = true;
+        }
+      }
+
       const responseByParticipant = {};
       const duplicateCounts = {};
       for (var i = 1; i < data.length; i++) {
         const row = data[i];
         const rawName = getExportCellValue(row, headers, nameColumn);
-        const best = findBestLessonJournalParticipant(rawName, candidates);
+        const responseTimestamp = headers.indexOf(timestampColumn) === -1 ? '' : row[headers.indexOf(timestampColumn)];
+        const best = findBestLessonJournalParticipant(rawName, candidates, matchContext, responseTimestamp);
         if (!best.participant || best.score < 60) {
-          if (rawName) notes.push(['Info', normalizedSite, source.label, 'Unmatched response row ' + (i + 1) + ' for name "' + rawName + '"']);
+          if (rawName) {
+            const unmatchedNote = 'Unmatched response row ' + (i + 1) + ' for name "' + rawName + '"' + (best.reason ? ' (' + best.reason + ')' : '');
+            notes.push(['Info', normalizedSite, source.label, unmatchedNote]);
+          }
           continue;
         }
         const pid = best.participant.participantId;
@@ -8306,81 +9899,72 @@ function exportLessonJournalWorkbook(token, filters) {
           rowNumber: i + 1,
           rawName: rawName,
           score: best.score,
-          timestamp: headers.indexOf(timestampColumn) === -1 ? '' : row[headers.indexOf(timestampColumn)]
+          matchReason: best.reason,
+          dateReason: best.dateReason,
+          timestamp: responseTimestamp
         };
         duplicateCounts[pid] = (duplicateCounts[pid] || 0) + 1;
         responseByParticipant[pid] = chooseLessonJournalResponse(responseByParticipant[pid], response, exportConfig.duplicateMode);
       }
 
-      const tabHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort', 'Response Timestamp', 'Raw Form Name', 'Match %'].concat(columns.map(column => column.exportLabel || column.sourceColumn));
-      if (exportConfig.includeSourceLinks) tabHeaders.push('Source Row');
-      const tabRows = siteParticipants.map(participant => {
+      siteParticipants.forEach(participant => {
         const response = responseByParticipant[participant.participantId];
-        const cohort = participant.schoolName + ' (' + participant.period + ' ' + participant.year + ')';
-        const row = [participant.fullName, participant.participantId, participant.site, cohort];
-        if (!response) {
-          row.push('', '', '');
-          columns.forEach(() => row.push(''));
-          if (exportConfig.includeSourceLinks) row.push('');
-          return row;
-        }
+        if (!response) return;
         summary[participant.participantId].completed[source.label] = true;
+        summary[participant.participantId].matchMethods[source.label] = response.matchReason;
         summary[participant.participantId].duplicateCounts[source.label] = duplicateCounts[participant.participantId] || 0;
-        row.push(response.timestamp, response.rawName, response.score);
-        columns.forEach(column => row.push(getExportCellValue(response.row, headers, column.sourceColumn)));
-        if (exportConfig.includeSourceLinks) {
-          row.push('https://docs.google.com/spreadsheets/d/' + extractSpreadsheetId(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + response.rowNumber + ':' + response.rowNumber);
+        if (duplicateCounts[participant.participantId] > 1) {
+          notes.push(['Info', normalizedSite, source.label, 'Multiple responses found for ' + participant.fullName + '; ' + exportConfig.duplicateMode + ' response used']);
         }
+        notes.push(['Info', normalizedSite, source.label, 'Matched row ' + response.rowNumber + ' (' + response.rawName + ') to ' + participant.fullName + ' at ' + response.score + '% via ' + response.matchReason + (response.dateReason ? '; ' + response.dateReason : '')]);
         columns.forEach(column => {
-          const wideHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
-          if (!wideHeaderSeen[wideHeader]) {
-            wideHeaders.push(wideHeader);
-            wideHeaderSeen[wideHeader] = true;
-          }
-          wideRowsByParticipant[participant.participantId].values[wideHeader] = getExportCellValue(response.row, headers, column.sourceColumn);
+          const lessonHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
+          lessonRowsByParticipant[participant.participantId].values[lessonHeader] = getExportCellValue(response.row, headers, column.sourceColumn);
         });
-        return row;
+        if (exportConfig.includeSourceLinks) {
+          const sourceLinkHeader = source.label + ' - Source Row';
+          lessonRowsByParticipant[participant.participantId].values[sourceLinkHeader] = 'https://docs.google.com/spreadsheets/d/' + extractSpreadsheetId(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + response.rowNumber + ':' + response.rowNumber;
+        }
       });
-
-      const tab = spreadsheet.insertSheet(makeSafeExportSheetName(normalizedSite + ' ' + source.label, usedSheetNames));
-      tab.getRange(1, 1, 1, tabHeaders.length).setValues([tabHeaders]);
-      if (tabRows.length) tab.getRange(2, 1, tabRows.length, tabHeaders.length).setValues(tabRows);
-      tab.getRange(1, 1, 1, tabHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
-      tab.setFrozenRows(1);
-      tab.setColumnWidths(1, tabHeaders.length, 170);
     });
   });
 
+  const lessonRows = participants.map(participant => {
+    const entry = lessonRowsByParticipant[participant.participantId];
+    return entry.meta.concat(lessonHeaders.slice(4).map(header => entry.values[header] || ''));
+  });
+  lessonSheet.getRange(1, 1, 1, lessonHeaders.length).setValues([lessonHeaders]);
+  if (lessonRows.length) lessonSheet.getRange(2, 1, lessonRows.length, lessonHeaders.length).setValues(lessonRows);
+  lessonSheet.getRange(1, 1, 1, lessonHeaders.length).setBackground('#0f766e').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
+  lessonSheet.setFrozenRows(1);
+  lessonSheet.setColumnWidths(1, lessonHeaders.length, 170);
+
+  const summarySheet = spreadsheet.insertSheet(makeSafeExportSheetName('Summary', usedSheetNames));
   const summaryHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => source.label));
   const summaryRows = participants.map(participant => {
     const entry = summary[participant.participantId];
-    return [entry.participantName, entry.participantId, entry.site, entry.cohort].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => entry.completed[source.label] ? 'Completed' : 'Missing'));
+    return [entry.participantName, entry.participantId, entry.site, entry.cohort].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => {
+      if (!entry.completed[source.label]) return 'Missing';
+      const method = entry.matchMethods[source.label] || 'Matched';
+      return method.indexOf('Unique first-name') !== -1 ? 'Matched by first name' : (method.indexOf('alias') !== -1 ? 'Matched by alias' : 'Completed');
+    }));
   });
-  defaultSheet.getRange(1, 1, 1, summaryHeaders.length).setValues([summaryHeaders]);
-  if (summaryRows.length) defaultSheet.getRange(2, 1, summaryRows.length, summaryHeaders.length).setValues(summaryRows);
-  defaultSheet.getRange(1, 1, 1, summaryHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
-  defaultSheet.setFrozenRows(1);
-  defaultSheet.setColumnWidths(1, summaryHeaders.length, 160);
-
-  const wideSheet = spreadsheet.insertSheet(makeSafeExportSheetName('Wide Consolidated', usedSheetNames));
-  const wideRows = participants.map(participant => {
-    const entry = wideRowsByParticipant[participant.participantId];
-    return entry.meta.concat(wideHeaders.slice(4).map(header => entry.values[header] || ''));
-  });
-  wideSheet.getRange(1, 1, 1, wideHeaders.length).setValues([wideHeaders]);
-  if (wideRows.length) wideSheet.getRange(2, 1, wideRows.length, wideHeaders.length).setValues(wideRows);
-  wideSheet.getRange(1, 1, 1, wideHeaders.length).setBackground('#0f766e').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
-  wideSheet.setFrozenRows(1);
-  wideSheet.setColumnWidths(1, wideHeaders.length, 170);
+  summarySheet.getRange(1, 1, 1, summaryHeaders.length).setValues([summaryHeaders]);
+  if (summaryRows.length) summarySheet.getRange(2, 1, summaryRows.length, summaryHeaders.length).setValues(summaryRows);
+  summarySheet.getRange(1, 1, 1, summaryHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
+  summarySheet.setFrozenRows(1);
+  summarySheet.setColumnWidths(1, summaryHeaders.length, 160);
 
   const notesSheet = spreadsheet.insertSheet(makeSafeExportSheetName('Export Notes', usedSheetNames));
   const noteRows = [
     ['Info', 'Export', '', 'Generated at ' + new Date().toISOString()],
-    ['Info', 'Filter', '', 'Site: ' + (filters.site || 'All') + '; Cohort: ' + (filters.rolloutId || 'All')]
+    ['Info', 'Filter', '', 'Site: ' + (filters.site || 'All') + '; Cohort: ' + (filters.rolloutId || 'All')],
+    ['Info', 'Workbook structure', '', 'Export contains Lesson Journals, Summary, and Export Notes only. Individual response tabs are intentionally excluded.']
   ].concat(notes);
   notesSheet.getRange(1, 1, 1, 4).setValues([['Severity', 'Site/Area', 'Sheet', 'Message']]);
   notesSheet.getRange(2, 1, noteRows.length, 4).setValues(noteRows);
   notesSheet.getRange(1, 1, 1, 4).setBackground('#334155').setFontColor('#ffffff').setFontWeight('bold');
+  notesSheet.setFrozenRows(1);
   notesSheet.setColumnWidths(1, 4, 220);
 
   SpreadsheetApp.flush();
@@ -8405,9 +9989,6 @@ function exportLessonJournalWorkbook(token, filters) {
   };
 }
 
-/**
- * Export participants data to CSV format
- */
 function exportParticipantsCSV(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {
