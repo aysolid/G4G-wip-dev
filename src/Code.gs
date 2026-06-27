@@ -12,7 +12,10 @@
 // CONFIGURATION
 // ============================================
 
-const CONFIG = {
+// Apps Script loads all .gs code in one global scope. Keep app-wide settings
+// as var declarations so accidental re-pastes or legacy deployments do not
+// fail with duplicate lexical declaration errors.
+var CONFIG = {
   APP_NAME: 'G4G Research Operations',
   VERSION: '1.0.0',
   SITES: ['UGA', 'Missouri'],
@@ -44,7 +47,7 @@ const CONFIG = {
   ]
 };
 
-const RUNTIME_CACHE = {
+var RUNTIME_CACHE = {
   configMap: null,
   globalProtocolItems: null,
   rolloutProtocolItems: {},
@@ -208,6 +211,22 @@ function getWebAppUrl() {
 /**
  * Get configuration for client-side use
  */
+function getConfig() {
+  const protocols = getGlobalProtocolItems();
+  const recordingTypes = getSessionRecordingTypes();
+  return {
+    appName: CONFIG.APP_NAME,
+    version: CONFIG.VERSION,
+    sites: CONFIG.SITES,
+    periods: CONFIG.PERIODS,
+    roles: CONFIG.ROLES,
+    instruments: protocols,
+    participantStatuses: CONFIG.PARTICIPANT_STATUSES,
+    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
+    sessionRecordingTypes: recordingTypes,
+    enrollmentFields: getEnrollmentFieldsInternal()
+  };
+}
 
 // ============================================
 // MEDIA & FIELD RECORDS
@@ -497,45 +516,49 @@ function deleteCohortMedia(token, mediaId) {
 }
 
 
-/**
- * Get configuration for client-side use
- */
-function getConfig() {
-  const protocols = getGlobalProtocolItems();
-  const recordingTypes = getSessionRecordingTypes();
-  return {
-    appName: CONFIG.APP_NAME,
-    version: CONFIG.VERSION,
-    sites: CONFIG.SITES,
-    periods: CONFIG.PERIODS,
-    roles: CONFIG.ROLES,
-    instruments: protocols,
-    participantStatuses: CONFIG.PARTICIPANT_STATUSES,
-    checklistStatuses: CONFIG.CHECKLIST_STATUSES,
-    sessionRecordingTypes: recordingTypes,
-    enrollmentFields: getEnrollmentFieldsInternal()
-  };
+function upsertConfigValue(key, value, description) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('Config');
+  const data = configSheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyCol = headers.indexOf('key');
+  const valueCol = headers.indexOf('value');
+  const descCol = headers.indexOf('description');
+  const updatedAtCol = headers.indexOf('updatedAt');
+  const timestamp = new Date().toISOString();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][keyCol] === key) {
+      const row = data[i].slice(0, headers.length);
+      row[valueCol] = value;
+      row[descCol] = description || '';
+      row[updatedAtCol] = timestamp;
+      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      invalidateConfigRuntimeCache();
+      return;
+    }
+  }
+  configSheet.appendRow([key, value, description || '', timestamp]);
+  invalidateConfigRuntimeCache();
 }
 
 function getSessionRecordingTypes() {
   const map = getConfigMap();
   const raw = map.SESSION_RECORDING_TYPES;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed.map(v => String(v).trim()).filter(Boolean);
-    } catch (e) {}
-  }
-  return ['GoPro', 'Tascam', 'Meeting Owl'];
+  if (!raw) return ['GoPro', 'Tascam', 'Meeting Owl'];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) return parsed.map(String).filter(Boolean);
+  } catch (e) {}
+  return String(raw).split(',').map(t => t.trim()).filter(Boolean);
 }
 
 function saveSessionRecordingTypes(token, types) {
   const currentUser = validateSession(token);
   if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
-  const normalized = (types || []).map(v => String(v || '').trim()).filter(Boolean);
-  if (!normalized.length) return { success: false, message: 'At least one recording type is required' };
-  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(normalized), 'Session recording input labels');
-  return { success: true, types: normalized };
+  const clean = (types || []).map(t => String(t || '').trim()).filter(Boolean);
+  if (!clean.length) return { success: false, message: 'At least one recording type is required' };
+  upsertConfigValue('SESSION_RECORDING_TYPES', JSON.stringify(clean), 'Session recording input labels');
+  return { success: true, types: clean, recordingTypes: clean };
 }
 
 function getSessionRecordingsByRollout(token, rolloutId) {
@@ -544,7 +567,7 @@ function getSessionRecordingsByRollout(token, rolloutId) {
   const sessionsResult = getSessionsByRollout(token, rolloutId);
   if (!sessionsResult.success) return sessionsResult;
   const types = getSessionRecordingTypes();
-  const sessions = (sessionsResult.sessions || []).map(s => {
+  const sessions = (sessionsResult.sessions || []).map(function(s) {
     let jsonLinks = {};
     if (s.recordingLinksJson) {
       try { jsonLinks = JSON.parse(s.recordingLinksJson || '{}') || {}; } catch (e) {}
@@ -558,7 +581,6 @@ function getSessionRecordingsByRollout(token, rolloutId) {
   });
   return { success: true, sessions: sessions, recordingTypes: types };
 }
-
 
 function getFieldNotesByRollout(token, rolloutId) {
   const currentUser = validateSession(token);
@@ -607,6 +629,8 @@ function saveSessionRecordingLinks(token, sessionId, links) {
   if (!sheet) return { success: false, message: 'StudySessions not found' };
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
+  const sessionIdIdx = headers.indexOf('sessionId');
+  if (sessionIdIdx === -1) return { success: false, message: 'sessionId column missing' };
   const ensureCol = name => {
     let idx = headers.indexOf(name);
     if (idx === -1) {
@@ -619,58 +643,32 @@ function saveSessionRecordingLinks(token, sessionId, links) {
   const col = name => headers.indexOf(name) + 1;
   const jsonCol = ensureCol('recordingLinksJson');
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf('sessionId')]) === String(sessionId)) {
+    if (String(data[i][sessionIdIdx]) === String(sessionId)) {
       if (col('goproLink') > 0) sheet.getRange(i + 1, col('goproLink')).setValue(links.GoPro || '');
       if (col('tascamLink') > 0) sheet.getRange(i + 1, col('tascamLink')).setValue(links.Tascam || '');
       if (col('meetingOwlLink') > 0) sheet.getRange(i + 1, col('meetingOwlLink')).setValue(links['Meeting Owl'] || '');
       sheet.getRange(i + 1, jsonCol).setValue(JSON.stringify(links || {}));
+      invalidateSheetSnapshot('StudySessions');
       return { success: true, message: 'Session recording links saved' };
     }
   }
   return { success: false, message: 'Session not found' };
 }
 
-
-function upsertConfigValue(key, value, description) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const configSheet = ss.getSheetByName('Config');
-  const data = configSheet.getDataRange().getValues();
-  const headers = data[0];
-  const keyCol = headers.indexOf('key');
-  const valueCol = headers.indexOf('value');
-  const descCol = headers.indexOf('description');
-  const updatedAtCol = headers.indexOf('updatedAt');
-  const timestamp = new Date().toISOString();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][keyCol] === key) {
-      const row = data[i].slice(0, headers.length);
-      row[valueCol] = value;
-      row[descCol] = description || '';
-      row[updatedAtCol] = timestamp;
-      configSheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
-      invalidateConfigRuntimeCache();
-      return;
-    }
-  }
-  configSheet.appendRow([key, value, description || '', timestamp]);
-  invalidateConfigRuntimeCache();
-}
-
-
 // ============================================
 // DIGITAL GOOGLE FORMS PROTOCOL SYNC
 // ============================================
 
-const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
-const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
-const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
-const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
-const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
-const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
-const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
-const LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
-const LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
-const LESSON_JOURNAL_EXPORT_SOURCES = [
+var DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
+var DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
+var DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
+var DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
+var DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
+var DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
+var ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
+var LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
+var LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
+var LESSON_JOURNAL_EXPORT_SOURCES = [
   { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
   { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
   { key: 'lesson_2_journal', label: 'Lesson 2 Journal', defaultSheetName: 'Lesson 2 Journal' },
@@ -2056,8 +2054,37 @@ function authenticateUser(username, password) {
 }
 
 /**
- * Create a new session for a user
+ * Create an authentication session record for a user.
+ *
+ * Note: current web sessions use the username token directly through
+ * validateSession(), but this helper is kept with a distinct name so it
+ * cannot collide with the study-session createSession(token, sessionData) API.
  */
+function createAuthSession(userId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sessionsSheet = ss.getSheetByName('Sessions');
+  if (!sessionsSheet) {
+    sessionsSheet = createSheetIfNotExists(ss, 'Sessions', [
+      'sessionId', 'userId', 'token', 'createdAt', 'expiresAt', 'isActive'
+    ]);
+  }
+
+  const sessionId = generateUUID();
+  const token = generateSessionToken();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + 60 * 60 * 1000); // 1 hour
+
+  sessionsSheet.appendRow([
+    sessionId,
+    userId,
+    token,
+    createdAt.toISOString(),
+    expiresAt.toISOString(),
+    true
+  ]);
+
+  return { sessionId, token, expiresAt };
+}
 
 /**
  * Validate a session token
@@ -3488,7 +3515,7 @@ function getAttendanceStatsByRollout(token, rolloutId) {
 // PARTICIPANT FUNCTIONS
 // ============================================
 
-const PARTICIPANT_PARENT_HEADERS = [
+var PARTICIPANT_PARENT_HEADERS = [
   'parent_guardian_names',
   'parent_guardian_phone',
   'parent_guardian_address',
@@ -3496,12 +3523,12 @@ const PARTICIPANT_PARENT_HEADERS = [
   'parent_guardian_dob'
 ];
 
-const ENROLLMENT_SYSTEM_HEADERS = [
+var ENROLLMENT_SYSTEM_HEADERS = [
   'participantId', 'site', 'rolloutId', 'schoolName', 'period', 'year',
   'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
 ];
 
-const DEFAULT_ENROLLMENT_FIELDS = [
+var DEFAULT_ENROLLMENT_FIELDS = [
   { key: 'fullName', label: 'Participant Full Name', type: 'text', required: true, core: true, placeholder: "Enter participant's full name" },
   { key: 'parent_guardian_names', label: 'Parent/Guardian Name(s)', type: 'text', required: false, core: true, placeholder: 'Enter parent/guardian names (comma-separated if multiple)' },
   { key: 'parent_guardian_phone', label: 'Parent/Guardian Phone Number', type: 'phone', required: false, core: true, placeholder: '(706) 555-1234' },
@@ -3786,10 +3813,10 @@ function buildParticipantRow(headers, data) {
   setValue('notes', data.notes || '');
   setValue('completionPercentage', data.completionPercentage || 0);
 
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(data);
+  const enrollmentFieldValuesForRow = getEnrollmentFieldValueMapFromData(data);
   getEnrollmentFieldsInternal().forEach(field => {
-    if (enrollmentValues[field.key] !== undefined) {
-      setValue(field.key, enrollmentValues[field.key]);
+    if (enrollmentFieldValuesForRow[field.key] !== undefined) {
+      setValue(field.key, enrollmentFieldValuesForRow[field.key]);
     }
   });
 
@@ -3994,13 +4021,13 @@ function enrollParticipant(token, participantData) {
   }
 
   const enrollmentFields = getEnrollmentFieldsInternal();
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
-  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
-  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
-  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
-  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+  const enrollmentFieldValuesForEnrollment = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentFieldValuesForEnrollment.fullName = String(enrollmentFieldValuesForEnrollment.fullName || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_email = String(enrollmentFieldValuesForEnrollment.parent_guardian_email || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_dob = String(enrollmentFieldValuesForEnrollment.parent_guardian_dob || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_phone = String(enrollmentFieldValuesForEnrollment.parent_guardian_phone || '').trim();
 
-  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForEnrollment);
   if (enrollmentErrors.length) {
     return { success: false, message: enrollmentErrors.join('; ') };
   }
@@ -4008,9 +4035,9 @@ function enrollParticipant(token, participantData) {
     return { success: false, message: 'Study cohort is required' };
   }
 
-  const parentEmail = enrollmentValues.parent_guardian_email;
-  const parentDob = enrollmentValues.parent_guardian_dob;
-  const parentPhone = enrollmentValues.parent_guardian_phone;
+  const parentEmail = enrollmentFieldValuesForEnrollment.parent_guardian_email;
+  const parentDob = enrollmentFieldValuesForEnrollment.parent_guardian_dob;
+  const parentPhone = enrollmentFieldValuesForEnrollment.parent_guardian_phone;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
@@ -4041,11 +4068,11 @@ function enrollParticipant(token, participantData) {
   // Add participant
   const row = buildParticipantRow(participantHeaders, {
     participantId: participantId,
-    fullName: enrollmentValues.fullName,
-    enrollmentFields: enrollmentValues,
-    parentGuardianNames: enrollmentValues.parent_guardian_names,
+    fullName: enrollmentFieldValuesForEnrollment.fullName,
+    enrollmentFields: enrollmentFieldValuesForEnrollment,
+    parentGuardianNames: enrollmentFieldValuesForEnrollment.parent_guardian_names,
     parentGuardianPhone: parentPhone,
-    parentGuardianAddress: enrollmentValues.parent_guardian_address,
+    parentGuardianAddress: enrollmentFieldValuesForEnrollment.parent_guardian_address,
     parentGuardianEmail: parentEmail,
     parentGuardianDob: parentDob,
     site: cohort.site,
@@ -4080,7 +4107,7 @@ function enrollParticipant(token, participantData) {
   appendRowsAsPlainText(checklistSheet, checklistRows);
 
   logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT', 'participant', participantId,
-    'Enrolled: ' + enrollmentValues.fullName);
+    'Enrolled: ' + enrollmentFieldValuesForEnrollment.fullName);
 
   return {
     success: true,
@@ -4115,20 +4142,20 @@ function updateParticipant(token, participantId, participantData) {
   const data = participantSnapshot.data;
 
   const enrollmentFields = getEnrollmentFieldsInternal();
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
-  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
-  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
-  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
-  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+  const enrollmentFieldValuesForUpdate = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentFieldValuesForUpdate.fullName = String(enrollmentFieldValuesForUpdate.fullName || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_email = String(enrollmentFieldValuesForUpdate.parent_guardian_email || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_dob = String(enrollmentFieldValuesForUpdate.parent_guardian_dob || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_phone = String(enrollmentFieldValuesForUpdate.parent_guardian_phone || '').trim();
 
-  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForUpdate);
   if (enrollmentErrors.length) {
     return { success: false, message: enrollmentErrors.join('; ') };
   }
 
-  const parentEmail = enrollmentValues.parent_guardian_email;
-  const parentDob = enrollmentValues.parent_guardian_dob;
-  const parentPhone = enrollmentValues.parent_guardian_phone;
+  const parentEmail = enrollmentFieldValuesForUpdate.parent_guardian_email;
+  const parentDob = enrollmentFieldValuesForUpdate.parent_guardian_dob;
+  const parentPhone = enrollmentFieldValuesForUpdate.parent_guardian_phone;
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
@@ -4151,7 +4178,7 @@ function updateParticipant(token, participantId, participantData) {
       if (participantData.parentGuardianEmail !== undefined) setRowValue('parent_guardian_email', parentEmail);
       if (participantData.parentGuardianDob !== undefined) setRowValue('parent_guardian_dob', parentDob);
       enrollmentFields.forEach(field => {
-        if (enrollmentValues[field.key] !== undefined) setRowValue(field.key, enrollmentValues[field.key]);
+        if (enrollmentFieldValuesForUpdate[field.key] !== undefined) setRowValue(field.key, enrollmentFieldValuesForUpdate[field.key]);
       });
       if (participantData.status) setRowValue('status', participantData.status);
       if (participantData.notes !== undefined) setRowValue('notes', participantData.notes);
@@ -4445,17 +4472,17 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const enrollmentValues = {};
+    const enrollmentFieldValuesForImport = {};
     enrollmentFields.forEach(field => {
-      enrollmentValues[field.key] = (getValue(row, field.key) || '').trim();
+      enrollmentFieldValuesForImport[field.key] = (getValue(row, field.key) || '').trim();
     });
-    const fullName = String(enrollmentValues.fullName || '').trim();
+    const fullName = String(enrollmentFieldValuesForImport.fullName || '').trim();
     const rolloutName = (getValue(row, cohortColumn) || '').trim();
-    const parentGuardianNames = String(enrollmentValues.parent_guardian_names || '').trim();
-    const parentGuardianPhone = String(enrollmentValues.parent_guardian_phone || '').trim();
-    const parentGuardianAddress = String(enrollmentValues.parent_guardian_address || '').trim();
-    const parentGuardianEmail = String(enrollmentValues.parent_guardian_email || '').trim();
-    const parentGuardianDob = String(enrollmentValues.parent_guardian_dob || '').trim();
+    const parentGuardianNames = String(enrollmentFieldValuesForImport.parent_guardian_names || '').trim();
+    const parentGuardianPhone = String(enrollmentFieldValuesForImport.parent_guardian_phone || '').trim();
+    const parentGuardianAddress = String(enrollmentFieldValuesForImport.parent_guardian_address || '').trim();
+    const parentGuardianEmail = String(enrollmentFieldValuesForImport.parent_guardian_email || '').trim();
+    const parentGuardianDob = String(enrollmentFieldValuesForImport.parent_guardian_dob || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -4464,7 +4491,7 @@ function importParticipantsCSV(token, fileData) {
 
     summary.processed++;
 
-    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForImport);
     if (!rolloutName) {
       rowErrors.push('cohortName is required');
     }
@@ -4493,7 +4520,7 @@ function importParticipantsCSV(token, fileData) {
     const rowValues = buildParticipantRow(participantHeaders, {
       participantId: newParticipantId,
       fullName: fullName,
-      enrollmentFields: enrollmentValues,
+      enrollmentFields: enrollmentFieldValuesForImport,
       parentGuardianNames: parentGuardianNames,
       parentGuardianPhone: parentGuardianPhone,
       parentGuardianAddress: parentGuardianAddress,
