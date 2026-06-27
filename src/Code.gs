@@ -515,6 +515,7 @@ function deleteCohortMedia(token, mediaId) {
   return { success: false, message: 'Media record not found' };
 }
 
+
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
