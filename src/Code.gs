@@ -1123,30 +1123,39 @@ function scoreParticipantNameMatch(rawName, participant, aliases, presentPartici
   if (!entered || !fullName) return { score: 0, reason: 'Missing name' };
   const enteredTokens = entered.split(' ').filter(Boolean);
   const fullTokens = fullName.split(' ').filter(Boolean);
-  let score = fuzzyStringScore(entered, fullName);
-  let reason = 'Fuzzy full-name comparison';
+  let score = 0;
+  let reason = 'No core name match';
+
   if (entered === fullName) {
     score = 100;
     reason = 'Exact full-name match';
-  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
-    score = Math.max(score, 82);
-    reason = 'First-name match';
   } else if (enteredTokens.length >= 2 && fullTokens.length >= 2 && enteredTokens[0] === fullTokens[0] && enteredTokens[enteredTokens.length - 1] === fullTokens[fullTokens.length - 1]) {
-    score = Math.max(score, 95);
+    score = 95;
     reason = 'First and last name match';
+  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
+    score = 82;
+    reason = 'First-name match';
   } else if (enteredTokens[0] && fullTokens[0] && enteredTokens[0] === fullTokens[0]) {
-    score = Math.max(score, 74);
+    score = 74;
     reason = 'Shared first name with fuzzy remainder';
   }
 
-  const aliasList = aliases[String(participant.participantId)] || [];
-  aliasList.forEach(alias => {
-    const aliasScore = fuzzyStringScore(entered, alias.normalizedAlias || alias.alias);
-    if (aliasScore > score) {
-      score = aliasScore;
-      reason = 'Participant alias match';
+  if (score === 0) {
+    const aliasList = aliases[String(participant.participantId)] || [];
+    for (var i = 0; i < aliasList.length; i++) {
+      const aliasName = normalizePersonNameForMatch(aliasList[i].normalizedAlias || aliasList[i].alias);
+      if (aliasName && aliasName === entered) {
+        score = 88;
+        reason = 'Participant alias fallback match';
+        break;
+      }
     }
-  });
+  }
+
+  if (score === 0) {
+    score = fuzzyStringScore(entered, fullName);
+    reason = 'Fuzzy full-name comparison';
+  }
 
   if (presentParticipantIds && presentParticipantIds[String(participant.participantId)] && score > 0) {
     score = Math.min(100, score + 5);
@@ -1753,6 +1762,112 @@ function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
   set('createdBy', createdBy || DIGITAL_FORM_SYNC_SYSTEM_USER);
   set('notes', notes || 'Created from Digital Forms Sync review');
   appendRowsAsPlainText(sheet, [row]);
+}
+
+function normalizeParticipantAliasList(aliasesText) {
+  const seen = {};
+  return String(aliasesText || '').split(';')
+    .map(alias => alias.trim())
+    .filter(Boolean)
+    .filter(alias => {
+      const normalized = normalizePersonNameForMatch(alias);
+      if (!normalized || seen[normalized]) return false;
+      seen[normalized] = true;
+      return true;
+    });
+}
+
+function getParticipantAliasRecordsInternal(participantId) {
+  ensureDigitalFormSyncSheets();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const records = [];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('participantId')]) === String(participantId)) {
+      records.push({
+        aliasId: getHeaderValue(data[i], headers, 'aliasId'),
+        participantId: getHeaderValue(data[i], headers, 'participantId'),
+        alias: getHeaderValue(data[i], headers, 'alias'),
+        normalizedAlias: getHeaderValue(data[i], headers, 'normalizedAlias'),
+        createdAt: getHeaderValue(data[i], headers, 'createdAt'),
+        createdBy: getHeaderValue(data[i], headers, 'createdBy'),
+        notes: getHeaderValue(data[i], headers, 'notes')
+      });
+    }
+  }
+  return records;
+}
+
+function getParticipantAliasTextInternal(participantId) {
+  return getParticipantAliasRecordsInternal(participantId).map(record => record.alias).filter(Boolean).join('; ');
+}
+
+function getParticipantAliasConflictsInternal(participantId, aliases) {
+  ensureDigitalFormSyncSheets();
+  const normalizedAliases = {};
+  aliases.forEach(alias => {
+    const normalized = normalizePersonNameForMatch(alias);
+    if (normalized) normalizedAliases[normalized] = alias;
+  });
+  const keys = Object.keys(normalizedAliases);
+  if (!keys.length) return [];
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || [];
+  const conflicts = [];
+  for (let i = 1; i < data.length; i++) {
+    const existingParticipantId = String(getHeaderValue(data[i], headers, 'participantId') || '');
+    const normalizedAlias = String(getHeaderValue(data[i], headers, 'normalizedAlias') || '');
+    if (existingParticipantId && existingParticipantId !== String(participantId) && normalizedAliases[normalizedAlias]) {
+      conflicts.push('Alias "' + normalizedAliases[normalizedAlias] + '" is also assigned to participant ' + existingParticipantId + '. It will be treated as an ambiguous fallback match.');
+    }
+  }
+  return conflicts;
+}
+
+function saveParticipantAliases(token, participantId, aliasesText) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') return { success: false, message: 'Unauthorized' };
+
+  const participantResult = getParticipantById(token, participantId);
+  if (!participantResult.success) return participantResult;
+
+  ensureDigitalFormSyncSheets();
+  const aliases = normalizeParticipantAliasList(aliasesText);
+  const warnings = getParticipantAliasConflictsInternal(participantId, aliases);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0] || ['aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'];
+  const keptRows = [headers];
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][headers.indexOf('participantId')]) !== String(participantId)) {
+      keptRows.push(data[i].slice(0, headers.length));
+    }
+  });
+  if (enabled) {
+    const minutes = Math.max(5, Number(everyMinutes) || 10);
+    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
+  }
+  const timestamp = new Date().toISOString();
+  aliases.forEach(alias => {
+    const row = new Array(headers.length).fill('');
+    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
+    set('aliasId', generateUUID());
+    set('participantId', participantId);
+    set('alias', alias);
+    set('normalizedAlias', normalizePersonNameForMatch(alias));
+    set('createdAt', timestamp);
+    set('createdBy', currentUser.fullName || currentUser.username || currentUser.userId || 'Admin');
+    set('notes', 'Manually assigned participant alias');
+    keptRows.push(row);
+  });
+  sheet.clearContents();
+  sheet.getRange(1, 1, keptRows.length, headers.length).setNumberFormat('@').setValues(keptRows);
+  invalidateSheetSnapshot('ParticipantAliases');
+  return { success: true, aliases: aliases, aliasesText: aliases.join('; '), warnings: warnings };
 }
 
 function reviewDigitalFormMatch(token, queueId, action, participantId) {
@@ -3980,6 +4095,11 @@ function getParticipantById(token, participantId) {
 
   if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && participant.site !== currentUser.site) {
     return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  if (currentUser.role !== 'viewer') {
+    participant.aliases = getParticipantAliasRecordsInternal(participant.participantId);
+    participant.aliasesText = participant.aliases.map(record => record.alias).filter(Boolean).join('; ');
   }
 
   // Get checklist items
@@ -7022,18 +7142,6 @@ function findBestLessonJournalParticipant(rawName, candidates, context, response
   }
 
   const aliases = context.aliases || {};
-  for (var i = 0; i < candidates.length; i++) {
-    const participant = candidates[i];
-    const aliasList = aliases[String(participant.participantId)] || [];
-    for (var a = 0; a < aliasList.length; a++) {
-      const aliasName = aliasList[a].normalizedAlias || aliasList[a].alias;
-      if (normalizePersonNameForMatch(aliasName) === normalizedRaw) {
-        const dateContext = getLessonJournalDateContext(participant, responseDate, context);
-        return { participant: participant, score: Math.min(100, 98 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact participant alias match', dateReason: dateContext.reason };
-      }
-    }
-  }
-
   const rawTokens = normalizedRaw.split(' ').filter(Boolean);
   if (rawTokens.length === 1) {
     const firstNameMatches = candidates.filter(participant => normalizePersonNameForMatch(participant.fullName).split(' ')[0] === rawTokens[0]);
@@ -7044,6 +7152,26 @@ function findBestLessonJournalParticipant(rawName, candidates, context, response
     if (firstNameMatches.length > 1) {
       return { participant: firstNameMatches[0], score: 59, reason: 'Ambiguous first-name match within selected cohort', dateReason: '' };
     }
+  }
+
+  const aliasMatches = [];
+  for (var i = 0; i < candidates.length; i++) {
+    const participant = candidates[i];
+    const aliasList = aliases[String(participant.participantId)] || [];
+    for (var a = 0; a < aliasList.length; a++) {
+      const aliasName = aliasList[a].normalizedAlias || aliasList[a].alias;
+      if (normalizePersonNameForMatch(aliasName) === normalizedRaw) {
+        aliasMatches.push(participant);
+        break;
+      }
+    }
+  }
+  if (aliasMatches.length === 1) {
+    const dateContext = getLessonJournalDateContext(aliasMatches[0], responseDate, context);
+    return { participant: aliasMatches[0], score: Math.min(100, 88 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact participant alias fallback match', dateReason: dateContext.reason };
+  }
+  if (aliasMatches.length > 1) {
+    return { participant: aliasMatches[0], score: 59, reason: 'Ambiguous participant alias fallback match within selected cohort', dateReason: '' };
   }
 
   const scored = candidates.map(participant => {
