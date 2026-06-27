@@ -1813,1212 +1813,6 @@ function reviewDigitalFormMatch(token, queueId, action, participantId) {
   return { success: true, message: 'Match confirmed and checklist updated' };
 }
 
-
-// ============================================
-// DIGITAL GOOGLE FORMS PROTOCOL SYNC
-// ============================================
-
-const DIGITAL_FORM_SYNC_CONFIG_KEY = 'DIGITAL_FORM_SYNC_CONFIG';
-const DIGITAL_FORM_SYNC_WATERMARKS_KEY = 'DIGITAL_FORM_SYNC_WATERMARKS';
-const DIGITAL_FORM_SYNC_SYSTEM_USER = 'Google Forms Sync';
-const DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
-const DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
-const DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
-const ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
-const LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
-const LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
-const LESSON_JOURNAL_EXPORT_SOURCES = [
-  { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
-  { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
-  { key: 'lesson_2_journal', label: 'Lesson 2 Journal', defaultSheetName: 'Lesson 2 Journal' },
-  { key: 'lesson_3_journal', label: 'Lesson 3 Journal', defaultSheetName: 'Lesson 3 Journal' },
-  { key: 'lesson_4_journal', label: 'Lesson 4 Journal', defaultSheetName: 'Lesson 4 Journal' },
-  { key: 'lesson_5_journal', label: 'Lesson 5 Journal', defaultSheetName: 'Lesson 5 Journal' },
-  { key: 'lesson_6_journal', label: 'Lesson 6 Journal', defaultSheetName: 'Lesson 6 Journal' },
-  { key: 'lesson_7_journal', label: 'Lesson 7 Journal', defaultSheetName: 'Lesson 7 Journal' },
-  { key: 'lesson_8_journal', label: 'Lesson 8 Journal', defaultSheetName: 'Lesson 8 Journal' },
-  { key: 'peer_playtesting_feedback', label: 'Peer Playtesting Feedback', defaultSheetName: 'Peer Playtesting Feedback' }
-];
-
-function isDigitalFormSyncSuperAdmin(user) {
-  if (!user || user.role !== 'admin') return false;
-  const userId = String(user.userId || '').trim();
-  const username = String(user.username || '').trim().toLowerCase();
-  return userId === DIGITAL_FORM_SYNC_SUPER_ADMIN_ID || username === DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME;
-}
-
-function getDigitalFormSyncAllowedAdminIdsInternal() {
-  return getSensitiveFeatureAllowedAdminIdsInternal(DIGITAL_FORM_SYNC_ACCESS_KEY);
-}
-
-function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
-  return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
-}
-
-function getLessonJournalExportAllowedAdminIdsInternal() {
-  return getSensitiveFeatureAllowedAdminIdsInternal(LESSON_JOURNAL_EXPORT_ACCESS_KEY);
-}
-
-function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
-  const allowed = {};
-  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
-  const configMap = getConfigMap();
-  const raw = configMap[configKey];
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      const ids = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.allowedAdminIds) ? parsed.allowedAdminIds : []);
-      ids.forEach(id => {
-        const clean = String(id || '').trim();
-        if (clean) allowed[clean] = true;
-      });
-    } catch (e) {
-      String(raw).split(',').forEach(id => {
-        const clean = String(id || '').trim();
-        if (clean) allowed[clean] = true;
-      });
-    }
-  }
-  return Object.keys(allowed);
-}
-
-function isUserAllowedForSensitiveFeature(user, configKey) {
-  if (!user || user.role !== 'admin') return false;
-  if (isDigitalFormSyncSuperAdmin(user)) return true;
-  const userId = String(user.userId || '').trim();
-  return !!userId && getSensitiveFeatureAllowedAdminIdsInternal(configKey).indexOf(userId) !== -1;
-}
-
-  ensureMediaRecordSheets();
-
-  // Create ActivityLog sheet
-  createSheetIfNotExists(ss, 'ActivityLog', [
-    'logId', 'timestamp', 'userId', 'userName', 'action', 'targetType', 'targetId', 'details'
-  ]);
-
-function canAccessEnrollmentFieldManager(user) {
-  return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
-}
-
-function canConfigureLessonJournalExport(user) {
-  return isUserAllowedForSensitiveFeature(user, LESSON_JOURNAL_EXPORT_ACCESS_KEY);
-}
-
-  ensureDigitalFormSyncSheets();
-
-  Logger.log('Database initialized successfully!');
-  return { success: true, message: 'Database initialized successfully!' };
-}
-
-function getEnrollmentFieldManagerAccessControlForUser(user) {
-  return {
-    hasAccess: canAccessEnrollmentFieldManager(user),
-    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
-    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
-    allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
-  };
-}
-
-function getLessonJournalExportAccessControlForUser(user) {
-  return {
-    hasAccess: canConfigureLessonJournalExport(user),
-    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
-    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
-    allowedAdminIds: getLessonJournalExportAllowedAdminIdsInternal()
-  };
-}
-
-function getAdminUsersForDigitalFormSyncAccess() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('Users');
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  const values = sheet.getDataRange().getValues();
-  const headers = values[0] || [];
-  const idx = header => headers.indexOf(header);
-  const allowed = getDigitalFormSyncAllowedAdminIdsInternal();
-  return values.slice(1)
-    .map(row => ({
-      userId: row[idx('userId')] || '',
-      username: row[idx('username')] || '',
-      fullName: row[idx('fullName')] || row[idx('name')] || '',
-      role: row[idx('role')] || '',
-      site: row[idx('site')] || '',
-      status: row[idx('status')] || ''
-    }))
-    .filter(user => String(user.role).toLowerCase() === 'admin' && String(user.status || 'active').toLowerCase() !== 'inactive')
-    .map(user => Object.assign({}, user, {
-      isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
-      hasAccess: isDigitalFormSyncSuperAdmin(user) || allowed.indexOf(String(user.userId || '').trim()) !== -1
-    }));
-}
-
-function saveDigitalFormSyncAccess(token, adminUserIds) {
-  const currentUser = validateSession(token);
-  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
-    return { success: false, message: 'Only the primary Digital Forms Sync administrator can manage access.' };
-  }
-  const allowed = {};
-  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
-  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
-    const clean = String(id || '').trim();
-    if (clean) allowed[clean] = true;
-  });
-  upsertConfigValue(DIGITAL_FORM_SYNC_ACCESS_KEY, JSON.stringify(Object.keys(allowed)), 'Admin users allowed to manage Digital Forms Sync');
-  return {
-    success: true,
-    message: 'Digital Forms Sync access updated',
-    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
-    adminUsers: getAdminUsersForDigitalFormSyncAccess()
-  };
-}
-
-function saveSensitiveFeatureAllowedAdminIdsInternal(configKey, adminUserIds, description) {
-  const allowed = {};
-  allowed[DIGITAL_FORM_SYNC_SUPER_ADMIN_ID] = true;
-  (Array.isArray(adminUserIds) ? adminUserIds : []).forEach(id => {
-    const clean = String(id || '').trim();
-    if (clean) allowed[clean] = true;
-  });
-  upsertConfigValue(configKey, JSON.stringify(Object.keys(allowed)), description);
-}
-
-function getAdminFeatureAccessData(token) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
-  const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
-  const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
-  const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
-  const lessonJournalAllowed = getLessonJournalExportAllowedAdminIdsInternal();
-  return {
-    success: true,
-    isSuperAdmin: isSuperAdmin,
-    digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
-    enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
-    lessonJournalExport: getLessonJournalExportAccessControlForUser(currentUser),
-    adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
-      digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
-      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1,
-      lessonJournalExportAccess: user.isSuperAdmin || lessonJournalAllowed.indexOf(String(user.userId || '').trim()) !== -1
-    })) : []
-  };
-}
-
-function saveAdminFeatureAccess(token, access) {
-  const currentUser = validateSession(token);
-  if (!isDigitalFormSyncSuperAdmin(currentUser)) {
-    return { success: false, message: 'Only the primary administrator can manage access to sensitive admin features.' };
-  }
-  const payload = access || {};
-  saveSensitiveFeatureAllowedAdminIdsInternal(
-    DIGITAL_FORM_SYNC_ACCESS_KEY,
-    payload.digitalFormsSyncAdminIds || [],
-    'Admin users allowed to manage Digital Forms Sync'
-  );
-  saveSensitiveFeatureAllowedAdminIdsInternal(
-    ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
-    payload.enrollmentFieldManagerAdminIds || [],
-    'Admin users allowed to manage Enrollment Field Manager'
-  );
-  saveSensitiveFeatureAllowedAdminIdsInternal(
-    LESSON_JOURNAL_EXPORT_ACCESS_KEY,
-    payload.lessonJournalExportAdminIds || [],
-    'Admin users allowed to configure Lesson Journal Export'
-  );
-  return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
-}
-
-function ensureDigitalFormSyncSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  createSheetIfNotExists(ss, 'FormResponseSyncLog', [
-    'syncId', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
-    'responseHash', 'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName',
-    'candidateRolloutId', 'candidateSessionId', 'participantId', 'checklistId', 'matchStatus',
-    'confidenceScore', 'matchedBy', 'matchedAt', 'notes', 'sourceLink'
-  ]);
-  createSheetIfNotExists(ss, 'FormResponseMatchQueue', [
-    'queueId', 'createdAt', 'sourceWorkbookId', 'sourceSheetName', 'sourceRowNumber', 'sourceTimestamp',
-    'rawName', 'normalizedName', 'instrumentNumber', 'instrumentName', 'candidateRolloutId',
-    'candidateSessionId', 'suggestedParticipantId', 'suggestedParticipantName', 'confidenceScore',
-    'status', 'reviewedBy', 'reviewedAt', 'notes', 'sourceLink', 'responseHash'
-  ]);
-  createSheetIfNotExists(ss, 'ParticipantAliases', [
-    'aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'
-  ]);
-}
-
-function getDefaultDigitalFormSyncConfig() {
-  return {
-    enabled: false,
-    masterWorkbookId: '',
-    masterWorkbookIds: { UGA: '', Missouri: '' },
-    autoMatchThreshold: 90,
-    reviewMatchThreshold: 70,
-    lateResponseWindowDays: 0,
-    enableRecentCompletedFallback: false,
-    recentCompletedFallbackDays: 30,
-    recentCompletedFallbackMaxCohorts: 1,
-    allowRecentCompletedAutoMatch: false,
-    preferPresentAttendance: true,
-    updateMissingChecklistItems: true,
-    saveAliasesOnReview: true,
-    mappings: [],
-    siteMappings: { UGA: [], Missouri: [] }
-  };
-}
-
-function extractSpreadsheetId(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const match = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (match) return match[1];
-  return raw.replace(/[?#].*$/, '');
-}
-
-function normalizeDigitalFormSyncConfig(config) {
-  const defaults = getDefaultDigitalFormSyncConfig();
-  const input = config || {};
-  const normalized = Object.assign({}, defaults, input);
-  const workbookIdsInput = input.masterWorkbookIds || {};
-  const legacyWorkbookId = extractSpreadsheetId(normalized.masterWorkbookId || normalized.masterWorkbookUrl || '');
-  normalized.masterWorkbookIds = {
-    UGA: extractSpreadsheetId(workbookIdsInput.UGA || workbookIdsInput.uga || input.ugaMasterWorkbookId || ''),
-    Missouri: extractSpreadsheetId(workbookIdsInput.Missouri || workbookIdsInput.missouri || input.missouriMasterWorkbookId || '')
-  };
-  if (legacyWorkbookId && !normalized.masterWorkbookIds.UGA && !normalized.masterWorkbookIds.Missouri) {
-    normalized.masterWorkbookIds.UGA = legacyWorkbookId;
-  }
-  normalized.masterWorkbookId = normalized.masterWorkbookIds.UGA || normalized.masterWorkbookIds.Missouri || legacyWorkbookId;
-  normalized.autoMatchThreshold = Math.min(100, Math.max(0, Number(normalized.autoMatchThreshold) || defaults.autoMatchThreshold));
-  normalized.reviewMatchThreshold = Math.min(normalized.autoMatchThreshold, Math.max(0, Number(normalized.reviewMatchThreshold) || defaults.reviewMatchThreshold));
-  normalized.lateResponseWindowDays = Math.max(0, Number(normalized.lateResponseWindowDays) || 0);
-  normalized.enableRecentCompletedFallback = !!normalized.enableRecentCompletedFallback;
-  normalized.recentCompletedFallbackDays = Math.max(0, Number(normalized.recentCompletedFallbackDays) || defaults.recentCompletedFallbackDays);
-  normalized.recentCompletedFallbackMaxCohorts = Math.max(1, Number(normalized.recentCompletedFallbackMaxCohorts) || defaults.recentCompletedFallbackMaxCohorts);
-  normalized.allowRecentCompletedAutoMatch = !!normalized.allowRecentCompletedAutoMatch;
-
-  const normalizeMapping = mapping => ({
-    enabled: !!mapping.enabled,
-    instrumentNumber: String(mapping.instrumentNumber || '').trim(),
-    instrumentName: String(mapping.instrumentName || '').trim(),
-    sheetName: String(mapping.sheetName || '').trim(),
-    timestampColumn: String(mapping.timestampColumn || 'Timestamp').trim() || 'Timestamp',
-    nameColumn: String(mapping.nameColumn || '').trim(),
-    allowLateResponses: mapping.allowLateResponses !== false
-  });
-  const legacyMappings = Array.isArray(input.mappings) ? input.mappings.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName) : [];
-  const inputSiteMappings = input.siteMappings || {};
-  normalized.siteMappings = { UGA: [], Missouri: [] };
-  ['UGA', 'Missouri'].forEach(site => {
-    const siteInput = inputSiteMappings[site] || inputSiteMappings[String(site).toLowerCase()] || null;
-    normalized.siteMappings[site] = Array.isArray(siteInput) && siteInput.length
-      ? siteInput.map(normalizeMapping).filter(mapping => mapping.instrumentNumber && mapping.sheetName)
-      : legacyMappings.slice();
-  });
-  normalized.mappings = legacyMappings.length ? legacyMappings : (normalized.siteMappings.UGA || []);
-  return normalized;
-}
-
-function getDigitalFormMappingsForSite(config, site) {
-  const normalizedSite = String(site || '').toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
-  const siteMappings = config && config.siteMappings && Array.isArray(config.siteMappings[normalizedSite]) ? config.siteMappings[normalizedSite] : [];
-  return siteMappings.length ? siteMappings : ((config && config.mappings) || []);
-}
-
-function getDigitalFormSyncConfigInternal() {
-  const configMap = getConfigMap();
-  if (!configMap[DIGITAL_FORM_SYNC_CONFIG_KEY]) return getDefaultDigitalFormSyncConfig();
-  try {
-    return normalizeDigitalFormSyncConfig(JSON.parse(configMap[DIGITAL_FORM_SYNC_CONFIG_KEY] || '{}'));
-  } catch (e) {
-    return getDefaultDigitalFormSyncConfig();
-  }
-}
-
-function getDigitalFormSyncWatermarksInternal() {
-  const configMap = getConfigMap();
-  if (!configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY]) return {};
-  try { return JSON.parse(configMap[DIGITAL_FORM_SYNC_WATERMARKS_KEY] || '{}') || {}; } catch (e) { return {}; }
-}
-
-function saveDigitalFormSyncWatermarksInternal(watermarks) {
-  upsertConfigValue(DIGITAL_FORM_SYNC_WATERMARKS_KEY, JSON.stringify(watermarks || {}), 'Per-form response sync watermarks');
-}
-
-function saveDigitalFormSyncConfig(token, config) {
-  const currentUser = validateSession(token);
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  ensureDigitalFormSyncSheets();
-  const normalized = normalizeDigitalFormSyncConfig(config || {});
-  upsertConfigValue(DIGITAL_FORM_SYNC_CONFIG_KEY, JSON.stringify(normalized), 'Google Forms digital protocol sync configuration');
-  return { success: true, message: 'Digital Forms Sync configuration saved', config: normalized };
-}
-
-function getDigitalFormSyncConfig(token) {
-  const currentUser = validateSession(token);
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  ensureDigitalFormSyncSheets();
-  return { success: true, config: getDigitalFormSyncConfigInternal(), accessControl: getDigitalFormSyncAccessControlForUser(currentUser) };
-}
-
-function openDigitalFormWorkbook(workbookId) {
-  const id = extractSpreadsheetId(workbookId);
-  if (!id) throw new Error('Master workbook ID is required');
-  return SpreadsheetApp.openById(id);
-}
-
-function getWorkbookTabsForDigitalSync(workbookId) {
-  const workbook = openDigitalFormWorkbook(workbookId);
-  return workbook.getSheets().map(sheet => ({
-    name: sheet.getName(),
-    sheetId: sheet.getSheetId(),
-    lastRow: sheet.getLastRow(),
-    headers: sheet.getLastRow() > 0 ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean) : []
-  }));
-}
-
-function testDigitalFormWorkbook(token, workbookId) {
-  const currentUser = validateSession(token);
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  try {
-    const tabs = getWorkbookTabsForDigitalSync(workbookId);
-    return { success: true, message: 'Connected to master workbook', tabs: tabs };
-  } catch (error) {
-    return { success: false, message: 'Unable to connect: ' + error.message };
-  }
-}
-
-/**
- * Create an authentication session record for a user.
- *
- * Note: current web sessions use the username token directly through
- * validateSession(), but this helper is kept with a distinct name so it
- * cannot collide with the study-session createSession(token, sessionData) API.
- */
-function createAuthSession(userId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sessionsSheet = ss.getSheetByName('Sessions');
-  if (!sessionsSheet) {
-    sessionsSheet = createSheetIfNotExists(ss, 'Sessions', [
-      'sessionId', 'userId', 'token', 'createdAt', 'expiresAt', 'isActive'
-    ]);
-  }
-  ensureDigitalFormSyncSheets();
-  const config = getDigitalFormSyncConfigInternal();
-  let tabs = [];
-  let workbookError = '';
-  const tabsBySite = {};
-  ['UGA', 'Missouri'].forEach(site => {
-    const workbookId = config.masterWorkbookIds && config.masterWorkbookIds[site];
-    if (!workbookId) return;
-    try {
-      tabsBySite[site] = getWorkbookTabsForDigitalSync(workbookId);
-      if (!tabs.length) tabs = tabsBySite[site];
-    } catch (e) {
-      tabsBySite[site] = [];
-      workbookError += (workbookError ? '; ' : '') + site + ': ' + e.message;
-    }
-  });
-  if (!tabs.length && config.masterWorkbookId) {
-    try {
-      tabs = getWorkbookTabsForDigitalSync(config.masterWorkbookId);
-      if (!tabsBySite.UGA || !tabsBySite.UGA.length) tabsBySite.UGA = tabs;
-    } catch (e) {
-      workbookError += (workbookError ? '; ' : '') + e.message;
-    }
-  }
-  return {
-    success: true,
-    config: config,
-    tabs: tabs,
-    tabsBySite: tabsBySite,
-    workbookError: workbookError,
-    protocolItems: getGlobalProtocolItems(),
-    queue: getDigitalFormMatchQueueInternal({ status: 'pending', limit: 50 }),
-    triggers: getDigitalFormSyncTriggerSummary(),
-    accessControl: getDigitalFormSyncAccessControlForUser(currentUser),
-    adminUsers: isDigitalFormSyncSuperAdmin(currentUser) ? getAdminUsersForDigitalFormSyncAccess() : []
-  };
-}
-
-function normalizePersonNameForMatch(name) {
-  return String(name || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function levenshteinDistance(a, b) {
-  a = String(a || '');
-  b = String(b || '');
-  if (a === b) return 0;
-  if (!a) return b.length;
-  if (!b) return a.length;
-  const prev = [];
-  const curr = [];
-  for (let j = 0; j <= b.length; j++) prev[j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
-  }
-  return prev[b.length];
-}
-
-function fuzzyStringScore(a, b) {
-  const left = normalizePersonNameForMatch(a);
-  const right = normalizePersonNameForMatch(b);
-  if (!left || !right) return 0;
-  if (left === right) return 100;
-  const distance = levenshteinDistance(left, right);
-  const maxLen = Math.max(left.length, right.length) || 1;
-  return Math.max(0, Math.round((1 - distance / maxLen) * 100));
-}
-
-function scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds) {
-  const entered = normalizePersonNameForMatch(rawName);
-  const fullName = normalizePersonNameForMatch(participant.fullName);
-  if (!entered || !fullName) return { score: 0, reason: 'Missing name' };
-  const enteredTokens = entered.split(' ').filter(Boolean);
-  const fullTokens = fullName.split(' ').filter(Boolean);
-  let score = fuzzyStringScore(entered, fullName);
-  let reason = 'Fuzzy full-name comparison';
-  if (entered === fullName) {
-    score = 100;
-    reason = 'Exact full-name match';
-  } else if (enteredTokens.length === 1 && fullTokens[0] === enteredTokens[0]) {
-    score = Math.max(score, 82);
-    reason = 'First-name match';
-  } else if (enteredTokens.length >= 2 && fullTokens.length >= 2 && enteredTokens[0] === fullTokens[0] && enteredTokens[enteredTokens.length - 1] === fullTokens[fullTokens.length - 1]) {
-    score = Math.max(score, 95);
-    reason = 'First and last name match';
-  } else if (enteredTokens[0] && fullTokens[0] && enteredTokens[0] === fullTokens[0]) {
-    score = Math.max(score, 74);
-    reason = 'Shared first name with fuzzy remainder';
-  }
-
-  const aliasList = aliases[String(participant.participantId)] || [];
-  aliasList.forEach(alias => {
-    const aliasScore = fuzzyStringScore(entered, alias.normalizedAlias || alias.alias);
-    if (aliasScore > score) {
-      score = aliasScore;
-      reason = 'Participant alias match';
-    }
-  });
-
-  if (presentParticipantIds && presentParticipantIds[String(participant.participantId)] && score > 0) {
-    score = Math.min(100, score + 5);
-    reason += ' + present attendance';
-  }
-  return { score: score, reason: reason };
-}
-
-function chooseBestParticipantMatch(rawName, candidates, aliases, presentParticipantIds) {
-  const scored = candidates.map(participant => {
-    const scoredMatch = scoreParticipantNameMatch(rawName, participant, aliases, presentParticipantIds);
-    return Object.assign({}, participant, { score: scoredMatch.score, reason: scoredMatch.reason });
-  }).sort((a, b) => b.score - a.score || String(a.fullName || '').localeCompare(String(b.fullName || '')));
-
-  const best = scored[0] || null;
-  const second = scored[1] || null;
-  if (!best) return { participant: null, score: 0, reason: 'No candidate participants' };
-
-  const enteredTokens = normalizePersonNameForMatch(rawName).split(' ').filter(Boolean);
-  if (enteredTokens.length === 1) {
-    const sameFirstName = scored.filter(candidate => normalizePersonNameForMatch(candidate.fullName).split(' ')[0] === enteredTokens[0]);
-    if (sameFirstName.length > 1) {
-      return { participant: best, score: Math.min(best.score, 69), reason: 'First name is not unique in candidate cohort' };
-    }
-  }
-
-  if (second && best.score - second.score < 8 && best.score < 95) {
-    return { participant: best, score: Math.min(best.score, 79), reason: 'Close competing participant match' };
-  }
-  return { participant: best, score: best.score, reason: best.reason };
-}
-
-function getDigitalFormMatchQueueInternal(options) {
-  ensureDigitalFormSyncSheets();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('FormResponseMatchQueue');
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
-  const statusFilter = options && options.status;
-  const limit = Number(options && options.limit) || 100;
-  const rows = [];
-  for (let i = data.length - 1; i >= 1 && rows.length < limit; i--) {
-    const row = data[i];
-    const status = row[headers.indexOf('status')];
-    if (statusFilter && status !== statusFilter) continue;
-    rows.push({
-      queueId: row[headers.indexOf('queueId')],
-      createdAt: row[headers.indexOf('createdAt')],
-      sourceSheetName: row[headers.indexOf('sourceSheetName')],
-      sourceRowNumber: row[headers.indexOf('sourceRowNumber')],
-      sourceTimestamp: row[headers.indexOf('sourceTimestamp')],
-      rawName: row[headers.indexOf('rawName')],
-      instrumentNumber: row[headers.indexOf('instrumentNumber')],
-      instrumentName: row[headers.indexOf('instrumentName')],
-      candidateRolloutId: row[headers.indexOf('candidateRolloutId')],
-      candidateSessionId: row[headers.indexOf('candidateSessionId')],
-      suggestedParticipantId: row[headers.indexOf('suggestedParticipantId')],
-      suggestedParticipantName: row[headers.indexOf('suggestedParticipantName')],
-      confidenceScore: row[headers.indexOf('confidenceScore')],
-      status: status,
-      notes: row[headers.indexOf('notes')],
-      sourceLink: row[headers.indexOf('sourceLink')]
-    });
-  }
-  return rows;
-}
-
-function buildDigitalSyncDatasets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const participantsSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
-  const sessionsSnapshot = getSheetSnapshot('StudySessions');
-  const attendanceSnapshot = getSheetSnapshot('SessionAttendance');
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const aliasSheet = ss.getSheetByName('ParticipantAliases');
-  const aliases = {};
-  if (aliasSheet && aliasSheet.getLastRow() > 1) {
-    const aliasData = aliasSheet.getDataRange().getValues();
-    const aliasHeaders = aliasData[0] || [];
-    for (let i = 1; i < aliasData.length; i++) {
-      const pid = String(aliasData[i][aliasHeaders.indexOf('participantId')] || '');
-      if (!pid) continue;
-      aliases[pid] = aliases[pid] || [];
-      aliases[pid].push({ alias: aliasData[i][aliasHeaders.indexOf('alias')], normalizedAlias: aliasData[i][aliasHeaders.indexOf('normalizedAlias')] });
-    }
-  }
-
-  const rolloutsSnapshot = getSheetSnapshot('StudyRollouts');
-  const rHeaders = rolloutsSnapshot.headers;
-  const rolloutsById = {};
-  for (let i = 1; i < rolloutsSnapshot.data.length; i++) {
-    const row = rolloutsSnapshot.data[i];
-    const rollout = {
-      rolloutId: row[rHeaders.indexOf('rolloutId')],
-      site: row[rHeaders.indexOf('site')],
-      schoolName: row[rHeaders.indexOf('schoolName')],
-      period: row[rHeaders.indexOf('period')],
-      year: row[rHeaders.indexOf('year')],
-      status: row[rHeaders.indexOf('status')]
-    };
-    if (rollout.rolloutId) rolloutsById[String(rollout.rolloutId)] = rollout;
-  }
-
-  const pHeaders = participantsSnapshot.headers;
-  const participants = [];
-  const participantsByRollout = {};
-  for (let i = 1; i < participantsSnapshot.data.length; i++) {
-    const row = participantsSnapshot.data[i];
-    const participant = {
-      participantId: row[pHeaders.indexOf('participantId')],
-      fullName: row[pHeaders.indexOf('fullName')],
-      site: row[pHeaders.indexOf('site')],
-      rolloutId: row[pHeaders.indexOf('rolloutId')],
-      status: row[pHeaders.indexOf('status')]
-    };
-    if (!participant.participantId) continue;
-    participants.push(participant);
-    participantsByRollout[String(participant.rolloutId)] = participantsByRollout[String(participant.rolloutId)] || [];
-    participantsByRollout[String(participant.rolloutId)].push(participant);
-  }
-
-  const sHeaders = sessionsSnapshot.headers;
-  const sessionsByDate = {};
-  const sessionById = {};
-  const rolloutSessionBounds = {};
-  for (let i = 1; i < sessionsSnapshot.data.length; i++) {
-    const row = sessionsSnapshot.data[i];
-    const session = {
-      sessionId: row[sHeaders.indexOf('sessionId')],
-      rolloutId: row[sHeaders.indexOf('rolloutId')],
-      sessionNumber: row[sHeaders.indexOf('sessionNumber')],
-      sessionDate: normalizeSessionDateValue(row[sHeaders.indexOf('sessionDate')]),
-      status: row[sHeaders.indexOf('status')]
-    };
-    const dateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-    if (!dateOnly) continue;
-    session.dateOnly = dateOnly;
-    sessionById[String(session.sessionId)] = session;
-    sessionsByDate[dateOnly] = sessionsByDate[dateOnly] || [];
-    sessionsByDate[dateOnly].push(session);
-    const rolloutIdKey = String(session.rolloutId || '');
-    rolloutSessionBounds[rolloutIdKey] = rolloutSessionBounds[rolloutIdKey] || { firstDate: dateOnly, lastDate: dateOnly, sessionCount: 0 };
-    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].firstDate) < 0) rolloutSessionBounds[rolloutIdKey].firstDate = dateOnly;
-    if (compareDateStrings(dateOnly, rolloutSessionBounds[rolloutIdKey].lastDate) > 0) rolloutSessionBounds[rolloutIdKey].lastDate = dateOnly;
-    rolloutSessionBounds[rolloutIdKey].sessionCount++;
-  }
-
-  const completedRolloutsBySite = {};
-  const todayKey = getDateOnly(new Date());
-  Object.keys(rolloutsById).forEach(rolloutId => {
-    const bounds = rolloutSessionBounds[rolloutId];
-    if (!bounds || !bounds.lastDate) return;
-    if (compareDateStrings(bounds.lastDate, todayKey) > 0) return;
-    const rollout = Object.assign({}, rolloutsById[rolloutId], bounds);
-    const siteKey = String(rollout.site || '').toLowerCase();
-    completedRolloutsBySite[siteKey] = completedRolloutsBySite[siteKey] || [];
-    completedRolloutsBySite[siteKey].push(rollout);
-  });
-  Object.keys(completedRolloutsBySite).forEach(siteKey => completedRolloutsBySite[siteKey].sort((a, b) => compareDateStrings(b.lastDate, a.lastDate)));
-
-  const aHeaders = attendanceSnapshot.headers;
-  const presentBySession = {};
-  for (let i = 1; i < attendanceSnapshot.data.length; i++) {
-    const row = attendanceSnapshot.data[i];
-    if (String(row[aHeaders.indexOf('status')] || '') !== 'present') continue;
-    const sessionId = String(row[aHeaders.indexOf('sessionId')] || '');
-    presentBySession[sessionId] = presentBySession[sessionId] || {};
-    presentBySession[sessionId][String(row[aHeaders.indexOf('participantId')] || '')] = true;
-  }
-
-  const cHeaders = checklistSnapshot.headers;
-  const checklistByParticipantInstrument = {};
-  for (let i = 1; i < checklistSnapshot.data.length; i++) {
-    const row = checklistSnapshot.data[i];
-    const key = String(row[cHeaders.indexOf('participantId')]) + '|' + String(row[cHeaders.indexOf('instrumentNumber')]);
-    checklistByParticipantInstrument[key] = { rowIndex: i, row: row };
-  }
-
-  return {
-    participants: participants,
-    participantsByRollout: participantsByRollout,
-    rolloutsById: rolloutsById,
-    completedRolloutsBySite: completedRolloutsBySite,
-    sessionsByDate: sessionsByDate,
-    sessionById: sessionById,
-    presentBySession: presentBySession,
-    aliases: aliases,
-    checklistSnapshot: checklistSnapshot,
-    checklistByParticipantInstrument: checklistByParticipantInstrument
-  };
-}
-
-function getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping) {
-  if (!responseDate) return { sessions: [], strategy: 'no_timestamp', notes: 'No response date available' };
-  const exact = datasets.sessionsByDate[responseDate] || [];
-  if (exact.length) return { sessions: exact, strategy: 'session_date', notes: 'Matched by exact session date ' + responseDate };
-  if (!mapping.allowLateResponses || !config.lateResponseWindowDays) {
-    return { sessions: [], strategy: 'no_session', notes: 'No DARTS session found for response date ' + responseDate };
-  }
-  const target = parseDateOnlyString(responseDate);
-  if (!target) return { sessions: [], strategy: 'no_timestamp', notes: 'Response date could not be parsed' };
-  const matches = [];
-  Object.keys(datasets.sessionsByDate).forEach(dateKey => {
-    const sessionDate = parseDateOnlyString(dateKey);
-    if (!sessionDate) return;
-    const diffDays = Math.abs(Math.round((target.getTime() - sessionDate.getTime()) / 86400000));
-    if (diffDays <= config.lateResponseWindowDays) {
-      datasets.sessionsByDate[dateKey].forEach(session => matches.push(session));
-    }
-  });
-  return matches.length
-    ? { sessions: matches, strategy: 'late_window', notes: 'Matched by late response window around ' + responseDate }
-    : { sessions: [], strategy: 'no_session', notes: 'No DARTS session found within late-response window for ' + responseDate };
-}
-
-function findSessionsForDigitalResponse(responseDate, datasets, config, mapping) {
-  return getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping).sessions;
-}
-
-function getRecentCompletedFallbackCandidates(responseDate, site, datasets, config) {
-  if (!config.enableRecentCompletedFallback) return { candidates: [], rollout: null, strategy: '', notes: '' };
-  const siteKey = String(site || '').toLowerCase();
-  if (!siteKey) return { candidates: [], rollout: null, strategy: '', notes: '' };
-  const responseDateKey = responseDate || getDateOnly(new Date());
-  const responseDateObj = parseDateOnlyString(responseDateKey);
-  const maxCohorts = Math.max(1, Number(config.recentCompletedFallbackMaxCohorts) || 1);
-  const graceDays = Math.max(0, Number(config.recentCompletedFallbackDays) || 0);
-  const recentRollouts = (datasets.completedRolloutsBySite[siteKey] || []).filter(rollout => {
-    if (!responseDateObj || !rollout.lastDate) return true;
-    if (compareDateStrings(rollout.lastDate, responseDateKey) > 0) return false;
-    const lastDate = parseDateOnlyString(rollout.lastDate);
-    if (!lastDate) return true;
-    const diffDays = Math.round((responseDateObj.getTime() - lastDate.getTime()) / 86400000);
-    return diffDays >= 0 && diffDays <= graceDays;
-  }).slice(0, maxCohorts);
-  const candidates = [];
-  recentRollouts.forEach(rollout => {
-    (datasets.participantsByRollout[String(rollout.rolloutId)] || []).forEach(participant => {
-      if (String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
-    });
-  });
-  const rollout = recentRollouts[0] || null;
-  return {
-    candidates: candidates,
-    rollout: rollout,
-    strategy: candidates.length ? 'recent_completed_cohort' : '',
-    notes: candidates.length && rollout ? 'Fallback searched recent completed cohort: ' + rollout.schoolName + ' (' + rollout.period + ' ' + rollout.year + ')' : ''
-  };
-}
-
-function buildDigitalResponseHash(values) {
-  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(values || []))).substring(0, 32);
-}
-
-function getExistingDigitalSyncKeys() {
-  ensureDigitalFormSyncSheets();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
-  const keys = {};
-  for (let i = 1; i < data.length; i++) {
-    const sourceWorkbookId = data[i][headers.indexOf('sourceWorkbookId')];
-    const sourceSheet = data[i][headers.indexOf('sourceSheetName')];
-    const sourceRow = data[i][headers.indexOf('sourceRowNumber')];
-    const hash = data[i][headers.indexOf('responseHash')];
-    keys[String(sourceWorkbookId) + '::' + String(sourceSheet) + '::' + String(sourceRow) + '::' + String(hash)] = true;
-  }
-  return keys;
-}
-
-function getDigitalSourceLink(workbookId, sheet, rowNumber) {
-  return 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + rowNumber + ':' + rowNumber;
-}
-
-function analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookId, datasets, config, site) {
-  const timestampCol = headers.indexOf(mapping.timestampColumn || 'Timestamp');
-  const nameCol = headers.indexOf(mapping.nameColumn || '');
-  const responseTimestamp = timestampCol >= 0 ? row[timestampCol] : '';
-  const rawName = nameCol >= 0 ? row[nameCol] : '';
-  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
-  const responseHash = buildDigitalResponseHash(row);
-  const sourceLink = getDigitalSourceLink(workbookId, sheet, rowNumber);
-  const normalizedName = normalizePersonNameForMatch(rawName);
-  const sessionMatch = getDigitalSessionMatchesForResponse(responseDate, datasets, config, mapping);
-  const sessions = sessionMatch.sessions || [];
-  const rolloutIds = {};
-  sessions.forEach(session => rolloutIds[String(session.rolloutId)] = true);
-  let candidates = [];
-  Object.keys(rolloutIds).forEach(rolloutId => {
-    (datasets.participantsByRollout[rolloutId] || []).forEach(participant => {
-      const sameSite = !site || String(participant.site || '').toLowerCase() === String(site || '').toLowerCase();
-      if (sameSite && String(participant.status || '').toLowerCase() !== 'withdrawn') candidates.push(participant);
-    });
-  });
-  const presentParticipantIds = {};
-  if (config.preferPresentAttendance) {
-    sessions.forEach(session => {
-      Object.assign(presentParticipantIds, datasets.presentBySession[String(session.sessionId)] || {});
-    });
-  }
-  let match = chooseBestParticipantMatch(rawName, candidates, datasets.aliases, presentParticipantIds);
-  let participant = match.participant;
-  let selectedSession = sessions[0] || null;
-  let matchStrategy = sessionMatch.strategy || 'session_date';
-  let strategyNotes = sessionMatch.notes || '';
-  let fallbackUsed = false;
-
-  if ((!participant || (match.score || 0) < config.reviewMatchThreshold) && config.enableRecentCompletedFallback) {
-    const fallback = getRecentCompletedFallbackCandidates(responseDate, site, datasets, config);
-    if (fallback.candidates.length) {
-      const fallbackMatch = chooseBestParticipantMatch(rawName, fallback.candidates, datasets.aliases, {});
-      if (!participant || fallbackMatch.score > (match.score || 0)) {
-        candidates = fallback.candidates;
-        match = fallbackMatch;
-        participant = match.participant;
-        selectedSession = null;
-        matchStrategy = fallback.strategy;
-        strategyNotes = fallback.notes;
-        fallbackUsed = true;
-      }
-    }
-  }
-
-  const checklistKey = participant ? String(participant.participantId) + '|' + String(mapping.instrumentNumber) : '';
-  const checklist = checklistKey ? datasets.checklistByParticipantInstrument[checklistKey] : null;
-  let matchStatus = 'unmatched';
-  let notes = match.reason || '';
-  const canAutoMatch = matchStrategy !== 'recent_completed_cohort' || config.allowRecentCompletedAutoMatch;
-  if (timestampCol === -1) notes = 'Timestamp column not found';
-  if (!mapping.nameColumn || nameCol === -1) notes = 'Name column not found';
-  else if (!sessions.length && !fallbackUsed) notes = strategyNotes || ('No DARTS session found for response date ' + (responseDate || '(blank)'));
-  else if (!participant) notes = 'No participant candidate matched';
-  else if (!checklist) notes = 'Matched participant, but checklist item was not found';
-  else if (match.score >= config.autoMatchThreshold && canAutoMatch) matchStatus = 'auto_matched';
-  else if (match.score >= config.reviewMatchThreshold) matchStatus = 'needs_review';
-  else matchStatus = 'unmatched';
-  if (strategyNotes) notes = notes ? notes + ' — ' + strategyNotes : strategyNotes;
-  if (matchStrategy === 'recent_completed_cohort' && !config.allowRecentCompletedAutoMatch && matchStatus === 'needs_review') {
-    notes += ' — Recent completed cohort fallback is configured for review-first matching.';
-  }
-
-  return {
-    sourceWorkbookId: workbookId,
-    sourceSheetName: sheet.getName(),
-    sourceRowNumber: rowNumber,
-    sourceTimestamp: responseTimestamp && !isNaN(new Date(responseTimestamp).getTime()) ? new Date(responseTimestamp).toISOString() : String(responseTimestamp || ''),
-    responseHash: responseHash,
-    rawName: rawName,
-    normalizedName: normalizedName,
-    instrumentNumber: mapping.instrumentNumber,
-    instrumentName: mapping.instrumentName,
-    candidateRolloutId: selectedSession ? selectedSession.rolloutId : (participant ? participant.rolloutId : ''),
-    candidateSessionId: selectedSession ? selectedSession.sessionId : '',
-    participantId: participant ? participant.participantId : '',
-    participantName: participant ? participant.fullName : '',
-    checklistId: checklist ? checklist.row[datasets.checklistSnapshot.headers.indexOf('checklistId')] : '',
-    checklistRowIndex: checklist ? checklist.rowIndex : -1,
-    matchStatus: matchStatus,
-    confidenceScore: match.score || 0,
-    matchedBy: matchStrategy,
-    notes: notes,
-    sourceLink: sourceLink
-  };
-}
-
-function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
-  const checklistSnapshot = datasets.checklistSnapshot;
-  const cData = checklistSnapshot.data;
-  const cHeaders = checklistSnapshot.headers;
-  const statusCol = cHeaders.indexOf('status');
-  const completedDateCol = cHeaders.indexOf('completedDate');
-  const completedByCol = cHeaders.indexOf('completedBy');
-  const notesCol = cHeaders.indexOf('notes');
-  const dataLinkCol = cHeaders.indexOf('dataLink');
-  const touchedParticipants = {};
-  let updated = 0;
-  matches.forEach(match => {
-    if (match.matchStatus !== 'auto_matched' || match.checklistRowIndex < 1) return;
-    const row = cData[match.checklistRowIndex];
-    if (!row) return;
-    if (String(row[statusCol] || '') === 'completed' && String(row[dataLinkCol] || '').indexOf(match.sourceLink) !== -1) {
-      match.matchStatus = 'duplicate';
-      return;
-    }
-    row[statusCol] = 'completed';
-    row[completedDateCol] = match.sourceTimestamp || new Date().toISOString();
-    row[completedByCol] = currentUserName || DIGITAL_FORM_SYNC_SYSTEM_USER;
-    const existingNotes = String(row[notesCol] || '').trim();
-    const syncNote = 'Auto-completed from Google Forms: ' + match.sourceSheetName + ' row ' + match.sourceRowNumber + ' (confidence ' + match.confidenceScore + '%).';
-    row[notesCol] = existingNotes ? (existingNotes + '\n' + syncNote) : syncNote;
-    if (dataLinkCol !== -1) row[dataLinkCol] = match.sourceLink;
-    touchedParticipants[String(match.participantId)] = true;
-    updated++;
-  });
-  if (updated > 0) {
-    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
-    invalidateSheetSnapshot('Checklist');
-    Object.keys(touchedParticipants).forEach(participantId => {
-      updateParticipantCompletion(participantId);
-      syncParticipantStatusFromChecklist(participantId);
-    });
-  }
-  return updated;
-}
-
-function appendDigitalSyncLogs(matches, dryRun, actorName) {
-  if (dryRun || !matches.length) return;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseSyncLog');
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
-  const rows = matches.map(match => {
-    const row = new Array(headers.length).fill('');
-    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
-    set('syncId', generateUUID());
-    set('sourceWorkbookId', match.sourceWorkbookId);
-    set('sourceSheetName', match.sourceSheetName);
-    set('sourceRowNumber', match.sourceRowNumber);
-    set('sourceTimestamp', match.sourceTimestamp);
-    set('responseHash', match.responseHash);
-    set('rawName', match.rawName);
-    set('normalizedName', match.normalizedName);
-    set('instrumentNumber', match.instrumentNumber);
-    set('instrumentName', match.instrumentName);
-    set('candidateRolloutId', match.candidateRolloutId);
-    set('candidateSessionId', match.candidateSessionId);
-    set('participantId', match.participantId);
-    set('checklistId', match.checklistId);
-    set('matchStatus', match.matchStatus);
-    set('confidenceScore', match.confidenceScore);
-    set('matchedBy', match.matchedBy || actorName || DIGITAL_FORM_SYNC_SYSTEM_USER);
-    set('matchedAt', new Date().toISOString());
-    set('notes', match.notes);
-    set('sourceLink', match.sourceLink);
-    return row;
-  });
-  appendRowsAsPlainText(sheet, rows);
-}
-
-function appendDigitalReviewQueue(matches, dryRun) {
-  if (dryRun) return 0;
-  const reviewMatches = matches.filter(match => match.matchStatus === 'needs_review' || match.matchStatus === 'unmatched');
-  if (!reviewMatches.length) return 0;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('FormResponseMatchQueue');
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
-  const existing = {};
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    existing[String(data[i][headers.indexOf('sourceSheetName')]) + '::' + String(data[i][headers.indexOf('sourceRowNumber')]) + '::' + String(data[i][headers.indexOf('responseHash')])] = true;
-  }
-  const rows = [];
-  reviewMatches.forEach(match => {
-    const key = match.sourceSheetName + '::' + match.sourceRowNumber + '::' + match.responseHash;
-    if (existing[key]) return;
-    const row = new Array(headers.length).fill('');
-    const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
-    set('queueId', generateUUID());
-    set('createdAt', new Date().toISOString());
-    set('sourceWorkbookId', match.sourceWorkbookId);
-    set('sourceSheetName', match.sourceSheetName);
-    set('sourceRowNumber', match.sourceRowNumber);
-    set('sourceTimestamp', match.sourceTimestamp);
-    set('rawName', match.rawName);
-    set('normalizedName', match.normalizedName);
-    set('instrumentNumber', match.instrumentNumber);
-    set('instrumentName', match.instrumentName);
-    set('candidateRolloutId', match.candidateRolloutId);
-    set('candidateSessionId', match.candidateSessionId);
-    set('suggestedParticipantId', match.participantId);
-    set('suggestedParticipantName', match.participantName);
-    set('confidenceScore', match.confidenceScore);
-    set('status', 'pending');
-    set('notes', match.notes);
-    set('sourceLink', match.sourceLink);
-    set('responseHash', match.responseHash);
-    rows.push(row);
-  });
-  appendRowsAsPlainText(sheet, rows);
-  return rows.length;
-}
-
-function runDigitalFormSync(token, options) {
-  const currentUser = token ? validateSession(token) : { fullName: DIGITAL_FORM_SYNC_SYSTEM_USER, role: 'admin', userId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID, username: DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME };
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  ensureDigitalFormSyncSheets();
-  const dryRun = !!(options && options.dryRun);
-  const force = !!(options && options.force);
-  const config = getDigitalFormSyncConfigInternal();
-  const workbookConfigs = [
-    { site: 'UGA', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.UGA },
-    { site: 'Missouri', workbookId: config.masterWorkbookIds && config.masterWorkbookIds.Missouri }
-  ].filter(item => item.workbookId);
-  if (!workbookConfigs.length && config.masterWorkbookId) workbookConfigs.push({ site: '', workbookId: config.masterWorkbookId });
-  if (!workbookConfigs.length) return { success: false, message: 'At least one site master workbook is not configured' };
-  const datasets = buildDigitalSyncDatasets();
-  const existingKeys = getExistingDigitalSyncKeys();
-  const watermarks = getDigitalFormSyncWatermarksInternal();
-  const matches = [];
-  const errors = [];
-  workbookConfigs.forEach(workbookConfig => {
-    const enabledMappings = getDigitalFormMappingsForSite(config, workbookConfig.site).filter(mapping => mapping.enabled);
-
-    let workbook;
-    try {
-      workbook = openDigitalFormWorkbook(workbookConfig.workbookId);
-    } catch (e) {
-      errors.push((workbookConfig.site || 'Master') + ' workbook: ' + e.message);
-      return;
-    }
-    enabledMappings.forEach(mapping => {
-      const sheet = workbook.getSheetByName(mapping.sheetName);
-      if (!sheet) { errors.push((workbookConfig.site || 'Master') + ' sheet not found: ' + mapping.sheetName); return; }
-      if (sheet.getLastRow() < 2) return;
-      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
-      const lastRow = sheet.getLastRow();
-      const watermarkKey = (workbookConfig.site || workbookConfig.workbookId) + '::' + mapping.sheetName;
-      const watermark = watermarks[watermarkKey] || {};
-      const startRow = force || dryRun ? 2 : Math.max(2, (Number(watermark.lastProcessedRow) || 1) + 1);
-      if (startRow > lastRow) return;
-      const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, headers.length).getValues();
-      values.forEach((row, offset) => {
-        const rowNumber = startRow + offset;
-        const analysis = analyzeDigitalFormResponse(mapping, sheet, headers, row, rowNumber, workbookConfig.workbookId, datasets, config, workbookConfig.site);
-        analysis.sourceSite = workbookConfig.site || '';
-        const existingKey = analysis.sourceWorkbookId + '::' + analysis.sourceSheetName + '::' + analysis.sourceRowNumber + '::' + analysis.responseHash;
-        if (existingKeys[existingKey] && !force) return;
-        matches.push(analysis);
-      });
-      if (!dryRun) {
-        watermarks[watermarkKey] = { lastProcessedRow: lastRow, lastProcessedAt: new Date().toISOString() };
-      }
-    });
-  });
-
-  const updatedCount = dryRun ? 0 : applyDigitalFormChecklistUpdates(matches, datasets, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
-  const queuedCount = appendDigitalReviewQueue(matches, dryRun);
-  appendDigitalSyncLogs(matches, dryRun, currentUser.fullName || DIGITAL_FORM_SYNC_SYSTEM_USER);
-  if (!dryRun) saveDigitalFormSyncWatermarksInternal(watermarks);
-
-  return {
-    success: true,
-    dryRun: dryRun,
-    processed: matches.length,
-    autoMatched: matches.filter(match => match.matchStatus === 'auto_matched').length,
-    needsReview: matches.filter(match => match.matchStatus === 'needs_review').length,
-    unmatched: matches.filter(match => match.matchStatus === 'unmatched').length,
-    duplicate: matches.filter(match => match.matchStatus === 'duplicate').length,
-    checklistUpdated: updatedCount,
-    queued: queuedCount,
-    errors: errors,
-    preview: matches.slice(0, 100)
-  };
-}
-
-function runDigitalFormSyncDryRun(token) {
-  return runDigitalFormSync(token, { dryRun: true, force: true });
-}
-
-function digitalFormSyncScheduledRun() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(1000)) return;
-  try {
-    const config = getDigitalFormSyncConfigInternal();
-    if (!config.enabled) return;
-    runDigitalFormSync(null, { dryRun: false });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function getDigitalFormSyncTriggerSummary() {
-  const triggers = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun');
-  return { enabled: triggers.length > 0, count: triggers.length };
-}
-
-function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
-  const currentUser = validateSession(token);
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  ScriptApp.getProjectTriggers().forEach(trigger => {
-    if (trigger.getHandlerFunction && trigger.getHandlerFunction() === 'digitalFormSyncScheduledRun') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-  if (enabled) {
-    const minutes = Math.max(5, Number(everyMinutes) || 10);
-    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
-  }
-  return { success: true, message: enabled ? 'Scheduled sync enabled' : 'Scheduled sync disabled', triggers: getDigitalFormSyncTriggerSummary() };
-}
-
-function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
-  const normalized = normalizePersonNameForMatch(alias);
-  if (!participantId || !normalized) return;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf('participantId')]) === String(participantId) && String(data[i][headers.indexOf('normalizedAlias')]) === normalized) return;
-  }
-  const row = new Array(headers.length).fill('');
-  const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
-  set('aliasId', generateUUID());
-  set('participantId', participantId);
-  set('alias', alias);
-  set('normalizedAlias', normalized);
-  set('createdAt', new Date().toISOString());
-  set('createdBy', createdBy || DIGITAL_FORM_SYNC_SYSTEM_USER);
-  set('notes', notes || 'Created from Digital Forms Sync review');
-  appendRowsAsPlainText(sheet, [row]);
-}
-
-function reviewDigitalFormMatch(token, queueId, action, participantId) {
-  const currentUser = validateSession(token);
-  if (!canAccessDigitalFormSync(currentUser)) return { success: false, message: 'Unauthorized' };
-  ensureDigitalFormSyncSheets();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const queueSheet = ss.getSheetByName('FormResponseMatchQueue');
-  const queueData = queueSheet.getDataRange().getValues();
-  const qHeaders = queueData[0] || [];
-  let rowIndex = -1;
-  let queueRow = null;
-  for (let i = 1; i < queueData.length; i++) {
-    if (String(queueData[i][qHeaders.indexOf('queueId')]) === String(queueId)) {
-      rowIndex = i + 1;
-      queueRow = queueData[i];
-      break;
-    }
-  }
-  if (!queueRow) return { success: false, message: 'Review item not found' };
-  if (action === 'ignore') {
-    queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('ignored');
-    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
-    queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
-    invalidateSheetSnapshot('FormResponseMatchQueue');
-    return { success: true, message: 'Response ignored' };
-  }
-  const targetParticipantId = participantId || queueRow[qHeaders.indexOf('suggestedParticipantId')];
-  if (!targetParticipantId) return { success: false, message: 'Participant ID is required to confirm this match' };
-  const instrumentNumber = queueRow[qHeaders.indexOf('instrumentNumber')];
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const cHeaders = checklistSnapshot.headers;
-  const cData = checklistSnapshot.data;
-  const enabledMap = {};
-  enabledNumbers.forEach(n => enabledMap[String(n)] = true);
-  const enabledItems = getGlobalProtocolItems().filter(i => enabledMap[String(i.number)]);
-
-  const rolloutParticipantIds = {};
-  for (let i = 1; i < pData.length; i++) {
-    if (String(pData[i][pHeaders.indexOf('rolloutId')]) === String(rolloutId)) {
-      rolloutParticipantIds[String(pData[i][pHeaders.indexOf('participantId')])] = true;
-    }
-  }
-
-  let deleted = 0;
-  for (let i = cData.length - 1; i >= 1; i--) {
-    const participantId = String(cData[i][cHeaders.indexOf('participantId')]);
-    if (!rolloutParticipantIds[participantId]) continue;
-    const number = String(cData[i][cHeaders.indexOf('instrumentNumber')]);
-    if (!enabledMap[number]) {
-      checklistSheet.deleteRow(i + 1);
-      invalidateSheetSnapshot('Checklist');
-      deleted++;
-    }
-  }
-  if (checklistRowIndex === -1) return { success: false, message: 'Checklist item not found for selected participant' };
-  const match = {
-    matchStatus: 'auto_matched',
-    checklistRowIndex: checklistRowIndex,
-    participantId: targetParticipantId,
-    sourceTimestamp: queueRow[qHeaders.indexOf('sourceTimestamp')],
-    sourceSheetName: queueRow[qHeaders.indexOf('sourceSheetName')],
-    sourceRowNumber: queueRow[qHeaders.indexOf('sourceRowNumber')],
-    confidenceScore: queueRow[qHeaders.indexOf('confidenceScore')],
-    sourceLink: queueRow[qHeaders.indexOf('sourceLink')]
-  };
-  applyDigitalFormChecklistUpdates([match], buildDigitalSyncDatasets(), currentUser.fullName);
-  queueSheet.getRange(rowIndex, qHeaders.indexOf('status') + 1).setValue('resolved');
-  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedBy') + 1).setValue(currentUser.fullName);
-  queueSheet.getRange(rowIndex, qHeaders.indexOf('reviewedAt') + 1).setValue(new Date().toISOString());
-  invalidateSheetSnapshot('FormResponseMatchQueue');
-  if (getDigitalFormSyncConfigInternal().saveAliasesOnReview) {
-    saveParticipantAliasInternal(targetParticipantId, queueRow[qHeaders.indexOf('rawName')], currentUser.fullName, 'Confirmed from form response review');
-  }
-
-  let added = 0;
-  const rowsToAppend = [];
-  Object.keys(rolloutParticipantIds).forEach(participantId => {
-    enabledItems.forEach(item => {
-      const key = participantId + '|' + String(item.number);
-      if (!existing[key]) {
-        const row = new Array(cHeaders.length).fill('');
-        const setChecklistValue = (header, value) => {
-          const idx = cHeaders.indexOf(header);
-          if (idx !== -1) row[idx] = value;
-        };
-        setChecklistValue('checklistId', generateUUID());
-        setChecklistValue('participantId', participantId);
-        setChecklistValue('instrumentNumber', item.number);
-        setChecklistValue('instrumentName', item.name);
-        setChecklistValue('category', item.category);
-        setChecklistValue('status', 'not_started');
-        rowsToAppend.push(row);
-        added++;
-      }
-    });
-  });
-  appendRowsAsPlainText(checklistSheet, rowsToAppend);
-  Object.keys(rolloutParticipantIds).forEach(participantId => updateParticipantCompletion(participantId));
-
-  return { added: added, deleted: deleted };
-}
-
 // ============================================
 // DATABASE INITIALIZATION
 // ============================================
@@ -3297,9 +2091,13 @@ function createSession(token, sessionData) {
 }
 
 /**
- * Create a new session for a user
+ * Create an authentication session record for a user.
+ *
+ * Note: current web sessions use the username token directly through
+ * validateSession(), but this helper is kept with a distinct name so it
+ * cannot collide with the study-session createSession(token, sessionData) API.
  */
-function createSession(userId) {
+function createAuthSession(userId) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sessionsSheet = ss.getSheetByName('Sessions');
   if (!sessionsSheet) {
@@ -5616,31 +4414,35 @@ const DEFAULT_ENROLLMENT_FIELDS = [
   { key: 'parent_guardian_dob', label: 'Parent/Guardian Date of Birth', type: 'date', required: false, core: true, placeholder: '' }
 ];
 
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const headers = checklistSnapshot.headers;
-  const data = checklistSnapshot.data;
+function slugifyEnrollmentFieldKey(label) {
+  return 'custom_' + String(label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .substring(0, 50);
+}
 
-  // Build participant site map for authorization checks from the cached participant snapshot.
-  const participantSiteMap = {};
-  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
-  const pData = participantSnapshot.data;
-  const pHeaders = participantSnapshot.headers;
-  for (let i = 1; i < pData.length; i++) {
-    participantSiteMap[pData[i][pHeaders.indexOf('participantId')]] = pData[i][pHeaders.indexOf('site')];
+function normalizeEnrollmentField(field, index, usedKeys) {
+  const typeWhitelist = ['text', 'textarea', 'number', 'date', 'email', 'phone', 'select'];
+  const label = String((field && field.label) || '').trim();
+  if (!label) return null;
+
+  let key = String((field && field.key) || '').trim();
+  if (!key) key = slugifyEnrollmentFieldKey(label);
+  key = key.replace(/[^a-zA-Z0-9_]/g, '_');
+  if (!key) key = 'custom_field_' + (index + 1);
+  if (ENROLLMENT_SYSTEM_HEADERS.indexOf(key) !== -1 || key === 'cohortName' || key === 'rolloutName') {
+    key = 'custom_' + key;
   }
 
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][headers.indexOf('checklistId')] === checklistId) {
-      const rowValues = data[i].slice(0, headers.length);
-      while (rowValues.length < headers.length) rowValues.push('');
-      const getRowValue = header => rowValues[headers.indexOf(header)];
-      const setRowValue = (header, value) => {
-        const idx = headers.indexOf(header);
-        if (idx !== -1) rowValues[idx] = value;
-      };
-      const participantId = getRowValue('participantId');
-      const instrumentName = getRowValue('instrumentName');
-      const participantSite = participantSiteMap[participantId];
+  const lowerUsed = usedKeys || {};
+  const baseKey = key;
+  let suffix = 2;
+  while (lowerUsed[key.toLowerCase()]) {
+    key = baseKey + '_' + suffix;
+    suffix++;
+  }
+  lowerUsed[key.toLowerCase()] = true;
 
   const type = typeWhitelist.indexOf(String((field && field.type) || 'text')) !== -1
     ? String(field.type)
@@ -5659,31 +4461,38 @@ const DEFAULT_ENROLLMENT_FIELDS = [
   };
 }
 
-      // Update status
-      if (updateData.status) {
-        setRowValue('status', updateData.status);
-        updateDetails.push('status -> ' + updateData.status);
+function getEnrollmentFieldsInternal() {
+  const used = {};
+  const defaults = DEFAULT_ENROLLMENT_FIELDS.map((field, idx) => normalizeEnrollmentField(field, idx, used)).filter(Boolean);
+  const defaultByKey = {};
+  defaults.forEach(field => defaultByKey[field.key] = field);
 
-        // If marking as completed, set the date and user
-        if (updateData.status === 'completed') {
-          setRowValue('completedDate', new Date().toISOString());
-          setRowValue('completedBy', currentUser.fullName);
-        } else {
-          // Clear completion info if status changed to not_started or missing
-          setRowValue('completedDate', '');
-          setRowValue('completedBy', '');
-        }
-      }
+  const configMap = getConfigMap();
+  const raw = configMap.ENROLLMENT_FIELDS;
+  if (!raw) return defaults;
 
-      // Update notes
-      if (updateData.notes !== undefined) {
-        setRowValue('notes', updateData.notes);
-        updateDetails.push('notes updated');
-      }
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) return defaults;
 
-      if (updateData.dataLink !== undefined) {
-        setRowValue('dataLink', updateData.dataLink);
-        updateDetails.push(updateData.dataLink ? 'data link saved' : 'data link removed');
+    const normalizedUsed = {};
+    const normalized = [];
+    parsed.forEach((field, idx) => {
+      const merged = defaultByKey[field && field.key]
+        ? Object.assign({}, defaultByKey[field.key], field, { key: field.key, core: true })
+        : field;
+      const normalizedField = normalizeEnrollmentField(merged, idx, normalizedUsed);
+      if (normalizedField) normalized.push(normalizedField);
+    });
+
+    if (!normalized.some(field => field.key === 'fullName')) {
+      normalized.unshift(Object.assign({}, defaultByKey.fullName));
+    }
+    normalized.forEach(field => {
+      if (field.key === 'fullName') {
+        field.required = true;
+        field.core = true;
+        field.type = 'text';
       }
     });
     return normalized;
@@ -5692,12 +4501,11 @@ const DEFAULT_ENROLLMENT_FIELDS = [
   }
 }
 
-      checklistSheet.getRange(i + 1, 1, 1, headers.length).setValues([rowValues]);
-      invalidateSheetSnapshot('Checklist');
-
-      // Update participant's completion percentage
-      updateParticipantCompletion(participantId);
-      syncParticipantStatusFromChecklist(participantId);
+function getEnrollmentFields(token) {
+  const currentUser = validateSession(token);
+  if (!currentUser) return { success: false, message: 'Unauthorized' };
+  return { success: true, fields: getEnrollmentFieldsInternal() };
+}
 
 function saveEnrollmentFields(token, fields) {
   const currentUser = validateSession(token);
@@ -5883,10 +4691,10 @@ function buildParticipantRow(headers, data) {
   setValue('notes', data.notes || '');
   setValue('completionPercentage', data.completionPercentage || 0);
 
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(data);
+  const enrollmentFieldValuesForRow = getEnrollmentFieldValueMapFromData(data);
   getEnrollmentFieldsInternal().forEach(field => {
-    if (enrollmentValues[field.key] !== undefined) {
-      setValue(field.key, enrollmentValues[field.key]);
+    if (enrollmentFieldValuesForRow[field.key] !== undefined) {
+      setValue(field.key, enrollmentFieldValuesForRow[field.key]);
     }
   });
 
@@ -6091,13 +4899,13 @@ function enrollParticipant(token, participantData) {
   }
 
   const enrollmentFields = getEnrollmentFieldsInternal();
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
-  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
-  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
-  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
-  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+  const enrollmentFieldValuesForEnrollment = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentFieldValuesForEnrollment.fullName = String(enrollmentFieldValuesForEnrollment.fullName || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_email = String(enrollmentFieldValuesForEnrollment.parent_guardian_email || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_dob = String(enrollmentFieldValuesForEnrollment.parent_guardian_dob || '').trim();
+  enrollmentFieldValuesForEnrollment.parent_guardian_phone = String(enrollmentFieldValuesForEnrollment.parent_guardian_phone || '').trim();
 
-  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForEnrollment);
   if (enrollmentErrors.length) {
     return { success: false, message: enrollmentErrors.join('; ') };
   }
@@ -6105,9 +4913,9 @@ function enrollParticipant(token, participantData) {
     return { success: false, message: 'Study cohort is required' };
   }
 
-  const parentEmail = enrollmentValues.parent_guardian_email;
-  const parentDob = enrollmentValues.parent_guardian_dob;
-  const parentPhone = enrollmentValues.parent_guardian_phone;
+  const parentEmail = enrollmentFieldValuesForEnrollment.parent_guardian_email;
+  const parentDob = enrollmentFieldValuesForEnrollment.parent_guardian_dob;
+  const parentPhone = enrollmentFieldValuesForEnrollment.parent_guardian_phone;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
@@ -6138,11 +4946,11 @@ function enrollParticipant(token, participantData) {
   // Add participant
   const row = buildParticipantRow(participantHeaders, {
     participantId: participantId,
-    fullName: enrollmentValues.fullName,
-    enrollmentFields: enrollmentValues,
-    parentGuardianNames: enrollmentValues.parent_guardian_names,
+    fullName: enrollmentFieldValuesForEnrollment.fullName,
+    enrollmentFields: enrollmentFieldValuesForEnrollment,
+    parentGuardianNames: enrollmentFieldValuesForEnrollment.parent_guardian_names,
     parentGuardianPhone: parentPhone,
-    parentGuardianAddress: enrollmentValues.parent_guardian_address,
+    parentGuardianAddress: enrollmentFieldValuesForEnrollment.parent_guardian_address,
     parentGuardianEmail: parentEmail,
     parentGuardianDob: parentDob,
     site: cohort.site,
@@ -6177,7 +4985,7 @@ function enrollParticipant(token, participantData) {
   appendRowsAsPlainText(checklistSheet, checklistRows);
 
   logActivity(currentUser.userId, currentUser.fullName, 'ENROLL_PARTICIPANT', 'participant', participantId,
-    'Enrolled: ' + enrollmentValues.fullName);
+    'Enrolled: ' + enrollmentFieldValuesForEnrollment.fullName);
 
   return {
     success: true,
@@ -6212,20 +5020,20 @@ function updateParticipant(token, participantId, participantData) {
   const data = participantSnapshot.data;
 
   const enrollmentFields = getEnrollmentFieldsInternal();
-  const enrollmentValues = getEnrollmentFieldValueMapFromData(participantData || {});
-  enrollmentValues.fullName = String(enrollmentValues.fullName || '').trim();
-  enrollmentValues.parent_guardian_email = String(enrollmentValues.parent_guardian_email || '').trim();
-  enrollmentValues.parent_guardian_dob = String(enrollmentValues.parent_guardian_dob || '').trim();
-  enrollmentValues.parent_guardian_phone = String(enrollmentValues.parent_guardian_phone || '').trim();
+  const enrollmentFieldValuesForUpdate = getEnrollmentFieldValueMapFromData(participantData || {});
+  enrollmentFieldValuesForUpdate.fullName = String(enrollmentFieldValuesForUpdate.fullName || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_email = String(enrollmentFieldValuesForUpdate.parent_guardian_email || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_dob = String(enrollmentFieldValuesForUpdate.parent_guardian_dob || '').trim();
+  enrollmentFieldValuesForUpdate.parent_guardian_phone = String(enrollmentFieldValuesForUpdate.parent_guardian_phone || '').trim();
 
-  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+  const enrollmentErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForUpdate);
   if (enrollmentErrors.length) {
     return { success: false, message: enrollmentErrors.join('; ') };
   }
 
-  const parentEmail = enrollmentValues.parent_guardian_email;
-  const parentDob = enrollmentValues.parent_guardian_dob;
-  const parentPhone = enrollmentValues.parent_guardian_phone;
+  const parentEmail = enrollmentFieldValuesForUpdate.parent_guardian_email;
+  const parentDob = enrollmentFieldValuesForUpdate.parent_guardian_dob;
+  const parentPhone = enrollmentFieldValuesForUpdate.parent_guardian_phone;
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('participantId')] === participantId) {
@@ -6248,7 +5056,7 @@ function updateParticipant(token, participantId, participantData) {
       if (participantData.parentGuardianEmail !== undefined) setRowValue('parent_guardian_email', parentEmail);
       if (participantData.parentGuardianDob !== undefined) setRowValue('parent_guardian_dob', parentDob);
       enrollmentFields.forEach(field => {
-        if (enrollmentValues[field.key] !== undefined) setRowValue(field.key, enrollmentValues[field.key]);
+        if (enrollmentFieldValuesForUpdate[field.key] !== undefined) setRowValue(field.key, enrollmentFieldValuesForUpdate[field.key]);
       });
       if (participantData.status) setRowValue('status', participantData.status);
       if (participantData.notes !== undefined) setRowValue('notes', participantData.notes);
@@ -6391,9 +5199,25 @@ function generateEnrollmentTemplate(token) {
   });
   templateSheet.getRange(1, headerValues.length).setNote('Choose the cohort/rollout for each participant (required).');
 
-  if (hasChanges) {
-    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
-    invalidateSheetSnapshot('Checklist');
+  // Helper sheet with cohort list
+  const helperSheet = tempSs.insertSheet('Cohorts');
+  if (cohorts.length > 0) {
+    helperSheet.getRange(1, 1, cohorts.length, 1).setValues(
+      cohorts.map(r => [`${r.schoolName} (${r.period} ${r.year})`])
+    );
+  }
+  helperSheet.hideSheet();
+
+  // Data validation for cohort dropdown (apply to reasonable range)
+  const lastRow = Math.max(2, cohorts.length + 5);
+  const cohortColumnIndex = headerValues.indexOf('cohortName') + 1;
+  if (cohorts.length > 0) {
+    const validationRange = helperSheet.getRange(1, 1, cohorts.length, 1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(validationRange, true)
+      .setAllowInvalid(false)
+      .build();
+    templateSheet.getRange(2, cohortColumnIndex, lastRow, 1).setDataValidation(rule);
   }
 
   // Auto-size
@@ -6526,17 +5350,17 @@ function importParticipantsCSV(token, fileData) {
     const row = rows[r];
     const rowNumber = r + 1; // 1-based CSV row
 
-    const enrollmentValues = {};
+    const enrollmentFieldValuesForImport = {};
     enrollmentFields.forEach(field => {
-      enrollmentValues[field.key] = (getValue(row, field.key) || '').trim();
+      enrollmentFieldValuesForImport[field.key] = (getValue(row, field.key) || '').trim();
     });
-    const fullName = String(enrollmentValues.fullName || '').trim();
+    const fullName = String(enrollmentFieldValuesForImport.fullName || '').trim();
     const rolloutName = (getValue(row, cohortColumn) || '').trim();
-    const parentGuardianNames = String(enrollmentValues.parent_guardian_names || '').trim();
-    const parentGuardianPhone = String(enrollmentValues.parent_guardian_phone || '').trim();
-    const parentGuardianAddress = String(enrollmentValues.parent_guardian_address || '').trim();
-    const parentGuardianEmail = String(enrollmentValues.parent_guardian_email || '').trim();
-    const parentGuardianDob = String(enrollmentValues.parent_guardian_dob || '').trim();
+    const parentGuardianNames = String(enrollmentFieldValuesForImport.parent_guardian_names || '').trim();
+    const parentGuardianPhone = String(enrollmentFieldValuesForImport.parent_guardian_phone || '').trim();
+    const parentGuardianAddress = String(enrollmentFieldValuesForImport.parent_guardian_address || '').trim();
+    const parentGuardianEmail = String(enrollmentFieldValuesForImport.parent_guardian_email || '').trim();
+    const parentGuardianDob = String(enrollmentFieldValuesForImport.parent_guardian_dob || '').trim();
 
     if (!fullName && !rolloutName) {
       summary.skipped++;
@@ -6545,7 +5369,7 @@ function importParticipantsCSV(token, fileData) {
 
     summary.processed++;
 
-    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentValues);
+    const rowErrors = validateEnrollmentFieldValues(enrollmentFields, enrollmentFieldValuesForImport);
     if (!rolloutName) {
       rowErrors.push('cohortName is required');
     }
@@ -6574,7 +5398,7 @@ function importParticipantsCSV(token, fileData) {
     const rowValues = buildParticipantRow(participantHeaders, {
       participantId: newParticipantId,
       fullName: fullName,
-      enrollmentFields: enrollmentValues,
+      enrollmentFields: enrollmentFieldValuesForImport,
       parentGuardianNames: parentGuardianNames,
       parentGuardianPhone: parentGuardianPhone,
       parentGuardianAddress: parentGuardianAddress,
@@ -7860,1034 +6684,6 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       sessionsByCohort[rolloutId].push(session);
       sessionLookup[session.sessionId] = session;
     }
-  }
-
-  const attendanceMap = {};
-  if (attendanceSheet) {
-    const aData = attendanceSheet.getDataRange().getValues();
-    const aHeaders = aData[0];
-    for (let i = 1; i < aData.length; i++) {
-      const sessionId = aData[i][aHeaders.indexOf('sessionId')];
-      if (!sessionLookup[sessionId]) continue;
-      const participantId = aData[i][aHeaders.indexOf('participantId')];
-      if (!attendanceMap[sessionId]) {
-        attendanceMap[sessionId] = {};
-      }
-      attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
-    }
-  }
-
-  const attendanceSummary = buildAttendanceSummary(
-    participants,
-    sessionsByCohort,
-    attendanceMap,
-    effectiveCohort
-  );
-
-  const protocolSummary = buildProtocolSummary(
-    participants,
-    checklistSheet
-  );
-
-  const attentionItems = buildAttentionItems(
-    attendanceSummary,
-    protocolSummary,
-    participants,
-    effectiveCohort
-  );
-
-  const comparison = buildComparisonSummary(
-    effectiveSite,
-    effectiveCohort,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet,
-    cohorts
-  );
-
-  const operations = buildOperationsSummary(
-    effectiveSite,
-    effectiveCohort,
-    cohorts,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet
-  );
-
-  const aboutSummary = buildAboutSummary(
-    effectiveSite,
-    effectiveCohort,
-    totalEnrolled,
-    cohorts,
-    participantsBySite
-  );
-
-  return {
-    success: true,
-    snapshot: {
-      contextLine: contextLine,
-      meta: {
-        generatedAt: new Date().toISOString(),
-        exportReady: totalEnrolled > 0
-      },
-      kpis: {
-        totalEnrolled: totalEnrolled,
-        activeEnrollments: activeEnrollments,
-        averageAttendance: attendanceSummary.averageAttendance,
-        participationStatus: attendanceSummary.participationStatus,
-        atRiskParticipants: attendanceSummary.atRiskParticipants,
-        protocolCompletionRate: protocolSummary.completionRate,
-        sessionsCompleted: attendanceSummary.sessionsCompleted,
-        totalSessions: attendanceSummary.totalSessions
-      },
-      attendance: attendanceSummary,
-      protocol: protocolSummary,
-      attention: attentionItems,
-      comparison: comparison,
-      operations: operations,
-      about: aboutSummary
-    }
-  };
-}
-
-
-function buildOperationsSummary(
-  effectiveSite,
-  effectiveCohort,
-  cohorts,
-  participantsBySite,
-  participantsByCohort,
-  sessionsByCohort,
-  attendanceMap,
-  checklistSheet
-) {
-  const today = getDateOnly(new Date());
-  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
-  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
-
-  const cohortOperations = visibleCohorts.map(cohort => {
-    const participants = participantsByCohort[cohort.rolloutId] || [];
-    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
-    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
-    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
-
-    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
-    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
-      session,
-      participants,
-      attendanceMap,
-      today,
-      protocolSummary,
-      sessionProtocolMap[session.sessionId]
-    ));
-    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
-    const completedOrLastSessions = sessionProgress
-      .filter(session => session.sessionDate)
-      .slice()
-      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
-    const lastSession = completedOrLastSessions[0] || null;
-
-    return {
-      rolloutId: cohort.rolloutId,
-      site: cohort.site,
-      label: formatCohortDisplayLabel(cohort),
-      schoolName: cohort.schoolName,
-      period: cohort.period,
-      year: cohort.year,
-      sourceStatus: cohort.status,
-      lifecycle: lifecycle,
-      participantCount: participants.length,
-      activeParticipants: participants.filter(p => p.status === 'active').length,
-      completedParticipants: participants.filter(p => p.status === 'completed').length,
-      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
-      totalSessions: sessionProgress.length,
-      nextSession: nextSession,
-      lastSession: lastSession,
-      lastSessionDate: lastSession ? lastSession.sessionDate : '',
-      sessions: sessionProgress
-    };
-  });
-
-  const sites = ['UGA', 'Missouri'].map(site => {
-    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
-    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
-    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    return {
-      site: site,
-      cohortCount: siteCohorts.length,
-      participantCount: participants.length,
-      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
-      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
-      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      cohorts: siteCohorts
-    };
-  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
-
-  const upcomingCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'upcoming')
-    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
-    .slice(0, 6);
-
-  const activeCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'inProgress')
-    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
-
-  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'completed')
-    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
-    .slice(0, 1);
-
-  return {
-    sites: sites,
-    cohorts: cohortOperations,
-    lifecycleCounts: lifecycleCounts,
-    activeCohorts: activeCohorts,
-    recentCompletedCohorts: recentCompletedCohorts,
-    upcomingCohorts: upcomingCohorts,
-    totalCohorts: cohortOperations.length
-  };
-}
-
-function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
-  let present = 0;
-  let absent = 0;
-  let excused = 0;
-  let notMarked = 0;
-  const records = attendanceMap[session.sessionId] || {};
-
-  participants.forEach(participant => {
-    const status = records[participant.participantId];
-    if (status === 'present') present++;
-    else if (status === 'absent') absent++;
-    else if (status === 'excused') excused++;
-    else notMarked++;
-  });
-
-  const participantCount = participants.length;
-  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
-  const markedCount = present + absent + excused;
-  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
-  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-  const timing = resolveSessionTiming(session, sessionDateOnly, today);
-
-  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
-
-  return {
-    sessionId: session.sessionId,
-    sessionNumber: session.sessionNumber,
-    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
-    sessionDate: session.sessionDate,
-    sourceStatus: session.status,
-    timing: timing,
-    present: present,
-    absent: absent,
-    excused: excused,
-    notMarked: notMarked,
-    markedCount: markedCount,
-    participantCount: participantCount,
-    attendanceRate: attendanceRate,
-    markedRate: markedRate,
-    protocolCompletion: protocolSummary.completionRate,
-    protocolDayCompleted: protocolDaySummary.completed || 0,
-    protocolDayTotal: protocolDaySummary.total || 0,
-    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
-    protocolDayItems: protocolDaySummary.items || []
-  };
-}
-
-function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
-  const summaries = {};
-  (sessions || []).forEach(session => {
-    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
-  });
-
-  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
-    return summaries;
-  }
-
-  const participantIds = new Set(participants.map(p => String(p.participantId)));
-  const participantRolloutMap = {};
-  const rolloutAllowedNumbersMap = {};
-  participants.forEach(participant => {
-    const participantId = String(participant.participantId);
-    const rolloutId = String(participant.rolloutId || '');
-    participantRolloutMap[participantId] = rolloutId;
-    if (!rolloutAllowedNumbersMap[rolloutId]) {
-      const allowed = {};
-      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
-        allowed[String(item.number)] = true;
-      });
-      rolloutAllowedNumbersMap[rolloutId] = allowed;
-    }
-  });
-
-  const sessionIdsByDate = {};
-  sessions.forEach(session => {
-    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-    if (!sessionDateOnly) return;
-    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
-    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
-  });
-
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const cData = checklistSnapshot.data;
-  const cHeaders = checklistSnapshot.headers;
-  const participantCol = cHeaders.indexOf('participantId');
-  const instrumentCol = cHeaders.indexOf('instrumentNumber');
-  const instrumentNameCol = cHeaders.indexOf('instrumentName');
-  const statusCol = cHeaders.indexOf('status');
-  const completedDateCol = cHeaders.indexOf('completedDate');
-  const totalsByInstrument = {};
-  const namesByInstrument = {};
-  const completedBySession = {};
-
-  Object.keys(summaries).forEach(sessionId => {
-    completedBySession[sessionId] = {};
-  });
-
-  for (let i = 1; i < cData.length; i++) {
-    const participantId = String(cData[i][participantCol]);
-    if (!participantIds.has(participantId)) continue;
-
-    const rolloutId = participantRolloutMap[participantId] || '';
-    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
-    const instrumentNumber = String(cData[i][instrumentCol]);
-    if (!allowedMap[instrumentNumber]) continue;
-
-    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
-    namesByInstrument[instrumentNumber] = instrumentName;
-    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
-
-    const status = cData[i][statusCol];
-    if (status !== 'completed') continue;
-
-    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
-    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
-    matchingSessionIds.forEach(sessionId => {
-      if (!completedBySession[sessionId]) return;
-      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
-    });
-  }
-
-  Object.keys(summaries).forEach(sessionId => {
-    const completedMap = completedBySession[sessionId] || {};
-    const items = Object.keys(completedMap)
-      .map(instrumentNumber => {
-        const total = totalsByInstrument[instrumentNumber] || participants.length;
-        const completed = completedMap[instrumentNumber] || 0;
-        return {
-          number: Number(instrumentNumber),
-          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
-          completed: completed,
-          total: total,
-          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
-        };
-      })
-      .filter(item => item.completed > 0)
-      .sort((a, b) => a.number - b.number);
-
-    summaries[sessionId].items = items;
-    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
-    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
-    summaries[sessionId].completionRate = summaries[sessionId].total > 0
-      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
-      : 0;
-  });
-
-  return summaries;
-}
-
-function resolveCohortLifecycle(cohort, sessions, today) {
-  if (!sessions || sessions.length === 0) {
-    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
-  }
-
-  const datedSessions = sessions
-    .map(session => getDateOnly(parseSessionDate(session.sessionDate)))
-    .filter(Boolean);
-
-  const completedByStatus = sessions.filter(session => String(session.status || '').toLowerCase() === 'completed').length;
-  if (completedByStatus === sessions.length) {
-    return { key: 'completed', label: 'Completed', tone: 'success', detail: 'All sessions marked complete' };
-  }
-
-  if (datedSessions.length === sessions.length) {
-    const firstDate = datedSessions[0];
-    const lastDate = datedSessions[datedSessions.length - 1];
-    if (firstDate > today) {
-      return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Starts ' + formatDashboardDate(firstDate) };
-    }
-    if (lastDate < today) {
-      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
-    }
-    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
-  }
-
-  if (String(cohort.status || '').toLowerCase() === 'active') {
-    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
-  }
-
-  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
-}
-
-function resolveSessionTiming(session, sessionDateOnly, today) {
-  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
-  if (!sessionDateOnly) return 'unscheduled';
-  if (sessionDateOnly < today) return 'completed';
-  if (sessionDateOnly === today) return 'today';
-  return 'upcoming';
-}
-
-function sortSessionsByNumberAndDate(a, b) {
-  const aNumber = Number(a.sessionNumber) || 0;
-  const bNumber = Number(b.sessionNumber) || 0;
-  if (aNumber !== bNumber) return aNumber - bNumber;
-  return compareDateStrings(a.sessionDate, b.sessionDate);
-}
-
-function compareDateStrings(a, b) {
-  const aDate = getDateOnly(parseSessionDate(a));
-  const bDate = getDateOnly(parseSessionDate(b));
-  if (!aDate && !bDate) return 0;
-  if (!aDate) return 1;
-  if (!bDate) return -1;
-  return aDate.localeCompare(bDate);
-}
-
-function getDateOnly(date) {
-  if (!date || isNaN(date.getTime())) return '';
-  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-}
-
-function formatDashboardDate(dateString) {
-  if (!dateString) return 'TBD';
-  const parsed = parseSessionDate(dateString);
-  if (!parsed) return dateString;
-  return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'MMM d, yyyy');
-}
-
-
-function buildOperationsSummary(
-  effectiveSite,
-  effectiveCohort,
-  cohorts,
-  participantsBySite,
-  participantsByCohort,
-  sessionsByCohort,
-  attendanceMap,
-  checklistSheet
-) {
-  const today = getDateOnly(new Date());
-  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
-  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
-
-  const cohortOperations = visibleCohorts.map(cohort => {
-    const participants = participantsByCohort[cohort.rolloutId] || [];
-    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
-    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
-    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
-
-    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
-    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
-      session,
-      participants,
-      attendanceMap,
-      today,
-      protocolSummary,
-      sessionProtocolMap[session.sessionId]
-    ));
-    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
-    const completedOrLastSessions = sessionProgress
-      .filter(session => session.sessionDate)
-      .slice()
-      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
-    const lastSession = completedOrLastSessions[0] || null;
-
-    return {
-      rolloutId: cohort.rolloutId,
-      site: cohort.site,
-      label: formatCohortDisplayLabel(cohort),
-      schoolName: cohort.schoolName,
-      period: cohort.period,
-      year: cohort.year,
-      sourceStatus: cohort.status,
-      lifecycle: lifecycle,
-      participantCount: participants.length,
-      activeParticipants: participants.filter(p => p.status === 'active').length,
-      completedParticipants: participants.filter(p => p.status === 'completed').length,
-      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
-      totalSessions: sessionProgress.length,
-      nextSession: nextSession,
-      lastSession: lastSession,
-      lastSessionDate: lastSession ? lastSession.sessionDate : '',
-      sessions: sessionProgress
-    };
-  });
-
-  const sites = ['UGA', 'Missouri'].map(site => {
-    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
-    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
-    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    return {
-      site: site,
-      cohortCount: siteCohorts.length,
-      participantCount: participants.length,
-      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
-      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
-      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      cohorts: siteCohorts
-    };
-  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
-
-  const upcomingCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'upcoming')
-    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
-    .slice(0, 6);
-
-  const activeCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'inProgress')
-    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
-
-  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'completed')
-    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
-    .slice(0, 1);
-
-  return {
-    sites: sites,
-    cohorts: cohortOperations,
-    lifecycleCounts: lifecycleCounts,
-    activeCohorts: activeCohorts,
-    recentCompletedCohorts: recentCompletedCohorts,
-    upcomingCohorts: upcomingCohorts,
-    totalCohorts: cohortOperations.length
-  };
-}
-
-function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
-  let present = 0;
-  let absent = 0;
-  let excused = 0;
-  let notMarked = 0;
-  const records = attendanceMap[session.sessionId] || {};
-
-  participants.forEach(participant => {
-    const status = records[participant.participantId];
-    if (status === 'present') present++;
-    else if (status === 'absent') absent++;
-    else if (status === 'excused') excused++;
-    else notMarked++;
-  });
-
-  const participantCount = participants.length;
-  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
-  const markedCount = present + absent + excused;
-  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
-  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-  const timing = resolveSessionTiming(session, sessionDateOnly, today);
-
-  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
-
-  return {
-    sessionId: session.sessionId,
-    sessionNumber: session.sessionNumber,
-    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
-    sessionDate: session.sessionDate,
-    sourceStatus: session.status,
-    timing: timing,
-    present: present,
-    absent: absent,
-    excused: excused,
-    notMarked: notMarked,
-    markedCount: markedCount,
-    participantCount: participantCount,
-    attendanceRate: attendanceRate,
-    markedRate: markedRate,
-    protocolCompletion: protocolSummary.completionRate,
-    protocolDayCompleted: protocolDaySummary.completed || 0,
-    protocolDayTotal: protocolDaySummary.total || 0,
-    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
-    protocolDayItems: protocolDaySummary.items || []
-  };
-}
-
-function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
-  const summaries = {};
-  (sessions || []).forEach(session => {
-    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
-  });
-
-  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
-    return summaries;
-  }
-
-  const participantIds = new Set(participants.map(p => String(p.participantId)));
-  const participantRolloutMap = {};
-  const rolloutAllowedNumbersMap = {};
-  participants.forEach(participant => {
-    const participantId = String(participant.participantId);
-    const rolloutId = String(participant.rolloutId || '');
-    participantRolloutMap[participantId] = rolloutId;
-    if (!rolloutAllowedNumbersMap[rolloutId]) {
-      const allowed = {};
-      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
-        allowed[String(item.number)] = true;
-      });
-      rolloutAllowedNumbersMap[rolloutId] = allowed;
-    }
-  });
-
-  const sessionIdsByDate = {};
-  sessions.forEach(session => {
-    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-    if (!sessionDateOnly) return;
-    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
-    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
-  });
-
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const cData = checklistSnapshot.data;
-  const cHeaders = checklistSnapshot.headers;
-  const participantCol = cHeaders.indexOf('participantId');
-  const instrumentCol = cHeaders.indexOf('instrumentNumber');
-  const instrumentNameCol = cHeaders.indexOf('instrumentName');
-  const statusCol = cHeaders.indexOf('status');
-  const completedDateCol = cHeaders.indexOf('completedDate');
-  const totalsByInstrument = {};
-  const namesByInstrument = {};
-  const completedBySession = {};
-
-  Object.keys(summaries).forEach(sessionId => {
-    completedBySession[sessionId] = {};
-  });
-
-  for (let i = 1; i < cData.length; i++) {
-    const participantId = String(cData[i][participantCol]);
-    if (!participantIds.has(participantId)) continue;
-
-    const rolloutId = participantRolloutMap[participantId] || '';
-    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
-    const instrumentNumber = String(cData[i][instrumentCol]);
-    if (!allowedMap[instrumentNumber]) continue;
-
-    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
-    namesByInstrument[instrumentNumber] = instrumentName;
-    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
-
-    const status = cData[i][statusCol];
-    if (status !== 'completed') continue;
-
-    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
-    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
-    matchingSessionIds.forEach(sessionId => {
-      if (!completedBySession[sessionId]) return;
-      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
-    });
-  }
-
-  Object.keys(summaries).forEach(sessionId => {
-    const completedMap = completedBySession[sessionId] || {};
-    const items = Object.keys(completedMap)
-      .map(instrumentNumber => {
-        const total = totalsByInstrument[instrumentNumber] || participants.length;
-        const completed = completedMap[instrumentNumber] || 0;
-        return {
-          number: Number(instrumentNumber),
-          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
-          completed: completed,
-          total: total,
-          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
-        };
-      })
-      .filter(item => item.completed > 0)
-      .sort((a, b) => a.number - b.number);
-
-    summaries[sessionId].items = items;
-    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
-    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
-    summaries[sessionId].completionRate = summaries[sessionId].total > 0
-      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
-      : 0;
-  });
-
-  return summaries;
-}
-
-function resolveCohortLifecycle(cohort, sessions, today) {
-  if (!sessions || sessions.length === 0) {
-    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
-  }
-
-  const attendanceMap = {};
-  if (attendanceSheet) {
-    const aData = attendanceSheet.getDataRange().getValues();
-    const aHeaders = aData[0];
-    for (let i = 1; i < aData.length; i++) {
-      const sessionId = aData[i][aHeaders.indexOf('sessionId')];
-      if (!sessionLookup[sessionId]) continue;
-      const participantId = aData[i][aHeaders.indexOf('participantId')];
-      if (!attendanceMap[sessionId]) {
-        attendanceMap[sessionId] = {};
-      }
-      attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
-    }
-  }
-
-  const attendanceSummary = buildAttendanceSummary(
-    participants,
-    sessionsByCohort,
-    attendanceMap,
-    effectiveCohort
-  );
-
-  const protocolSummary = buildProtocolSummary(
-    participants,
-    checklistSheet
-  );
-
-  const attentionItems = buildAttentionItems(
-    attendanceSummary,
-    protocolSummary,
-    participants,
-    effectiveCohort
-  );
-
-  const comparison = buildComparisonSummary(
-    effectiveSite,
-    effectiveCohort,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet,
-    cohorts
-  );
-
-  const operations = buildOperationsSummary(
-    effectiveSite,
-    effectiveCohort,
-    cohorts,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet
-  );
-
-  const aboutSummary = buildAboutSummary(
-    effectiveSite,
-    effectiveCohort,
-    totalEnrolled,
-    cohorts,
-    participantsBySite
-  );
-
-  return {
-    success: true,
-    snapshot: {
-      contextLine: contextLine,
-      meta: {
-        generatedAt: new Date().toISOString(),
-        exportReady: totalEnrolled > 0
-      },
-      kpis: {
-        totalEnrolled: totalEnrolled,
-        activeEnrollments: activeEnrollments,
-        averageAttendance: attendanceSummary.averageAttendance,
-        participationStatus: attendanceSummary.participationStatus,
-        atRiskParticipants: attendanceSummary.atRiskParticipants,
-        protocolCompletionRate: protocolSummary.completionRate,
-        sessionsCompleted: attendanceSummary.sessionsCompleted,
-        totalSessions: attendanceSummary.totalSessions
-      },
-      attendance: attendanceSummary,
-      protocol: protocolSummary,
-      attention: attentionItems,
-      comparison: comparison,
-      operations: operations,
-      about: aboutSummary
-    }
-  };
-}
-
-
-function buildOperationsSummary(
-  effectiveSite,
-  effectiveCohort,
-  cohorts,
-  participantsBySite,
-  participantsByCohort,
-  sessionsByCohort,
-  attendanceMap,
-  checklistSheet
-) {
-  const today = getDateOnly(new Date());
-  const visibleCohorts = cohorts.filter(cohort => effectiveCohort === 'All' || String(cohort.rolloutId) === String(effectiveCohort));
-  const lifecycleCounts = { upcoming: 0, inProgress: 0, completed: 0, unscheduled: 0 };
-
-  const cohortOperations = visibleCohorts.map(cohort => {
-    const participants = participantsByCohort[cohort.rolloutId] || [];
-    const sessions = (sessionsByCohort[cohort.rolloutId] || []).slice().sort(sortSessionsByNumberAndDate);
-    const lifecycle = resolveCohortLifecycle(cohort, sessions, today);
-    lifecycleCounts[lifecycle.key] = (lifecycleCounts[lifecycle.key] || 0) + 1;
-
-    const attendanceSummary = buildAttendanceSummary(participants, { [cohort.rolloutId]: sessions }, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    const sessionProtocolMap = buildSessionProtocolCompletionMap(sessions, participants, checklistSheet);
-    const sessionProgress = sessions.map(session => buildSessionOperationsRow(
-      session,
-      participants,
-      attendanceMap,
-      today,
-      protocolSummary,
-      sessionProtocolMap[session.sessionId]
-    ));
-    const nextSession = sessionProgress.find(session => session.timing === 'today' || session.timing === 'upcoming') || null;
-    const completedOrLastSessions = sessionProgress
-      .filter(session => session.sessionDate)
-      .slice()
-      .sort((a, b) => compareDateStrings(b.sessionDate, a.sessionDate));
-    const lastSession = completedOrLastSessions[0] || null;
-
-    return {
-      rolloutId: cohort.rolloutId,
-      site: cohort.site,
-      label: formatCohortDisplayLabel(cohort),
-      schoolName: cohort.schoolName,
-      period: cohort.period,
-      year: cohort.year,
-      sourceStatus: cohort.status,
-      lifecycle: lifecycle,
-      participantCount: participants.length,
-      activeParticipants: participants.filter(p => p.status === 'active').length,
-      completedParticipants: participants.filter(p => p.status === 'completed').length,
-      withdrawnParticipants: participants.filter(p => p.status === 'withdrawn').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      sessionsCompleted: sessionProgress.filter(session => session.timing === 'completed').length,
-      totalSessions: sessionProgress.length,
-      nextSession: nextSession,
-      lastSession: lastSession,
-      lastSessionDate: lastSession ? lastSession.sessionDate : '',
-      sessions: sessionProgress
-    };
-  });
-
-  const sites = ['UGA', 'Missouri'].map(site => {
-    const siteCohorts = cohortOperations.filter(cohort => cohort.site === site);
-    const participants = (participantsBySite[site] || []).filter(participant => effectiveCohort === 'All' || String(participant.rolloutId) === String(effectiveCohort));
-    const attendanceSummary = buildAttendanceSummary(participants, sessionsByCohort, attendanceMap, 'All');
-    const protocolSummary = buildProtocolSummary(participants, checklistSheet);
-    return {
-      site: site,
-      cohortCount: siteCohorts.length,
-      participantCount: participants.length,
-      activeCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'inProgress').length,
-      upcomingCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'upcoming').length,
-      completedCohorts: siteCohorts.filter(cohort => cohort.lifecycle.key === 'completed').length,
-      averageAttendance: attendanceSummary.averageAttendance,
-      protocolCompletion: protocolSummary.completionRate,
-      cohorts: siteCohorts
-    };
-  }).filter(site => effectiveSite === 'All' || site.site === effectiveSite);
-
-  const upcomingCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'upcoming')
-    .sort((a, b) => compareDateStrings((a.nextSession || {}).sessionDate, (b.nextSession || {}).sessionDate))
-    .slice(0, 6);
-
-  const activeCohorts = cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'inProgress')
-    .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
-
-  const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'completed')
-    .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
-    .slice(0, 1);
-
-  return {
-    sites: sites,
-    cohorts: cohortOperations,
-    lifecycleCounts: lifecycleCounts,
-    activeCohorts: activeCohorts,
-    recentCompletedCohorts: recentCompletedCohorts,
-    upcomingCohorts: upcomingCohorts,
-    totalCohorts: cohortOperations.length
-  };
-}
-
-function buildSessionOperationsRow(session, participants, attendanceMap, today, protocolSummary, sessionProtocolSummary) {
-  let present = 0;
-  let absent = 0;
-  let excused = 0;
-  let notMarked = 0;
-  const records = attendanceMap[session.sessionId] || {};
-
-  participants.forEach(participant => {
-    const status = records[participant.participantId];
-    if (status === 'present') present++;
-    else if (status === 'absent') absent++;
-    else if (status === 'excused') excused++;
-    else notMarked++;
-  });
-
-  const participantCount = participants.length;
-  const attendanceRate = participantCount > 0 ? Math.round((present / participantCount) * 100) : 0;
-  const markedCount = present + absent + excused;
-  const markedRate = participantCount > 0 ? Math.round((markedCount / participantCount) * 100) : 0;
-  const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-  const timing = resolveSessionTiming(session, sessionDateOnly, today);
-
-  const protocolDaySummary = sessionProtocolSummary || { completed: 0, total: 0, completionRate: 0 };
-
-  return {
-    sessionId: session.sessionId,
-    sessionNumber: session.sessionNumber,
-    sessionName: session.sessionName || ('Session ' + (session.sessionNumber || '')),
-    sessionDate: session.sessionDate,
-    sourceStatus: session.status,
-    timing: timing,
-    present: present,
-    absent: absent,
-    excused: excused,
-    notMarked: notMarked,
-    markedCount: markedCount,
-    participantCount: participantCount,
-    attendanceRate: attendanceRate,
-    markedRate: markedRate,
-    protocolCompletion: protocolSummary.completionRate,
-    protocolDayCompleted: protocolDaySummary.completed || 0,
-    protocolDayTotal: protocolDaySummary.total || 0,
-    protocolDayCompletionRate: protocolDaySummary.completionRate || 0,
-    protocolDayItems: protocolDaySummary.items || []
-  };
-}
-
-function buildSessionProtocolCompletionMap(sessions, participants, checklistSheet) {
-  const summaries = {};
-  (sessions || []).forEach(session => {
-    summaries[session.sessionId] = { completed: 0, total: 0, completionRate: 0, items: [] };
-  });
-
-  if (!checklistSheet || !participants || participants.length === 0 || !sessions || sessions.length === 0) {
-    return summaries;
-  }
-
-  const participantIds = new Set(participants.map(p => String(p.participantId)));
-  const participantRolloutMap = {};
-  const rolloutAllowedNumbersMap = {};
-  participants.forEach(participant => {
-    const participantId = String(participant.participantId);
-    const rolloutId = String(participant.rolloutId || '');
-    participantRolloutMap[participantId] = rolloutId;
-    if (!rolloutAllowedNumbersMap[rolloutId]) {
-      const allowed = {};
-      getRolloutProtocolItemsInternal(rolloutId).forEach(item => {
-        allowed[String(item.number)] = true;
-      });
-      rolloutAllowedNumbersMap[rolloutId] = allowed;
-    }
-  });
-
-  const sessionIdsByDate = {};
-  sessions.forEach(session => {
-    const sessionDateOnly = getDateOnly(parseSessionDate(session.sessionDate));
-    if (!sessionDateOnly) return;
-    sessionIdsByDate[sessionDateOnly] = sessionIdsByDate[sessionDateOnly] || [];
-    sessionIdsByDate[sessionDateOnly].push(session.sessionId);
-  });
-
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const cData = checklistSnapshot.data;
-  const cHeaders = checklistSnapshot.headers;
-  const participantCol = cHeaders.indexOf('participantId');
-  const instrumentCol = cHeaders.indexOf('instrumentNumber');
-  const instrumentNameCol = cHeaders.indexOf('instrumentName');
-  const statusCol = cHeaders.indexOf('status');
-  const completedDateCol = cHeaders.indexOf('completedDate');
-  const totalsByInstrument = {};
-  const namesByInstrument = {};
-  const completedBySession = {};
-
-  Object.keys(summaries).forEach(sessionId => {
-    completedBySession[sessionId] = {};
-  });
-
-  for (let i = 1; i < cData.length; i++) {
-    const participantId = String(cData[i][participantCol]);
-    if (!participantIds.has(participantId)) continue;
-
-    const rolloutId = participantRolloutMap[participantId] || '';
-    const allowedMap = rolloutAllowedNumbersMap[rolloutId] || {};
-    const instrumentNumber = String(cData[i][instrumentCol]);
-    if (!allowedMap[instrumentNumber]) continue;
-
-    const instrumentName = cData[i][instrumentNameCol] || ('Item ' + instrumentNumber);
-    namesByInstrument[instrumentNumber] = instrumentName;
-    totalsByInstrument[instrumentNumber] = (totalsByInstrument[instrumentNumber] || 0) + 1;
-
-    const status = cData[i][statusCol];
-    if (status !== 'completed') continue;
-
-    const completedDateOnly = getDateOnly(new Date(cData[i][completedDateCol]));
-    const matchingSessionIds = sessionIdsByDate[completedDateOnly] || [];
-    matchingSessionIds.forEach(sessionId => {
-      if (!completedBySession[sessionId]) return;
-      completedBySession[sessionId][instrumentNumber] = (completedBySession[sessionId][instrumentNumber] || 0) + 1;
-    });
-  }
-
-  Object.keys(summaries).forEach(sessionId => {
-    const completedMap = completedBySession[sessionId] || {};
-    const items = Object.keys(completedMap)
-      .map(instrumentNumber => {
-        const total = totalsByInstrument[instrumentNumber] || participants.length;
-        const completed = completedMap[instrumentNumber] || 0;
-        return {
-          number: Number(instrumentNumber),
-          name: namesByInstrument[instrumentNumber] || ('Item ' + instrumentNumber),
-          completed: completed,
-          total: total,
-          percentage: total > 0 ? Math.round((completed / total) * 100) : 0
-        };
-      })
-      .filter(item => item.completed > 0)
-      .sort((a, b) => a.number - b.number);
-
-    summaries[sessionId].items = items;
-    summaries[sessionId].completed = items.reduce((sum, item) => sum + item.completed, 0);
-    summaries[sessionId].total = items.reduce((sum, item) => sum + item.total, 0);
-    summaries[sessionId].completionRate = summaries[sessionId].total > 0
-      ? Math.round((summaries[sessionId].completed / summaries[sessionId].total) * 100)
-      : 0;
-  });
-
-  return summaries;
-}
-
-function resolveCohortLifecycle(cohort, sessions, today) {
-  if (!sessions || sessions.length === 0) {
-    return { key: 'unscheduled', label: 'Unscheduled', tone: 'neutral', detail: 'No sessions scheduled' };
   }
 
   const attendanceMap = {};
