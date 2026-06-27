@@ -515,6 +515,7 @@ function deleteCohortMedia(token, mediaId) {
   return { success: false, message: 'Media record not found' };
 }
 
+
 function upsertConfigValue(key, value, description) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const configSheet = ss.getSheetByName('Config');
@@ -1845,6 +1846,10 @@ function saveParticipantAliases(token, participantId, aliasesText) {
     if (String(data[i][headers.indexOf('participantId')]) !== String(participantId)) {
       keptRows.push(data[i].slice(0, headers.length));
     }
+  });
+  if (enabled) {
+    const minutes = Math.max(5, Number(everyMinutes) || 10);
+    ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
   }
   const timestamp = new Date().toISOString();
   aliases.forEach(alias => {
