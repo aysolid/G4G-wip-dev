@@ -1743,11 +1743,30 @@ function setDigitalFormSyncSchedule(token, enabled, everyMinutes) {
   return { success: true, message: enabled ? 'Scheduled sync enabled' : 'Scheduled sync disabled', triggers: getDigitalFormSyncTriggerSummary() };
 }
 
+function ensureParticipantAliasesSheetInternal() {
+  ensureDigitalFormSyncSheets();
+  const expectedHeaders = ['aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'];
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  if (!sheet) return { sheet: null, headers: expectedHeaders };
+  let currentHeaders = [];
+  if (sheet.getLastRow() >= 1 && sheet.getLastColumn() >= 1) {
+    currentHeaders = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), expectedHeaders.length)).getValues()[0].filter(Boolean);
+  }
+  const missingRequiredHeader = expectedHeaders.some(header => currentHeaders.indexOf(header) === -1);
+  if (sheet.getLastRow() < 1 || missingRequiredHeader) {
+    sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+    sheet.setFrozenRows(1);
+  }
+  return { sheet: sheet, headers: expectedHeaders };
+}
+
 function saveParticipantAliasInternal(participantId, alias, createdBy, notes) {
   const normalized = normalizePersonNameForMatch(alias);
   if (!participantId || !normalized) return;
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].filter(Boolean);
+  const aliasSheetInfo = ensureParticipantAliasesSheetInternal();
+  const sheet = aliasSheetInfo.sheet;
+  const headers = aliasSheetInfo.headers;
+  if (!sheet) return;
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][headers.indexOf('participantId')]) === String(participantId) && String(data[i][headers.indexOf('normalizedAlias')]) === normalized) return;
@@ -1778,11 +1797,11 @@ function normalizeParticipantAliasList(aliasesText) {
 }
 
 function getParticipantAliasRecordsInternal(participantId) {
-  ensureDigitalFormSyncSheets();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const aliasSheetInfo = ensureParticipantAliasesSheetInternal();
+  const sheet = aliasSheetInfo.sheet;
+  const headers = aliasSheetInfo.headers;
   if (!sheet || sheet.getLastRow() < 2) return [];
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
+  const data = sheet.getRange(1, 1, sheet.getLastRow(), headers.length).getValues();
   const records = [];
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][headers.indexOf('participantId')]) === String(participantId)) {
@@ -1813,10 +1832,11 @@ function getParticipantAliasConflictsInternal(participantId, aliases) {
   });
   const keys = Object.keys(normalizedAliases);
   if (!keys.length) return [];
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
+  const aliasSheetInfo = ensureParticipantAliasesSheetInternal();
+  const sheet = aliasSheetInfo.sheet;
+  const headers = aliasSheetInfo.headers;
   if (!sheet || sheet.getLastRow() < 2) return [];
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
+  const data = sheet.getRange(1, 1, sheet.getLastRow(), headers.length).getValues();
   const conflicts = [];
   for (let i = 1; i < data.length; i++) {
     const existingParticipantId = String(getHeaderValue(data[i], headers, 'participantId') || '');
@@ -1835,24 +1855,26 @@ function saveParticipantAliases(token, participantId, aliasesText) {
   const participantResult = getParticipantById(token, participantId);
   if (!participantResult.success) return participantResult;
 
-  ensureDigitalFormSyncSheets();
   const aliases = normalizeParticipantAliasList(aliasesText);
   const warnings = getParticipantAliasConflictsInternal(participantId, aliases);
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || ['aliasId', 'participantId', 'alias', 'normalizedAlias', 'createdAt', 'createdBy', 'notes'];
-  const keptRows = [headers];
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf('participantId')]) !== String(participantId)) {
-      keptRows.push(data[i].slice(0, headers.length));
+  const aliasSheetInfo = ensureParticipantAliasesSheetInternal();
+  const sheet = aliasSheetInfo.sheet;
+  const headers = aliasSheetInfo.headers;
+  if (!sheet) return { success: false, message: 'ParticipantAliases sheet could not be created' };
+
+  for (let rowIndex = sheet.getLastRow(); rowIndex >= 2; rowIndex--) {
+    const existingParticipantId = String(sheet.getRange(rowIndex, headers.indexOf('participantId') + 1).getValue() || '');
+    if (existingParticipantId === String(participantId)) {
+      sheet.deleteRow(rowIndex);
     }
   });
   if (enabled) {
     const minutes = Math.max(5, Number(everyMinutes) || 10);
     ScriptApp.newTrigger('digitalFormSyncScheduledRun').timeBased().everyMinutes(minutes).create();
   }
+
   const timestamp = new Date().toISOString();
-  aliases.forEach(alias => {
+  const rows = aliases.map(alias => {
     const row = new Array(headers.length).fill('');
     const set = (header, value) => { const idx = headers.indexOf(header); if (idx !== -1) row[idx] = value; };
     set('aliasId', generateUUID());
@@ -1862,10 +1884,9 @@ function saveParticipantAliases(token, participantId, aliasesText) {
     set('createdAt', timestamp);
     set('createdBy', currentUser.fullName || currentUser.username || currentUser.userId || 'Admin');
     set('notes', 'Manually assigned participant alias');
-    keptRows.push(row);
+    return row;
   });
-  sheet.clearContents();
-  sheet.getRange(1, 1, keptRows.length, headers.length).setNumberFormat('@').setValues(keptRows);
+  appendRowsAsPlainText(sheet, rows);
   invalidateSheetSnapshot('ParticipantAliases');
   return { success: true, aliases: aliases, aliasesText: aliases.join('; '), warnings: warnings };
 }
