@@ -3983,6 +3983,11 @@ function getAllParticipants(token, filters) {
   const rolloutIdCol = headers.indexOf('rolloutId');
   const schoolNameCol = headers.indexOf('schoolName');
   const statusCol = headers.indexOf('status');
+  const completionCol = headers.indexOf('completionPercentage');
+  const useStoredCompletion = filters.useStoredCompletion === true;
+  const enrollmentFieldsForParticipants = currentUser.role !== 'viewer'
+    ? getEnrollmentFieldsInternal()
+    : [];
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
@@ -4013,7 +4018,9 @@ function getAllParticipants(token, filters) {
     return { success: true, participants: [] };
   }
 
-  const completionMap = buildLiveCompletionMap(filteredRows.map(row => row[participantIdCol]).filter(Boolean));
+  const completionMap = useStoredCompletion
+    ? {}
+    : buildLiveCompletionMap(filteredRows.map(row => row[participantIdCol]).filter(Boolean));
 
   for (let i = 0; i < filteredRows.length; i++) {
     const row = filteredRows[i];
@@ -4030,7 +4037,9 @@ function getAllParticipants(token, filters) {
       enrolledBy: getHeaderValue(row, headers, 'enrolledBy'),
       status: row[statusCol],
       notes: getHeaderValue(row, headers, 'notes'),
-      completionPercentage: (completionMap[participantId] || {}).percentage || 0
+      completionPercentage: useStoredCompletion
+        ? Number(completionCol !== -1 ? row[completionCol] : 0) || 0
+        : (completionMap[participantId] || {}).percentage || 0
     };
 
     if (currentUser.role !== 'viewer') {
@@ -4040,7 +4049,7 @@ function getAllParticipants(token, filters) {
       participant.parentGuardianEmail = getHeaderValue(row, headers, 'parent_guardian_email');
       participant.parentGuardianDob = getHeaderValue(row, headers, 'parent_guardian_dob');
       participant.enrollmentFields = {};
-      getEnrollmentFieldsInternal().forEach(field => {
+      enrollmentFieldsForParticipants.forEach(field => {
         participant.enrollmentFields[field.key] = getHeaderValue(row, headers, field.key);
       });
     }
@@ -4049,6 +4058,61 @@ function getAllParticipants(token, filters) {
   }
 
   return { success: true, participants: participants };
+}
+
+
+/**
+ * Get a lightweight participant count for the active filters without loading checklist progress.
+ */
+function getParticipantCount(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (!participantsSheet) return { success: true, count: 0 };
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
+  filters = filters || {};
+
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const siteCol = headers.indexOf('site');
+  const rolloutIdCol = headers.indexOf('rolloutId');
+  const schoolNameCol = headers.indexOf('schoolName');
+  const statusCol = headers.indexOf('status');
+  const searchLower = filters.search ? String(filters.search).toLowerCase() : '';
+  let count = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const participantId = row[participantIdCol];
+    const fullName = row[fullNameCol] || '';
+    const site = row[siteCol];
+    const rolloutId = row[rolloutIdCol];
+    const schoolName = row[schoolNameCol] || '';
+    const status = row[statusCol];
+
+    if (filters.site && filters.site !== 'All' && site !== filters.site) continue;
+    if (filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+    if (filters.status && status !== filters.status) continue;
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && site !== currentUser.site) continue;
+    if (searchLower) {
+      const matchesSearch =
+        String(fullName).toLowerCase().includes(searchLower) ||
+        String(participantId).toLowerCase().includes(searchLower) ||
+        String(schoolName).toLowerCase().includes(searchLower);
+      if (!matchesSearch) continue;
+    }
+
+    count++;
+  }
+
+  return { success: true, count: count };
 }
 
 /**
@@ -5350,6 +5414,7 @@ function updateParticipantCompletion(participantId) {
         pHeaders.indexOf('completionPercentage') + 1,
         percentage
       );
+      invalidateSheetSnapshot('Participants');
       break;
     }
   }
@@ -5451,6 +5516,7 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   const dashboardStatusCol = pHeaders.indexOf('status');
   const dashboardRolloutIdCol = pHeaders.indexOf('rolloutId');
   const dashboardParticipantIdCol = pHeaders.indexOf('participantId');
+  const dashboardCompletionCol = pHeaders.indexOf('completionPercentage');
 
   for (let i = 1; i < pData.length; i++) {
     const site = pData[i][dashboardSiteCol];
@@ -5470,6 +5536,9 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
 
     filteredParticipantIds.push(participantId);
     stats.totalParticipants++;
+    if (dashboardCompletionCol !== -1) {
+      totalCompletion += Number(pData[i][dashboardCompletionCol]) || 0;
+    }
 
     if (status === 'active') stats.activeParticipants++;
     if (status === 'completed') stats.completedParticipants++;
@@ -5480,12 +5549,6 @@ function getDashboardStats(token, siteFilter, rolloutFilter) {
   }
 
   const filteredParticipantIdSet = new Set(filteredParticipantIds.map(id => String(id)));
-  const liveCompletionMap = filteredParticipantIds.length > 0
-    ? buildLiveCompletionMap(filteredParticipantIds)
-    : {};
-  filteredParticipantIds.forEach(pid => {
-    totalCompletion += (liveCompletionMap[pid] || {}).percentage || 0;
-  });
 
   stats.overallCompletion = stats.totalParticipants > 0
     ? Math.round(totalCompletion / stats.totalParticipants)
