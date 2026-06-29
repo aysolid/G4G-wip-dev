@@ -18,6 +18,7 @@
 var CONFIG = {
   APP_NAME: 'G4G Research Operations',
   VERSION: '1.0.0',
+  RECENT_COMPLETED_COHORT_RETENTION_DAYS: 4,
   SITES: ['UGA', 'Missouri'],
   PERIODS: ['Spring', 'Summer', 'Fall'],
   ROLES: ['admin', 'facilitator', 'viewer'],
@@ -5886,8 +5887,9 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
   let activeEnrollments = 0;
 
   if (participantsSheet) {
-    const pData = participantsSheet.getDataRange().getValues();
-    const pHeaders = pData[0];
+    const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+    const pData = participantSnapshot.data;
+    const pHeaders = participantSnapshot.headers;
     for (let i = 1; i < pData.length; i++) {
       const participant = {
         participantId: pData[i][pHeaders.indexOf('participantId')],
@@ -5920,8 +5922,9 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
   const sessionsByCohort = {};
 
   if (sessionsSheet) {
-    const sData = sessionsSheet.getDataRange().getValues();
-    const sHeaders = sData[0];
+    const sessionSnapshot = getSheetSnapshot('StudySessions');
+    const sData = sessionSnapshot.data;
+    const sHeaders = sessionSnapshot.headers;
     for (let i = 1; i < sData.length; i++) {
       const rolloutId = sData[i][sHeaders.indexOf('rolloutId')];
       if (effectiveSite !== 'All') {
@@ -5946,8 +5949,9 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
 
   const attendanceMap = {};
   if (attendanceSheet) {
-    const aData = attendanceSheet.getDataRange().getValues();
-    const aHeaders = aData[0];
+    const attendanceSnapshot = getSheetSnapshot('SessionAttendance');
+    const aData = attendanceSnapshot.data;
+    const aHeaders = attendanceSnapshot.headers;
     for (let i = 1; i < aData.length; i++) {
       const sessionId = aData[i][aHeaders.indexOf('sessionId')];
       if (!sessionLookup[sessionId]) continue;
@@ -6095,6 +6099,7 @@ function buildOperationsSummary(
       nextSession: nextSession,
       lastSession: lastSession,
       lastSessionDate: lastSession ? lastSession.sessionDate : '',
+      daysSinceEnded: lastSession ? getDaysBetweenDateStrings(lastSession.sessionDate, today) : null,
       sessions: sessionProgress
     };
   });
@@ -6126,8 +6131,9 @@ function buildOperationsSummary(
     .filter(cohort => cohort.lifecycle.key === 'inProgress')
     .sort((a, b) => a.site.localeCompare(b.site) || a.label.localeCompare(b.label));
 
+  const recentCompletedRetentionDays = Number(CONFIG.RECENT_COMPLETED_COHORT_RETENTION_DAYS) || 4;
   const recentCompletedCohorts = activeCohorts.length > 0 ? [] : cohortOperations
-    .filter(cohort => cohort.lifecycle.key === 'completed')
+    .filter(cohort => cohort.lifecycle.key === 'completed' && isWithinRecentCompletedCohortWindow(cohort.lastSessionDate, today, recentCompletedRetentionDays))
     .sort((a, b) => compareDateStrings(b.lastSessionDate, a.lastSessionDate))
     .slice(0, 1);
 
@@ -6137,6 +6143,7 @@ function buildOperationsSummary(
     lifecycleCounts: lifecycleCounts,
     activeCohorts: activeCohorts,
     recentCompletedCohorts: recentCompletedCohorts,
+    recentCompletedRetentionDays: recentCompletedRetentionDays,
     upcomingCohorts: upcomingCohorts,
     totalCohorts: cohortOperations.length
   };
@@ -6346,6 +6353,19 @@ function compareDateStrings(a, b) {
   if (!aDate) return 1;
   if (!bDate) return -1;
   return aDate.localeCompare(bDate);
+}
+
+function getDaysBetweenDateStrings(startDateString, endDateString) {
+  const startDate = parseSessionDate(startDateString);
+  const endDate = parseSessionDate(endDateString);
+  if (!startDate || !endDate) return null;
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((endDate.getTime() - startDate.getTime()) / msPerDay);
+}
+
+function isWithinRecentCompletedCohortWindow(lastSessionDate, today, retentionDays) {
+  const daysSinceEnded = getDaysBetweenDateStrings(lastSessionDate, today);
+  return daysSinceEnded !== null && daysSinceEnded >= 0 && daysSinceEnded <= retentionDays;
 }
 
 function getDateOnly(date) {

@@ -2437,23 +2437,30 @@
     function renderActiveCohorts(operations) {
       const active = operations && operations.activeCohorts ? operations.activeCohorts : [];
       const recentCompleted = operations && operations.recentCompletedCohorts ? operations.recentCompletedCohorts : [];
+      const retentionDays = operations && operations.recentCompletedRetentionDays ? operations.recentCompletedRetentionDays : 4;
       const showingRecentCompleted = active.length === 0 && recentCompleted.length > 0;
       const cohorts = active.length ? active : recentCompleted;
       const titleEl = document.getElementById('activeCohortPanelTitle');
       const subtitleEl = document.getElementById('activeCohortPanelSubtitle');
 
       if (titleEl && subtitleEl) {
-        if (showingRecentCompleted) {
-          titleEl.innerHTML = '<span class="material-icons">history</span> Most Recent Concluded Cohort';
-          subtitleEl.textContent = 'Latest completed rollout retained until the next cohort becomes active';
-        } else {
+        if (active.length > 1) {
+          titleEl.innerHTML = '<span class="material-icons">play_circle</span> Active Cohorts Session Progress';
+          subtitleEl.textContent = active.length + ' active implementations are in progress for this filter';
+        } else if (active.length === 1) {
           titleEl.innerHTML = '<span class="material-icons">play_circle</span> Active Cohort Session Progress';
           subtitleEl.textContent = 'Running session history with attendance, marking progress, and protocol completion';
+        } else if (showingRecentCompleted) {
+          titleEl.innerHTML = '<span class="material-icons">history</span> Recently Concluded Cohort';
+          subtitleEl.textContent = 'Final session activity retained for ' + retentionDays + ' days after completion';
+        } else {
+          titleEl.innerHTML = '<span class="material-icons">pause_circle</span> No Active Cohort Right Now';
+          subtitleEl.textContent = 'Active session progress will appear here when a cohort is in progress';
         }
       }
 
       if (!cohorts.length) {
-        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No active or recently concluded cohorts are available for this filter.</p>';
+        document.getElementById('activeCohorts').innerHTML = '<p style="color: var(--gray-500); text-align: center;">No active or recently concluded cohort is available for this filter.</p>';
         return;
       }
       const html = cohorts.map(cohort => {
@@ -2502,7 +2509,7 @@
             <div class="active-cohort-header">
               <div>
                 <div class="active-cohort-title">${cohort.label}</div>
-                <div class="card-subtitle">${cohort.site} · ${cohort.participantCount} participants · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions completed</div>
+                <div class="card-subtitle">${cohort.site} · ${cohort.participantCount} participants · ${cohort.sessionsCompleted}/${cohort.totalSessions} sessions completed${showingRecentCompleted && cohort.daysSinceEnded !== null && cohort.daysSinceEnded !== undefined ? ' · ended ' + cohort.daysSinceEnded + ' day' + (cohort.daysSinceEnded === 1 ? '' : 's') + ' ago' : ''}</div>
               </div>
               <span class="status-pill ${cohort.lifecycle.tone}">${cohort.lifecycle.label}</span>
             </div>
