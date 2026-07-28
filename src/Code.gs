@@ -666,8 +666,6 @@ var DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
 var DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
 var DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
 var ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
-var LESSON_JOURNAL_EXPORT_CONFIG_KEY = 'LESSON_JOURNAL_EXPORT_CONFIG';
-var LESSON_JOURNAL_EXPORT_ACCESS_KEY = 'LESSON_JOURNAL_EXPORT_ACCESS_ADMINS';
 var LESSON_JOURNAL_EXPORT_SOURCES = [
   { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
   { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
@@ -694,10 +692,6 @@ function getDigitalFormSyncAllowedAdminIdsInternal() {
 
 function getEnrollmentFieldManagerAllowedAdminIdsInternal() {
   return getSensitiveFeatureAllowedAdminIdsInternal(ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
-}
-
-function getLessonJournalExportAllowedAdminIdsInternal() {
-  return getSensitiveFeatureAllowedAdminIdsInternal(LESSON_JOURNAL_EXPORT_ACCESS_KEY);
 }
 
 function getSensitiveFeatureAllowedAdminIdsInternal(configKey) {
@@ -738,10 +732,6 @@ function canAccessEnrollmentFieldManager(user) {
   return isUserAllowedForSensitiveFeature(user, ENROLLMENT_FIELD_MANAGER_ACCESS_KEY);
 }
 
-function canConfigureLessonJournalExport(user) {
-  return isUserAllowedForSensitiveFeature(user, LESSON_JOURNAL_EXPORT_ACCESS_KEY);
-}
-
 function getDigitalFormSyncAccessControlForUser(user) {
   return {
     hasAccess: canAccessDigitalFormSync(user),
@@ -757,15 +747,6 @@ function getEnrollmentFieldManagerAccessControlForUser(user) {
     isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
     superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
     allowedAdminIds: getEnrollmentFieldManagerAllowedAdminIdsInternal()
-  };
-}
-
-function getLessonJournalExportAccessControlForUser(user) {
-  return {
-    hasAccess: canConfigureLessonJournalExport(user),
-    isSuperAdmin: isDigitalFormSyncSuperAdmin(user),
-    superAdminUserId: DIGITAL_FORM_SYNC_SUPER_ADMIN_ID,
-    allowedAdminIds: getLessonJournalExportAllowedAdminIdsInternal()
   };
 }
 
@@ -829,17 +810,14 @@ function getAdminFeatureAccessData(token) {
   const isSuperAdmin = isDigitalFormSyncSuperAdmin(currentUser);
   const digitalAllowed = getDigitalFormSyncAllowedAdminIdsInternal();
   const enrollmentAllowed = getEnrollmentFieldManagerAllowedAdminIdsInternal();
-  const lessonJournalAllowed = getLessonJournalExportAllowedAdminIdsInternal();
   return {
     success: true,
     isSuperAdmin: isSuperAdmin,
     digitalFormsSync: getDigitalFormSyncAccessControlForUser(currentUser),
     enrollmentFieldManager: getEnrollmentFieldManagerAccessControlForUser(currentUser),
-    lessonJournalExport: getLessonJournalExportAccessControlForUser(currentUser),
     adminUsers: isSuperAdmin ? getAdminUsersForDigitalFormSyncAccess().map(user => Object.assign({}, user, {
       digitalFormsSyncAccess: user.isSuperAdmin || digitalAllowed.indexOf(String(user.userId || '').trim()) !== -1,
-      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1,
-      lessonJournalExportAccess: user.isSuperAdmin || lessonJournalAllowed.indexOf(String(user.userId || '').trim()) !== -1
+      enrollmentFieldManagerAccess: user.isSuperAdmin || enrollmentAllowed.indexOf(String(user.userId || '').trim()) !== -1
     })) : []
   };
 }
@@ -859,11 +837,6 @@ function saveAdminFeatureAccess(token, access) {
     ENROLLMENT_FIELD_MANAGER_ACCESS_KEY,
     payload.enrollmentFieldManagerAdminIds || [],
     'Admin users allowed to manage Enrollment Field Manager'
-  );
-  saveSensitiveFeatureAllowedAdminIdsInternal(
-    LESSON_JOURNAL_EXPORT_ACCESS_KEY,
-    payload.lessonJournalExportAdminIds || [],
-    'Admin users allowed to configure Lesson Journal Export'
   );
   return Object.assign({ message: 'Admin feature access updated' }, getAdminFeatureAccessData(token));
 }
@@ -1530,6 +1503,7 @@ function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
   const notesCol = cHeaders.indexOf('notes');
   const dataLinkCol = cHeaders.indexOf('dataLink');
   const touchedParticipants = {};
+  const changedChecklistRows = [];
   let updated = 0;
   matches.forEach(match => {
     if (match.matchStatus !== 'auto_matched' || match.checklistRowIndex < 1) return;
@@ -1547,15 +1521,12 @@ function applyDigitalFormChecklistUpdates(matches, datasets, currentUserName) {
     row[notesCol] = existingNotes ? (existingNotes + '\n' + syncNote) : syncNote;
     if (dataLinkCol !== -1) row[dataLinkCol] = match.sourceLink;
     touchedParticipants[String(match.participantId)] = true;
+    changedChecklistRows.push(match.checklistRowIndex);
     updated++;
   });
   if (updated > 0) {
-    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
-    invalidateSheetSnapshot('Checklist');
-    Object.keys(touchedParticipants).forEach(participantId => {
-      updateParticipantCompletion(participantId);
-      syncParticipantStatusFromChecklist(participantId);
-    });
+    writeDataRowsByIndexes(checklistSnapshot.sheet, cData, changedChecklistRows, cHeaders.length);
+    syncParticipantProgressBatch(Object.keys(touchedParticipants), true);
   }
   return updated;
 }
@@ -2846,7 +2817,7 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
     });
   });
   appendRowsAsPlainText(checklistSheet, rowsToAppend);
-  Object.keys(rolloutParticipantIds).forEach(participantId => updateParticipantCompletion(participantId));
+  syncParticipantProgressBatch(Object.keys(rolloutParticipantIds), false);
 
   return { added: added, deleted: deleted };
 }
@@ -3900,6 +3871,31 @@ function appendRowsAsPlainText(sheet, rows) {
   return startRow;
 }
 
+function writeDataRowsByIndexes(sheet, data, rowIndexes, columnCount) {
+  if (!sheet || !Array.isArray(data) || !Array.isArray(rowIndexes) || !rowIndexes.length) return 0;
+  const indexes = Array.from(new Set(rowIndexes.map(Number).filter(index => index >= 1 && index < data.length))).sort((a, b) => a - b);
+  if (!indexes.length) return 0;
+  const width = columnCount || (data[0] ? data[0].length : 0);
+  let groupStart = indexes[0];
+  let previous = indexes[0];
+  let written = 0;
+  const flushGroup = endIndex => {
+    const values = data.slice(groupStart, endIndex + 1).map(row => row.slice(0, width));
+    sheet.getRange(groupStart + 1, 1, values.length, width).setValues(values);
+    written += values.length;
+  };
+  for (let i = 1; i < indexes.length; i++) {
+    if (indexes[i] !== previous + 1) {
+      flushGroup(previous);
+      groupStart = indexes[i];
+    }
+    previous = indexes[i];
+  }
+  flushGroup(previous);
+  invalidateSheetSnapshot(sheet.getName());
+  return written;
+}
+
 function appendParticipantRowAsText(participantsSheet, rowValues) {
   return appendRowsAsPlainText(participantsSheet, [rowValues]);
 }
@@ -4054,10 +4050,10 @@ function getAllParticipants(token, filters) {
       });
     }
 
-    participants.push(participant);
+    count++;
   }
 
-  return { success: true, participants: participants };
+  return { success: true, count: count };
 }
 
 
@@ -4859,9 +4855,8 @@ function updateChecklistItem(token, checklistId, updateData) {
       checklistSheet.getRange(i + 1, 1, 1, headers.length).setValues([rowValues]);
       invalidateSheetSnapshot('Checklist');
 
-      // Update participant's completion percentage
-      updateParticipantCompletion(participantId);
-      syncParticipantStatusFromChecklist(participantId);
+      // Update participant completion and derived status in one checklist scan.
+      syncParticipantProgressBatch([participantId], true);
 
       logActivity(currentUser.userId, currentUser.fullName, 'UPDATE_CHECKLIST', 'checklist', checklistId,
         'Updated: ' + instrumentName + (updateDetails.length ? ' (' + updateDetails.join(', ') + ')' : ''));
@@ -4874,46 +4869,7 @@ function updateChecklistItem(token, checklistId, updateData) {
 }
 
 function syncParticipantStatusFromChecklist(participantId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const participantsSheet = ss.getSheetByName('Participants');
-  const checklistSheet = ss.getSheetByName('Checklist');
-  if (!participantsSheet || !checklistSheet) return;
-
-  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
-  const pHeaders = participantSnapshot.headers;
-  const pData = participantSnapshot.data;
-  let participantRow = -1;
-  let currentStatus = '';
-  for (let i = 1; i < pData.length; i++) {
-    if (String(pData[i][pHeaders.indexOf('participantId')]) === String(participantId)) {
-      participantRow = i + 1;
-      currentStatus = String(pData[i][pHeaders.indexOf('status')] || '');
-      break;
-    }
-  }
-  if (participantRow === -1) return;
-  if (currentStatus === 'withdrawn') return; // never auto-overwrite withdrawn
-
-  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
-  const cHeaders = checklistSnapshot.headers;
-  const cData = checklistSnapshot.data;
-  let hasPostTestCompleted = false;
-  for (let i = 1; i < cData.length; i++) {
-    if (String(cData[i][cHeaders.indexOf('participantId')]) !== String(participantId)) continue;
-    const name = String(cData[i][cHeaders.indexOf('instrumentName')] || '').toLowerCase();
-    const status = String(cData[i][cHeaders.indexOf('status')] || '');
-    if (name.indexOf('post-test') !== -1 || name.indexOf('post test') !== -1) {
-      if (status === 'completed') {
-        hasPostTestCompleted = true;
-        break;
-      }
-    }
-  }
-
-  const targetStatus = hasPostTestCompleted ? 'completed' : 'active';
-  if (currentStatus !== targetStatus) {
-    setCellAsPlainText(participantsSheet, participantRow, pHeaders.indexOf('status') + 1, targetStatus);
-  }
+  syncParticipantProgressBatch([participantId], true);
 }
 
 function bulkUpdateParticipantStatus(token, rolloutId, updates) {
@@ -5227,6 +5183,7 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
   let successCount = 0;
   let errorCount = 0;
   const touchedParticipants = {};
+  const changedChecklistRows = [];
 
   let hasChanges = false;
   updates.forEach(update => {
@@ -5254,19 +5211,16 @@ function bulkUpdateInstrumentStatus(token, rolloutId, instrumentNumber, updates)
       cData[row - 1][completedByCol] = '';
     }
     hasChanges = true;
+    changedChecklistRows.push(row - 1);
     touchedParticipants[update.participantId] = true;
     successCount++;
   });
 
   if (hasChanges) {
-    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
-    invalidateSheetSnapshot('Checklist');
+    writeDataRowsByIndexes(checklistSnapshot.sheet, cData, changedChecklistRows, cHeaders.length);
   }
 
-  Object.keys(touchedParticipants).forEach(pid => {
-    updateParticipantCompletion(pid);
-    syncParticipantStatusFromChecklist(pid);
-  });
+  syncParticipantProgressBatch(Object.keys(touchedParticipants), true);
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT', 'checklist', instrumentNumber,
     'Updated ' + successCount + ' ' + instrument.name + ' records for cohort ' + cohort.schoolName);
@@ -5340,6 +5294,7 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
 
   let successCount = 0;
   let errorCount = 0;
+  const changedChecklistRows = [];
 
   let hasChanges = false;
   updates.forEach(update => {
@@ -5359,11 +5314,12 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
       return;
     }
     cData[row - 1][dataLinkCol] = update.dataLink;
+    changedChecklistRows.push(row - 1);
     hasChanges = true;
     successCount++;
   });
   if (hasChanges) {
-    checklistSnapshot.sheet.getRange(1, 1, cData.length, cHeaders.length).setValues(cData);
+    writeDataRowsByIndexes(checklistSnapshot.sheet, cData, changedChecklistRows, cHeaders.length);
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_INSTRUMENT_LINK', 'checklist', instrumentNumber,
@@ -5376,50 +5332,114 @@ function bulkUpdateInstrumentLinks(token, rolloutId, instrumentNumber, updates) 
 }
 
 /**
- * Update participant's completion percentage
+ * Recalculate completion and optional derived status for one or more participants
+ * with a single checklist scan and grouped sheet writes.
  */
-function updateParticipantCompletion(participantId) {
+function syncParticipantProgressBatch(participantIds, syncStatus) {
+  const requestedIds = Array.from(new Set((participantIds || []).map(id => String(id || '')).filter(Boolean)));
+  if (!requestedIds.length) return {};
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const participantsSheet = ss.getSheetByName('Participants');
   const checklistSheet = ss.getSheetByName('Checklist');
+  if (!participantsSheet || !checklistSheet) return {};
 
-  // Count completed items
-  const cData = checklistSheet.getDataRange().getValues();
-  const cHeaders = cData[0];
-
-  let total = 0;
-  let completed = 0;
+  const requestedSet = new Set(requestedIds);
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const cHeaders = checklistSnapshot.headers;
+  const cData = checklistSnapshot.data;
+  const checklistParticipantCol = cHeaders.indexOf('participantId');
+  const checklistStatusCol = cHeaders.indexOf('status');
+  const checklistNameCol = cHeaders.indexOf('instrumentName');
+  const progress = {};
+  requestedIds.forEach(id => {
+    progress[id] = { total: 0, completed: 0, percentage: 0, postTestCompleted: false };
+  });
 
   for (let i = 1; i < cData.length; i++) {
-    if (cData[i][cHeaders.indexOf('participantId')] === participantId) {
-      total++;
-      if (cData[i][cHeaders.indexOf('status')] === 'completed') {
-        completed++;
+    const participantId = String(cData[i][checklistParticipantCol] || '');
+    if (!requestedSet.has(participantId)) continue;
+    const entry = progress[participantId];
+    const status = String(cData[i][checklistStatusCol] || '');
+    entry.total++;
+    if (status === 'completed') entry.completed++;
+    if (syncStatus && status === 'completed') {
+      const instrumentName = String(cData[i][checklistNameCol] || '').toLowerCase();
+      if (instrumentName.indexOf('post-test') !== -1 || instrumentName.indexOf('post test') !== -1) {
+        entry.postTestCompleted = true;
       }
     }
   }
 
-  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-  // Update participant record
   const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
-  const pData = participantSnapshot.data;
   const pHeaders = participantSnapshot.headers;
+  const pData = participantSnapshot.data;
+  const participantIdCol = pHeaders.indexOf('participantId');
+  const completionCol = pHeaders.indexOf('completionPercentage');
+  const statusCol = pHeaders.indexOf('status');
+  let changed = false;
+  const changedRows = [];
 
   for (let i = 1; i < pData.length; i++) {
-    if (pData[i][pHeaders.indexOf('participantId')] === participantId) {
-      setCellAsPlainText(
-        participantsSheet,
-        i + 1,
-        pHeaders.indexOf('completionPercentage') + 1,
-        percentage
-      );
-      invalidateSheetSnapshot('Participants');
-      break;
+    const participantId = String(pData[i][participantIdCol] || '');
+    const entry = progress[participantId];
+    if (!entry) continue;
+    let completionChanged = false;
+    let statusChanged = false;
+    entry.percentage = entry.total > 0 ? Math.round((entry.completed / entry.total) * 100) : 0;
+    if (Number(pData[i][completionCol]) !== entry.percentage) {
+      pData[i][completionCol] = entry.percentage;
+      completionChanged = true;
+      changed = true;
+    }
+    if (syncStatus && String(pData[i][statusCol] || '') !== 'withdrawn') {
+      const targetStatus = entry.postTestCompleted ? 'completed' : 'active';
+      if (String(pData[i][statusCol] || '') !== targetStatus) {
+        pData[i][statusCol] = targetStatus;
+        statusChanged = true;
+        changed = true;
+      }
+    }
+    if (completionChanged || statusChanged) {
+      changedRows.push({ row: i + 1, completionChanged: completionChanged, statusChanged: statusChanged });
     }
   }
 
-  return percentage;
+  if (changed && pData.length > 1) {
+    const writeChangedColumn = (flagName, columnIndex) => {
+      const rows = changedRows.filter(item => item[flagName]).map(item => item.row).sort((a, b) => a - b);
+      if (!rows.length) return;
+      let groupStart = rows[0];
+      let previousRow = rows[0];
+      const flushGroup = endRow => {
+        const count = endRow - groupStart + 1;
+        const values = [];
+        for (let row = groupStart; row <= endRow; row++) values.push([pData[row - 1][columnIndex]]);
+        participantsSheet.getRange(groupStart, columnIndex + 1, count, 1).setNumberFormat('@').setValues(values);
+      };
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i] !== previousRow + 1) {
+          flushGroup(previousRow);
+          groupStart = rows[i];
+        }
+        previousRow = rows[i];
+      }
+      flushGroup(previousRow);
+    };
+    writeChangedColumn('completionChanged', completionCol);
+    if (syncStatus) writeChangedColumn('statusChanged', statusCol);
+    invalidateSheetSnapshot('Participants');
+  }
+
+  return progress;
+}
+
+/**
+ * Backward-compatible single-participant completion updater.
+ */
+function updateParticipantCompletion(participantId) {
+  const progress = syncParticipantProgressBatch([participantId], false);
+  return progress[String(participantId)] ? progress[String(participantId)].percentage : 0;
 }
 
 function buildLiveCompletionMap(participantIds) {
@@ -6024,37 +6044,33 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       }
       attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
     }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
   }
 
-  const attendanceSummary = buildAttendanceSummary(
-    participants,
-    sessionsByCohort,
-    attendanceMap,
-    effectiveCohort
-  );
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
 
-  const protocolSummary = buildProtocolSummary(
-    participants,
-    checklistSheet
-  );
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
 
-  const attentionItems = buildAttentionItems(
-    attendanceSummary,
-    protocolSummary,
-    participants,
-    effectiveCohort
-  );
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
 
-  const comparison = buildComparisonSummary(
-    effectiveSite,
-    effectiveCohort,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet,
-    cohorts
-  );
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
 
   const operations = buildOperationsSummary(
     effectiveSite,
@@ -6972,9 +6988,10 @@ function getRecentActivity(token, limit) {
 // ============================================
 
 /**
- * Lesson Journal Export configuration and workbook generation
+ * Build the fixed Lesson Journal export plan. Source tabs are discovered by their
+ * standard names and all response columns except name/timestamp are included.
  */
-function getDefaultLessonJournalExportConfig() {
+function getLessonJournalExportPlan() {
   const siteConfig = {};
   ['UGA', 'Missouri'].forEach(site => {
     siteConfig[site] = LESSON_JOURNAL_EXPORT_SOURCES.map(source => ({
@@ -6992,100 +7009,6 @@ function getDefaultLessonJournalExportConfig() {
     includeSourceLinks: false,
     sites: siteConfig
   };
-}
-
-function normalizeLessonJournalExportConfig(config) {
-  const defaults = getDefaultLessonJournalExportConfig();
-  const input = config || {};
-  const normalized = {
-    duplicateMode: ['latest', 'first'].indexOf(String(input.duplicateMode || 'latest')) !== -1 ? String(input.duplicateMode || 'latest') : 'latest',
-    includeSourceLinks: !!input.includeSourceLinks,
-    sites: { UGA: [], Missouri: [] }
-  };
-  ['UGA', 'Missouri'].forEach(site => {
-    const siteInput = input.sites && Array.isArray(input.sites[site]) ? input.sites[site] : [];
-    const byKey = {};
-    siteInput.forEach(source => {
-      const key = String(source.key || '').trim();
-      if (key) byKey[key] = source;
-    });
-    normalized.sites[site] = defaults.sites[site].map(defaultSource => {
-      const source = byKey[defaultSource.key] || {};
-      const columns = Array.isArray(source.columns) ? source.columns : [];
-      return {
-        key: defaultSource.key,
-        label: String(source.label || defaultSource.label).trim(),
-        enabled: source.enabled !== false,
-        sheetName: String(source.sheetName || defaultSource.sheetName || '').trim(),
-        timestampColumn: String(source.timestampColumn || 'Timestamp').trim() || 'Timestamp',
-        nameColumn: String(source.nameColumn || '').trim(),
-        columns: columns.map(column => ({
-          sourceColumn: String(column.sourceColumn || '').trim(),
-          exportLabel: String(column.exportLabel || column.sourceColumn || '').trim(),
-          enabled: column.enabled !== false
-        })).filter(column => column.sourceColumn)
-      };
-    });
-  });
-  return normalized;
-}
-
-function getLessonJournalExportConfigInternal() {
-  const configMap = getConfigMap();
-  const raw = configMap[LESSON_JOURNAL_EXPORT_CONFIG_KEY];
-  if (!raw) return getDefaultLessonJournalExportConfig();
-  try {
-    return normalizeLessonJournalExportConfig(JSON.parse(raw));
-  } catch (e) {
-    return getDefaultLessonJournalExportConfig();
-  }
-}
-
-function getLessonJournalExportAdminData(token) {
-  const currentUser = validateSession(token);
-  if (!currentUser || currentUser.role !== 'admin') return { success: false, message: 'Unauthorized' };
-  if (!canConfigureLessonJournalExport(currentUser)) {
-    return {
-      success: true,
-      restricted: true,
-      message: 'Lesson Journal Export configuration is restricted. Ask the primary administrator to grant access.',
-      accessControl: getLessonJournalExportAccessControlForUser(currentUser)
-    };
-  }
-  const digitalConfig = getDigitalFormSyncConfigInternal();
-  const tabsBySite = {};
-  let workbookError = '';
-  ['UGA', 'Missouri'].forEach(site => {
-    const workbookId = digitalConfig.masterWorkbookIds && digitalConfig.masterWorkbookIds[site];
-    if (!workbookId) {
-      tabsBySite[site] = [];
-      return;
-    }
-    try {
-      tabsBySite[site] = getWorkbookTabsForDigitalSync(workbookId);
-    } catch (e) {
-      tabsBySite[site] = [];
-      workbookError += (workbookError ? '; ' : '') + site + ': ' + e.message;
-    }
-  });
-  return {
-    success: true,
-    config: getLessonJournalExportConfigInternal(),
-    sources: LESSON_JOURNAL_EXPORT_SOURCES,
-    tabsBySite: tabsBySite,
-    workbookError: workbookError,
-    accessControl: getLessonJournalExportAccessControlForUser(currentUser)
-  };
-}
-
-function saveLessonJournalExportConfig(token, config) {
-  const currentUser = validateSession(token);
-  if (!canConfigureLessonJournalExport(currentUser)) {
-    return { success: false, message: 'Only the primary administrator or explicitly authorized admins can configure Lesson Journal Export.' };
-  }
-  const normalized = normalizeLessonJournalExportConfig(config || {});
-  upsertConfigValue(LESSON_JOURNAL_EXPORT_CONFIG_KEY, JSON.stringify(normalized), 'Lesson Journal Export column and sheet mappings');
-  return { success: true, message: 'Lesson Journal Export configuration saved', config: normalized };
 }
 
 function getLessonJournalWorkbookIdForSite(site) {
@@ -7301,12 +7224,13 @@ function exportLessonJournalWorkbook(token, filters) {
     filters.site = currentUser.site;
   }
 
-  const participantResult = getAllParticipants(token, filters);
+  const participantFilters = Object.assign({}, filters, { useStoredCompletion: true });
+  const participantResult = getAllParticipants(token, participantFilters);
   if (!participantResult.success) return participantResult;
   const participants = participantResult.participants || [];
   if (!participants.length) return { success: false, message: 'No participants found for selected filters' };
 
-  const exportConfig = getLessonJournalExportConfigInternal();
+  const exportPlan = getLessonJournalExportPlan();
   const matchContext = buildLessonJournalExportSessionContext(participants);
   const participantsBySite = {};
   participants.forEach(participant => {
@@ -7361,7 +7285,7 @@ function exportLessonJournalWorkbook(token, filters) {
       return;
     }
 
-    const siteSources = (exportConfig.sites && exportConfig.sites[normalizedSite]) || [];
+    const siteSources = (exportPlan.sites && exportPlan.sites[normalizedSite]) || [];
     const siteParticipants = participantsBySite[site] || [];
     const candidates = siteParticipants;
 
@@ -7376,7 +7300,7 @@ function exportLessonJournalWorkbook(token, filters) {
       const timestampColumn = headers.indexOf(source.timestampColumn) !== -1 ? source.timestampColumn : (headers[0] || 'Timestamp');
       const nameColumn = findLessonJournalNameColumn(headers, source.nameColumn);
       if (!nameColumn) {
-        notes.push(['Warning', normalizedSite, source.label, 'No participant-name column configured or detected']);
+        notes.push(['Warning', normalizedSite, source.label, 'No participant-name column could be detected']);
         return;
       }
       let columns = (source.columns || []).filter(column => column.enabled !== false && headers.indexOf(column.sourceColumn) !== -1);
@@ -7384,13 +7308,7 @@ function exportLessonJournalWorkbook(token, filters) {
         columns = headers
           .filter(header => header && header !== timestampColumn && header !== nameColumn)
           .map(header => ({ sourceColumn: header, exportLabel: header, enabled: true }));
-        notes.push(['Info', normalizedSite, source.label, 'No configured columns found; exported all non-name, non-timestamp columns']);
-      } else {
-        (source.columns || []).forEach(column => {
-          if (column.enabled !== false && headers.indexOf(column.sourceColumn) === -1) {
-            notes.push(['Warning', normalizedSite, source.label, 'Configured column not found: ' + column.sourceColumn]);
-          }
-        });
+        notes.push(['Info', normalizedSite, source.label, 'Automatic column selection exported all non-name, non-timestamp columns']);
       }
 
       columns.forEach(column => {
@@ -7400,7 +7318,7 @@ function exportLessonJournalWorkbook(token, filters) {
           lessonHeaderSeen[lessonHeader] = true;
         }
       });
-      if (exportConfig.includeSourceLinks) {
+      if (exportPlan.includeSourceLinks) {
         const sourceLinkHeader = source.label + ' - Source Row';
         if (!lessonHeaderSeen[sourceLinkHeader]) {
           lessonHeaders.push(sourceLinkHeader);
@@ -7434,7 +7352,7 @@ function exportLessonJournalWorkbook(token, filters) {
           timestamp: responseTimestamp
         };
         duplicateCounts[pid] = (duplicateCounts[pid] || 0) + 1;
-        responseByParticipant[pid] = chooseLessonJournalResponse(responseByParticipant[pid], response, exportConfig.duplicateMode);
+        responseByParticipant[pid] = chooseLessonJournalResponse(responseByParticipant[pid], response, exportPlan.duplicateMode);
       }
 
       siteParticipants.forEach(participant => {
@@ -7444,14 +7362,14 @@ function exportLessonJournalWorkbook(token, filters) {
         summary[participant.participantId].matchMethods[source.label] = response.matchReason;
         summary[participant.participantId].duplicateCounts[source.label] = duplicateCounts[participant.participantId] || 0;
         if (duplicateCounts[participant.participantId] > 1) {
-          notes.push(['Info', normalizedSite, source.label, 'Multiple responses found for ' + participant.fullName + '; ' + exportConfig.duplicateMode + ' response used']);
+          notes.push(['Info', normalizedSite, source.label, 'Multiple responses found for ' + participant.fullName + '; ' + exportPlan.duplicateMode + ' response used']);
         }
         notes.push(['Info', normalizedSite, source.label, 'Matched row ' + response.rowNumber + ' (' + response.rawName + ') to ' + participant.fullName + ' at ' + response.score + '% via ' + response.matchReason + (response.dateReason ? '; ' + response.dateReason : '')]);
         columns.forEach(column => {
           const lessonHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
           lessonRowsByParticipant[participant.participantId].values[lessonHeader] = getExportCellValue(response.row, headers, column.sourceColumn);
         });
-        if (exportConfig.includeSourceLinks) {
+        if (exportPlan.includeSourceLinks) {
           const sourceLinkHeader = source.label + ' - Source Row';
           lessonRowsByParticipant[participant.participantId].values[sourceLinkHeader] = 'https://docs.google.com/spreadsheets/d/' + extractSpreadsheetId(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + response.rowNumber + ':' + response.rowNumber;
         }
