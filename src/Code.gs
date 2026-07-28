@@ -4050,10 +4050,10 @@ function getAllParticipants(token, filters) {
       });
     }
 
-    participants.push(participant);
+    count++;
   }
 
-  return { success: true, participants: participants };
+  return { success: true, count: count };
 }
 
 
@@ -6044,37 +6044,33 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       }
       attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
     }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
   }
 
-  const attendanceSummary = buildAttendanceSummary(
-    participants,
-    sessionsByCohort,
-    attendanceMap,
-    effectiveCohort
-  );
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
 
-  const protocolSummary = buildProtocolSummary(
-    participants,
-    checklistSheet
-  );
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
 
-  const attentionItems = buildAttentionItems(
-    attendanceSummary,
-    protocolSummary,
-    participants,
-    effectiveCohort
-  );
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
 
-  const comparison = buildComparisonSummary(
-    effectiveSite,
-    effectiveCohort,
-    participantsBySite,
-    participantsByCohort,
-    sessionsByCohort,
-    attendanceMap,
-    checklistSheet,
-    cohorts
-  );
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
 
   const operations = buildOperationsSummary(
     effectiveSite,
