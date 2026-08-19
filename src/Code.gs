@@ -4036,10 +4036,65 @@ function getAllParticipants(token, filters) {
       });
     }
 
-    participants.push(participant);
+    count++;
   }
 
-  return { success: true, participants: participants };
+  return { success: true, count: count };
+}
+
+
+/**
+ * Get a lightweight participant count for the active filters without loading checklist progress.
+ */
+function getParticipantCount(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (!participantsSheet) return { success: true, count: 0 };
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
+  filters = filters || {};
+
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const siteCol = headers.indexOf('site');
+  const rolloutIdCol = headers.indexOf('rolloutId');
+  const schoolNameCol = headers.indexOf('schoolName');
+  const statusCol = headers.indexOf('status');
+  const searchLower = filters.search ? String(filters.search).toLowerCase() : '';
+  let count = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const participantId = row[participantIdCol];
+    const fullName = row[fullNameCol] || '';
+    const site = row[siteCol];
+    const rolloutId = row[rolloutIdCol];
+    const schoolName = row[schoolNameCol] || '';
+    const status = row[statusCol];
+
+    if (filters.site && filters.site !== 'All' && site !== filters.site) continue;
+    if (filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+    if (filters.status && status !== filters.status) continue;
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && site !== currentUser.site) continue;
+    if (searchLower) {
+      const matchesSearch =
+        String(fullName).toLowerCase().includes(searchLower) ||
+        String(participantId).toLowerCase().includes(searchLower) ||
+        String(schoolName).toLowerCase().includes(searchLower);
+      if (!matchesSearch) continue;
+    }
+
+    count++;
+  }
+
+  return { success: true, count: count };
 }
 
 
@@ -6162,36 +6217,43 @@ function getPublicLandingSnapshot(siteFilter, rolloutFilter) {
       }
       attendanceMap[sessionId][participantId] = aData[i][aHeaders.indexOf('status')];
     }
+    if (lastDate < today) {
+      return { key: 'completed', label: 'Completed', tone: 'success', detail: 'Ended ' + formatDashboardDate(lastDate) };
+    }
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Session window is active' };
   }
 
-  const attendanceSummary = buildAttendanceSummary(
-    participants,
-    sessionsByCohort,
-    attendanceMap,
-    effectiveCohort
-  );
+  if (String(cohort.status || '').toLowerCase() === 'active') {
+    return { key: 'inProgress', label: 'In Progress', tone: 'warning', detail: 'Active cohort' };
+  }
 
-  const protocolSummary = buildProtocolSummary(
-    participants,
-    checklistSheet
-  );
+  return { key: 'upcoming', label: 'Upcoming', tone: 'info', detail: 'Schedule partially pending' };
+}
 
-  const attentionItems = buildAttentionItems(
-    attendanceSummary,
-    protocolSummary,
-    participants,
-    effectiveCohort
-  );
+function resolveSessionTiming(session, sessionDateOnly, today) {
+  if (String(session.status || '').toLowerCase() === 'completed') return 'completed';
+  if (!sessionDateOnly) return 'unscheduled';
+  if (sessionDateOnly < today) return 'completed';
+  if (sessionDateOnly === today) return 'today';
+  return 'upcoming';
+}
 
-  const comparison = buildComparisonSummary(
+function sortSessionsByNumberAndDate(a, b) {
+  const aNumber = Number(a.sessionNumber) || 0;
+  const bNumber = Number(b.sessionNumber) || 0;
+  if (aNumber !== bNumber) return aNumber - bNumber;
+  return compareDateStrings(a.sessionDate, b.sessionDate);
+}
+
+  const operations = buildOperationsSummary(
     effectiveSite,
     effectiveCohort,
+    cohorts,
     participantsBySite,
     participantsByCohort,
     sessionsByCohort,
     attendanceMap,
-    checklistSheet,
-    cohorts
+    checklistSheet
   );
 
   const operations = buildOperationsSummary(
