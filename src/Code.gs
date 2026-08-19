@@ -666,18 +666,7 @@ var DIGITAL_FORM_SYNC_ACCESS_KEY = 'DIGITAL_FORM_SYNC_ACCESS_ADMINS';
 var DIGITAL_FORM_SYNC_SUPER_ADMIN_ID = '03456e13-c1fc-45c4-ad4a-28e06d23cb6d';
 var DIGITAL_FORM_SYNC_SUPER_ADMIN_USERNAME = 'david';
 var ENROLLMENT_FIELD_MANAGER_ACCESS_KEY = 'ENROLLMENT_FIELD_MANAGER_ACCESS_ADMINS';
-var LESSON_JOURNAL_EXPORT_SOURCES = [
-  { key: 'game_maker_mad_libs', label: 'Game Maker Mad Libs', defaultSheetName: 'Game Maker Mad Libs' },
-  { key: 'lesson_1_journal', label: 'Lesson 1 Journal', defaultSheetName: 'Lesson 1 Journal' },
-  { key: 'lesson_2_journal', label: 'Lesson 2 Journal', defaultSheetName: 'Lesson 2 Journal' },
-  { key: 'lesson_3_journal', label: 'Lesson 3 Journal', defaultSheetName: 'Lesson 3 Journal' },
-  { key: 'lesson_4_journal', label: 'Lesson 4 Journal', defaultSheetName: 'Lesson 4 Journal' },
-  { key: 'lesson_5_journal', label: 'Lesson 5 Journal', defaultSheetName: 'Lesson 5 Journal' },
-  { key: 'lesson_6_journal', label: 'Lesson 6 Journal', defaultSheetName: 'Lesson 6 Journal' },
-  { key: 'lesson_7_journal', label: 'Lesson 7 Journal', defaultSheetName: 'Lesson 7 Journal' },
-  { key: 'lesson_8_journal', label: 'Lesson 8 Journal', defaultSheetName: 'Lesson 8 Journal' },
-  { key: 'peer_playtesting_feedback', label: 'Peer Playtesting Feedback', defaultSheetName: 'Peer Playtesting Feedback' }
-];
+
 
 function isDigitalFormSyncSuperAdmin(user) {
   if (!user || user.role !== 'admin') return false;
@@ -1946,7 +1935,7 @@ function initializeDatabase() {
     'participantId', 'fullName', 'parent_guardian_names', 'parent_guardian_phone',
     'parent_guardian_address', 'parent_guardian_email', 'parent_guardian_dob',
     'site', 'rolloutId', 'schoolName', 'period', 'year',
-    'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+    'enrollmentDate', 'enrolledBy', 'status', 'notes', 'switchNumber', 'completionPercentage'
   ]);
 
   // Create Checklist sheet
@@ -2581,13 +2570,10 @@ function getAllRollouts(token, siteFilter) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
-
-  if (!rolloutsSheet) return { success: false, message: 'Study cohorts sheet not found' };
-
-  const data = rolloutsSheet.getDataRange().getValues();
-  const headers = data[0];
+  const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+  const data = rolloutSnapshot.data;
+  const headers = rolloutSnapshot.headers;
+  if (!data.length) return { success: false, message: 'Study cohorts sheet not found' };
   const cohorts = [];
 
   for (let i = 1; i < data.length; i++) {
@@ -2603,7 +2589,8 @@ function getAllRollouts(token, siteFilter) {
     };
 
     // Apply site filter if specified
-    if (!siteFilter || siteFilter === 'All' || cohort.site === siteFilter) {
+    const allowedSite = currentUser.role !== 'facilitator' || currentUser.site === 'All' || cohort.site === currentUser.site;
+    if (allowedSite && (!siteFilter || siteFilter === 'All' || cohort.site === siteFilter)) {
       cohorts.push(cohort);
     }
   }
@@ -2826,13 +2813,10 @@ function syncRolloutChecklistProtocolItems(rolloutId, enabledNumbers) {
  * Get cohort by ID
  */
 function getRolloutById(rolloutId) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rolloutsSheet = ss.getSheetByName('StudyRollouts');
-
-  if (!rolloutsSheet) return null;
-
-  const data = rolloutsSheet.getDataRange().getValues();
-  const headers = data[0];
+  const rolloutSnapshot = getSheetSnapshot('StudyRollouts');
+  const data = rolloutSnapshot.data;
+  const headers = rolloutSnapshot.headers;
+  if (!data.length) return null;
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][headers.indexOf('rolloutId')] === rolloutId) {
@@ -3628,7 +3612,7 @@ var PARTICIPANT_PARENT_HEADERS = [
 
 var ENROLLMENT_SYSTEM_HEADERS = [
   'participantId', 'site', 'rolloutId', 'schoolName', 'period', 'year',
-  'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+  'enrollmentDate', 'enrolledBy', 'status', 'notes', 'switchNumber', 'completionPercentage'
 ];
 
 var DEFAULT_ENROLLMENT_FIELDS = [
@@ -3797,7 +3781,7 @@ function ensureParticipantColumns(participantsSheet) {
     'parent_guardian_names', 'parent_guardian_phone', 'parent_guardian_address',
     'parent_guardian_email', 'parent_guardian_dob',
     'site', 'rolloutId', 'schoolName', 'period', 'year',
-    'enrollmentDate', 'enrolledBy', 'status', 'notes', 'completionPercentage'
+    'enrollmentDate', 'enrolledBy', 'status', 'notes', 'switchNumber', 'completionPercentage'
   ];
 
   getEnrollmentFieldsInternal().forEach(field => {
@@ -3939,6 +3923,7 @@ function buildParticipantRow(headers, data) {
   setValue('enrolledBy', data.enrolledBy);
   setValue('status', data.status);
   setValue('notes', data.notes || '');
+  setValue('switchNumber', data.switchNumber || '');
   setValue('completionPercentage', data.completionPercentage || 0);
 
   const enrollmentFieldValuesForRow = getEnrollmentFieldValueMapFromData(data);
@@ -4033,6 +4018,7 @@ function getAllParticipants(token, filters) {
       enrolledBy: getHeaderValue(row, headers, 'enrolledBy'),
       status: row[statusCol],
       notes: getHeaderValue(row, headers, 'notes'),
+      switchNumber: getHeaderValue(row, headers, 'switchNumber'),
       completionPercentage: useStoredCompletion
         ? Number(completionCol !== -1 ? row[completionCol] : 0) || 0
         : (completionMap[participantId] || {}).percentage || 0
@@ -4111,6 +4097,91 @@ function getParticipantCount(token, filters) {
   return { success: true, count: count };
 }
 
+
+/**
+ * Get a lightweight participant count for the active filters without loading checklist progress.
+ */
+function getParticipantCount(token, filters) {
+  const currentUser = validateSession(token);
+  if (!currentUser) {
+    return { success: false, message: 'Unauthorized' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const participantsSheet = ss.getSheetByName('Participants');
+  if (!participantsSheet) return { success: true, count: 0 };
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
+  filters = filters || {};
+
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const siteCol = headers.indexOf('site');
+  const rolloutIdCol = headers.indexOf('rolloutId');
+  const schoolNameCol = headers.indexOf('schoolName');
+  const statusCol = headers.indexOf('status');
+  const searchLower = filters.search ? String(filters.search).toLowerCase() : '';
+  let count = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const participantId = row[participantIdCol];
+    const fullName = row[fullNameCol] || '';
+    const site = row[siteCol];
+    const rolloutId = row[rolloutIdCol];
+    const schoolName = row[schoolNameCol] || '';
+    const status = row[statusCol];
+
+    if (filters.site && filters.site !== 'All' && site !== filters.site) continue;
+    if (filters.rolloutId && filters.rolloutId !== 'All' && rolloutId !== filters.rolloutId) continue;
+    if (filters.status && status !== filters.status) continue;
+    if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && site !== currentUser.site) continue;
+    if (searchLower) {
+      const matchesSearch =
+        String(fullName).toLowerCase().includes(searchLower) ||
+        String(participantId).toLowerCase().includes(searchLower) ||
+        String(schoolName).toLowerCase().includes(searchLower);
+      if (!matchesSearch) continue;
+    }
+
+    count++;
+  }
+
+  return { success: true, count: count };
+}
+
+function getParticipantSwitchAssignments(token, rolloutId) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) return { success: false, message: 'Cohort not found' };
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const snapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = snapshot.headers;
+  const participantIdCol = headers.indexOf('participantId');
+  const fullNameCol = headers.indexOf('fullName');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const switchNumberCol = headers.indexOf('switchNumber');
+  const participants = [];
+  for (let i = 1; i < snapshot.data.length; i++) {
+    if (String(snapshot.data[i][rolloutCol]) !== String(rolloutId)) continue;
+    participants.push({
+      participantId: snapshot.data[i][participantIdCol],
+      fullName: snapshot.data[i][fullNameCol],
+      switchNumber: snapshot.data[i][switchNumberCol] || ''
+    });
+  }
+  participants.sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+  return { success: true, participants: participants };
+}
+
 /**
  * Get participant by ID with checklist
  */
@@ -4148,6 +4219,7 @@ function getParticipantById(token, participantId) {
         enrolledBy: getHeaderValue(pData[i], pHeaders, 'enrolledBy'),
         status: getHeaderValue(pData[i], pHeaders, 'status'),
         notes: getHeaderValue(pData[i], pHeaders, 'notes'),
+        switchNumber: getHeaderValue(pData[i], pHeaders, 'switchNumber'),
         completionPercentage: getHeaderValue(pData[i], pHeaders, 'completionPercentage') || 0
       };
 
@@ -4379,6 +4451,7 @@ function updateParticipant(token, participantId, participantData) {
       });
       if (participantData.status) setRowValue('status', participantData.status);
       if (participantData.notes !== undefined) setRowValue('notes', participantData.notes);
+      if (participantData.switchNumber !== undefined) setRowValue('switchNumber', String(participantData.switchNumber || '').trim());
 
       const targetRange = participantsSheet.getRange(i + 1, 1, 1, headers.length);
       targetRange.setNumberFormat('@');
@@ -4901,18 +4974,19 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
   let successCount = 0;
   let errorCount = 0;
   let hasChanges = false;
+  const changedRows = [];
   updates.forEach(update => {
     if (!update || !update.participantId || !update.status) { errorCount++; return; }
     if (CONFIG.PARTICIPANT_STATUSES.indexOf(update.status) === -1) { errorCount++; return; }
     const row = rowByParticipantId[String(update.participantId)];
     if (!row) { errorCount++; return; }
     pData[row - 1][participantStatusCol] = update.status;
+    changedRows.push(row - 1);
     hasChanges = true;
     successCount++;
   });
   if (hasChanges) {
-    participantSnapshot.sheet.getRange(1, 1, pData.length, pHeaders.length).setValues(pData);
-    invalidateSheetSnapshot('Participants');
+    writeDataRowsByIndexes(participantSnapshot.sheet, pData, changedRows, pHeaders.length);
   }
 
   logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_PARTICIPANT_STATUS', 'cohort', rolloutId,
@@ -4920,6 +4994,71 @@ function bulkUpdateParticipantStatus(token, rolloutId, updates) {
   return {
     success: errorCount === 0,
     message: 'Updated ' + successCount + ' participants' + (errorCount > 0 ? (' (' + errorCount + ' errors)') : '')
+  };
+}
+
+/**
+ * Assign or clear Nintendo Switch numbers for multiple participants in a cohort.
+ */
+function bulkUpdateParticipantSwitchNumbers(token, rolloutId, updates) {
+  const currentUser = validateSession(token);
+  if (!currentUser || currentUser.role === 'viewer') {
+    return { success: false, message: 'Unauthorized' };
+  }
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return { success: false, message: 'No switch assignments provided' };
+  }
+
+  const cohort = getRolloutById(rolloutId);
+  if (!cohort) return { success: false, message: 'Cohort not found' };
+  if (currentUser.role === 'facilitator' && currentUser.site !== 'All' && cohort.site !== currentUser.site) {
+    return { success: false, message: 'Unauthorized for this site' };
+  }
+
+  const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
+  const headers = participantSnapshot.headers;
+  const data = participantSnapshot.data;
+  const participantIdCol = headers.indexOf('participantId');
+  const rolloutCol = headers.indexOf('rolloutId');
+  const switchNumberCol = headers.indexOf('switchNumber');
+  const rowByParticipantId = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][rolloutCol]) === String(rolloutId)) {
+      rowByParticipantId[String(data[i][participantIdCol])] = i;
+    }
+  }
+
+  const changedRows = [];
+  let updatedCount = 0;
+  let errorCount = 0;
+  updates.forEach(update => {
+    const participantId = String((update && update.participantId) || '');
+    const rowIndex = rowByParticipantId[participantId];
+    if (!participantId || rowIndex === undefined) {
+      errorCount++;
+      return;
+    }
+    const switchNumber = String(update.switchNumber === undefined ? '' : update.switchNumber).trim();
+    if (switchNumber.length > 50) {
+      errorCount++;
+      return;
+    }
+    if (String(data[rowIndex][switchNumberCol] || '') !== switchNumber) {
+      data[rowIndex][switchNumberCol] = switchNumber;
+      changedRows.push(rowIndex);
+    }
+    updatedCount++;
+  });
+
+  if (changedRows.length) {
+    writeDataRowsByIndexes(participantSnapshot.sheet, data, changedRows, headers.length);
+  }
+  logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_SWITCH_NUMBERS', 'cohort', rolloutId,
+    'Updated switch assignments for ' + updatedCount + ' participants');
+  return {
+    success: errorCount === 0,
+    message: 'Updated ' + updatedCount + ' switch assignment' + (updatedCount === 1 ? '' : 's') +
+      (errorCount ? ' (' + errorCount + ' errors)' : '')
   };
 }
 
@@ -4932,28 +5071,61 @@ function bulkUpdateChecklist(token, participantId, updates) {
     return { success: false, message: 'Unauthorized' };
   }
 
-  let successCount = 0;
-  let errorCount = 0;
+  if (!participantId || !Array.isArray(updates) || !updates.length) {
+    return { success: false, message: 'No checklist updates provided' };
+  }
+  const participantResult = getParticipantById(token, participantId);
+  if (!participantResult.success) return participantResult;
 
-  for (let i = 0; i < updates.length; i++) {
-    const update = updates[i];
-    const result = updateChecklistItem(token, update.checklistId, {
-      status: update.status,
-      notes: update.notes
-    });
-
-    if (result.success) {
-      successCount++;
-    } else {
-      errorCount++;
-      if (result.message && result.message.toLowerCase().includes('unauthorized')) {
-        return { success: false, message: result.message };
-      }
+  const snapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const headers = snapshot.headers;
+  const data = snapshot.data;
+  const checklistIdCol = headers.indexOf('checklistId');
+  const participantIdCol = headers.indexOf('participantId');
+  const statusCol = headers.indexOf('status');
+  const notesCol = headers.indexOf('notes');
+  const completedDateCol = headers.indexOf('completedDate');
+  const completedByCol = headers.indexOf('completedBy');
+  const rowByChecklistId = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][participantIdCol]) === String(participantId)) {
+      rowByChecklistId[String(data[i][checklistIdCol])] = i;
     }
   }
 
+  let successCount = 0;
+  let errorCount = 0;
+  const changedRows = [];
+  updates.forEach(update => {
+    const rowIndex = rowByChecklistId[String((update && update.checklistId) || '')];
+    if (rowIndex === undefined) {
+      errorCount++;
+      return;
+    }
+    if (update.status) {
+      data[rowIndex][statusCol] = update.status;
+      if (update.status === 'completed') {
+        data[rowIndex][completedDateCol] = new Date().toISOString();
+        data[rowIndex][completedByCol] = currentUser.fullName;
+      } else {
+        data[rowIndex][completedDateCol] = '';
+        data[rowIndex][completedByCol] = '';
+      }
+    }
+    if (update.notes !== undefined) data[rowIndex][notesCol] = update.notes;
+    changedRows.push(rowIndex);
+    successCount++;
+  });
+
+  if (changedRows.length) {
+    writeDataRowsByIndexes(snapshot.sheet, data, changedRows, headers.length);
+    syncParticipantProgressBatch([participantId], true);
+    logActivity(currentUser.userId, currentUser.fullName, 'BULK_UPDATE_CHECKLIST', 'participant', participantId,
+      'Updated ' + successCount + ' checklist items');
+  }
+
   return {
-    success: true,
+    success: errorCount === 0,
     message: `Updated ${successCount} items, ${errorCount} errors`
   };
 }
@@ -4992,8 +5164,9 @@ function getInstrumentChecklistForRollout(token, rolloutId, instrumentNumber) {
   const participantSnapshot = getSheetSnapshot('Participants', { ensureFn: ensureParticipantColumns });
   const pData = participantSnapshot.data;
   const pHeaders = participantSnapshot.headers;
-  const checklistData = checklistSheet.getDataRange().getValues();
-  const cHeaders = checklistData[0];
+  const checklistSnapshot = getSheetSnapshot('Checklist', { ensureFn: ensureChecklistColumns });
+  const checklistData = checklistSnapshot.data;
+  const cHeaders = checklistSnapshot.headers;
 
   const instrumentCol = cHeaders.indexOf('instrumentNumber');
   const checklistParticipantCol = cHeaders.indexOf('participantId');
@@ -6083,6 +6256,17 @@ function sortSessionsByNumberAndDate(a, b) {
     checklistSheet
   );
 
+  const operations = buildOperationsSummary(
+    effectiveSite,
+    effectiveCohort,
+    cohorts,
+    participantsBySite,
+    participantsByCohort,
+    sessionsByCohort,
+    attendanceMap,
+    checklistSheet
+  );
+
   const aboutSummary = buildAboutSummary(
     effectiveSite,
     effectiveCohort,
@@ -6987,456 +7171,6 @@ function getRecentActivity(token, limit) {
 // EXPORT FUNCTIONS
 // ============================================
 
-/**
- * Build the fixed Lesson Journal export plan. Source tabs are discovered by their
- * standard names and all response columns except name/timestamp are included.
- */
-function getLessonJournalExportPlan() {
-  const siteConfig = {};
-  ['UGA', 'Missouri'].forEach(site => {
-    siteConfig[site] = LESSON_JOURNAL_EXPORT_SOURCES.map(source => ({
-      key: source.key,
-      label: source.label,
-      enabled: true,
-      sheetName: source.defaultSheetName,
-      timestampColumn: 'Timestamp',
-      nameColumn: '',
-      columns: []
-    }));
-  });
-  return {
-    duplicateMode: 'latest',
-    includeSourceLinks: false,
-    sites: siteConfig
-  };
-}
-
-function getLessonJournalWorkbookIdForSite(site) {
-  const digitalConfig = getDigitalFormSyncConfigInternal();
-  const normalizedSite = String(site || '').toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
-  return digitalConfig.masterWorkbookIds && digitalConfig.masterWorkbookIds[normalizedSite]
-    ? digitalConfig.masterWorkbookIds[normalizedSite]
-    : digitalConfig.masterWorkbookId;
-}
-
-function makeSafeExportSheetName(name, used) {
-  var base = String(name || 'Sheet').replace(/[\\/?*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!base) base = 'Sheet';
-  base = base.substring(0, 31);
-  var candidate = base;
-  var n = 2;
-  while (used[candidate]) {
-    var suffix = ' (' + n + ')';
-    candidate = base.substring(0, Math.max(1, 31 - suffix.length)) + suffix;
-    n++;
-  }
-  used[candidate] = true;
-  return candidate;
-}
-
-function findLessonJournalNameColumn(headers, configured) {
-  if (configured && headers.indexOf(configured) !== -1) return configured;
-  const candidates = ['My name is', 'What is your name?', 'Name', 'Full Name', 'Participant Name', "My child's name is"];
-  for (var i = 0; i < candidates.length; i++) {
-    const exact = headers.find(header => String(header || '').trim().toLowerCase() === candidates[i].toLowerCase());
-    if (exact) return exact;
-  }
-  return headers.find(header => /name/i.test(String(header || ''))) || '';
-}
-
-function getExportCellValue(row, headers, headerName) {
-  const index = headers.indexOf(headerName);
-  if (index === -1) return '';
-  const value = row[index];
-  if (value instanceof Date) return formatDate(value);
-  return value === null || value === undefined ? '' : value;
-}
-
-function chooseLessonJournalResponse(existing, candidate, duplicateMode) {
-  if (!existing) return candidate;
-  const existingTime = parseSessionDate(existing.timestamp) || new Date(0);
-  const candidateTime = parseSessionDate(candidate.timestamp) || new Date(0);
-  if (duplicateMode === 'first') return candidateTime < existingTime ? candidate : existing;
-  return candidateTime >= existingTime ? candidate : existing;
-}
-
-function loadParticipantAliasesForLessonJournalExport() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('ParticipantAliases');
-  const aliases = {};
-  if (!sheet || sheet.getLastRow() < 2) return aliases;
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0] || [];
-  const participantCol = headers.indexOf('participantId');
-  const aliasCol = headers.indexOf('alias');
-  const normalizedCol = headers.indexOf('normalizedAlias');
-  if (participantCol === -1 || aliasCol === -1) return aliases;
-  for (var i = 1; i < data.length; i++) {
-    const participantId = String(data[i][participantCol] || '').trim();
-    const alias = String(data[i][aliasCol] || '').trim();
-    if (!participantId || !alias) continue;
-    aliases[participantId] = aliases[participantId] || [];
-    aliases[participantId].push({
-      alias: alias,
-      normalizedAlias: normalizedCol === -1 ? normalizePersonNameForMatch(alias) : data[i][normalizedCol]
-    });
-  }
-  return aliases;
-}
-
-function buildLessonJournalExportSessionContext(participants) {
-  const participantIds = {};
-  const rolloutIds = {};
-  participants.forEach(participant => {
-    participantIds[String(participant.participantId || '')] = true;
-    if (participant.rolloutId) rolloutIds[String(participant.rolloutId)] = true;
-  });
-
-  const context = {
-    aliases: loadParticipantAliasesForLessonJournalExport(),
-    participantIds: participantIds,
-    rolloutBounds: {},
-    sessionDatesByRollout: {}
-  };
-
-  const sessionsSnapshot = getSheetSnapshot('StudySessions');
-  const headers = sessionsSnapshot.headers || [];
-  const rolloutCol = headers.indexOf('rolloutId');
-  const dateCol = headers.indexOf('sessionDate');
-  if (rolloutCol === -1 || dateCol === -1) return context;
-
-  for (var i = 1; i < sessionsSnapshot.data.length; i++) {
-    const row = sessionsSnapshot.data[i];
-    const rolloutId = String(row[rolloutCol] || '');
-    if (!rolloutIds[rolloutId]) continue;
-    const dateOnly = getDateOnly(parseSessionDate(normalizeSessionDateValue(row[dateCol])));
-    if (!dateOnly) continue;
-    context.sessionDatesByRollout[rolloutId] = context.sessionDatesByRollout[rolloutId] || {};
-    context.sessionDatesByRollout[rolloutId][dateOnly] = true;
-    context.rolloutBounds[rolloutId] = context.rolloutBounds[rolloutId] || { firstDate: dateOnly, lastDate: dateOnly };
-    if (compareDateStrings(dateOnly, context.rolloutBounds[rolloutId].firstDate) < 0) context.rolloutBounds[rolloutId].firstDate = dateOnly;
-    if (compareDateStrings(dateOnly, context.rolloutBounds[rolloutId].lastDate) > 0) context.rolloutBounds[rolloutId].lastDate = dateOnly;
-  }
-
-  return context;
-}
-
-function getLessonJournalDateContext(participant, responseDate, context) {
-  if (!responseDate || !participant || !participant.rolloutId) {
-    return { scoreAdjustment: 0, reason: 'No response timestamp/date available' };
-  }
-  const rolloutId = String(participant.rolloutId);
-  const sessionDates = context.sessionDatesByRollout[rolloutId] || {};
-  const bounds = context.rolloutBounds[rolloutId];
-  if (sessionDates[responseDate]) {
-    return { scoreAdjustment: 5, reason: 'Response timestamp falls on a session date for this cohort' };
-  }
-  if (bounds && compareDateStrings(responseDate, bounds.firstDate) >= 0 && compareDateStrings(responseDate, bounds.lastDate) <= 0) {
-    return { scoreAdjustment: 3, reason: 'Response timestamp falls within this cohort session-date range' };
-  }
-  if (bounds && compareDateStrings(responseDate, bounds.lastDate) > 0) {
-    const responseObj = parseDateOnlyString(responseDate);
-    const lastObj = parseDateOnlyString(bounds.lastDate);
-    if (responseObj && lastObj) {
-      const diffDays = Math.round((responseObj.getTime() - lastObj.getTime()) / 86400000);
-      if (diffDays >= 0 && diffDays <= 30) {
-        return { scoreAdjustment: 1, reason: 'Response was submitted after the cohort ended, but within 30 days' };
-      }
-    }
-  }
-  return { scoreAdjustment: -8, reason: 'Response timestamp is outside this cohort session-date range' };
-}
-
-function findBestLessonJournalParticipant(rawName, candidates, context, responseTimestamp) {
-  const normalizedRaw = normalizePersonNameForMatch(rawName);
-  const responseDate = getDateOnly(parseSessionDate(responseTimestamp));
-  if (!normalizedRaw) return { participant: null, score: 0, reason: 'Missing response name', dateReason: '' };
-
-  const rawAsId = String(rawName || '').trim().toLowerCase();
-  const idMatch = candidates.find(participant => String(participant.participantId || '').trim().toLowerCase() === rawAsId);
-  if (idMatch) {
-    return { participant: idMatch, score: 100, reason: 'Exact participant ID match', dateReason: getLessonJournalDateContext(idMatch, responseDate, context).reason };
-  }
-
-  const exactFullName = candidates.find(participant => normalizePersonNameForMatch(participant.fullName) === normalizedRaw);
-  if (exactFullName) {
-    const dateContext = getLessonJournalDateContext(exactFullName, responseDate, context);
-    return { participant: exactFullName, score: Math.min(100, 96 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact full-name match', dateReason: dateContext.reason };
-  }
-
-  const aliases = context.aliases || {};
-  const rawTokens = normalizedRaw.split(' ').filter(Boolean);
-  if (rawTokens.length === 1) {
-    const firstNameMatches = candidates.filter(participant => normalizePersonNameForMatch(participant.fullName).split(' ')[0] === rawTokens[0]);
-    if (firstNameMatches.length === 1) {
-      const dateContext = getLessonJournalDateContext(firstNameMatches[0], responseDate, context);
-      return { participant: firstNameMatches[0], score: Math.min(100, 90 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Unique first-name match within selected cohort', dateReason: dateContext.reason };
-    }
-    if (firstNameMatches.length > 1) {
-      return { participant: firstNameMatches[0], score: 59, reason: 'Ambiguous first-name match within selected cohort', dateReason: '' };
-    }
-  }
-
-  const aliasMatches = [];
-  for (var i = 0; i < candidates.length; i++) {
-    const participant = candidates[i];
-    const aliasList = aliases[String(participant.participantId)] || [];
-    for (var a = 0; a < aliasList.length; a++) {
-      const aliasName = aliasList[a].normalizedAlias || aliasList[a].alias;
-      if (normalizePersonNameForMatch(aliasName) === normalizedRaw) {
-        aliasMatches.push(participant);
-        break;
-      }
-    }
-  }
-  if (aliasMatches.length === 1) {
-    const dateContext = getLessonJournalDateContext(aliasMatches[0], responseDate, context);
-    return { participant: aliasMatches[0], score: Math.min(100, 88 + Math.max(0, dateContext.scoreAdjustment)), reason: 'Exact participant alias fallback match', dateReason: dateContext.reason };
-  }
-  if (aliasMatches.length > 1) {
-    return { participant: aliasMatches[0], score: 59, reason: 'Ambiguous participant alias fallback match within selected cohort', dateReason: '' };
-  }
-
-  const scored = candidates.map(participant => {
-    const base = scoreParticipantNameMatch(rawName, participant, aliases, {});
-    const dateContext = getLessonJournalDateContext(participant, responseDate, context);
-    return {
-      participant: participant,
-      score: Math.max(0, Math.min(100, base.score + dateContext.scoreAdjustment)),
-      reason: base.reason,
-      dateReason: dateContext.reason
-    };
-  }).sort((a, b) => b.score - a.score || String(a.participant.fullName || '').localeCompare(String(b.participant.fullName || '')));
-
-  const best = scored[0] || { participant: null, score: 0, reason: 'No candidate participants', dateReason: '' };
-  const second = scored[1] || null;
-  if (second && best.score - second.score < 8 && best.score < 95) {
-    return Object.assign({}, best, { score: Math.min(best.score, 59), reason: best.reason + ' (ambiguous close match)' });
-  }
-  return best;
-}
-
-function exportLessonJournalWorkbook(token, filters) {
-  const currentUser = validateSession(token);
-  if (!currentUser) return { success: false, message: 'Unauthorized' };
-
-  filters = filters || {};
-  if (currentUser.role === 'facilitator' && currentUser.site !== 'All') {
-    filters.site = currentUser.site;
-  }
-
-  const participantFilters = Object.assign({}, filters, { useStoredCompletion: true });
-  const participantResult = getAllParticipants(token, participantFilters);
-  if (!participantResult.success) return participantResult;
-  const participants = participantResult.participants || [];
-  if (!participants.length) return { success: false, message: 'No participants found for selected filters' };
-
-  const exportPlan = getLessonJournalExportPlan();
-  const matchContext = buildLessonJournalExportSessionContext(participants);
-  const participantsBySite = {};
-  participants.forEach(participant => {
-    const site = String(participant.site || '');
-    if (!participantsBySite[site]) participantsBySite[site] = [];
-    participantsBySite[site].push(participant);
-  });
-
-  const spreadsheet = SpreadsheetApp.create('Lesson Journal Export ' + new Date().toISOString());
-  const lessonSheet = spreadsheet.getSheets()[0];
-  lessonSheet.setName('Lesson Journals');
-  const usedSheetNames = { 'Lesson Journals': true };
-  const notes = [];
-  const lessonRowsByParticipant = {};
-  const lessonHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'];
-  const lessonHeaderSeen = {};
-  lessonHeaders.forEach(header => { lessonHeaderSeen[header] = true; });
-
-  participants.forEach(participant => {
-    lessonRowsByParticipant[participant.participantId] = {
-      meta: [participant.fullName, participant.participantId, participant.site, participant.schoolName + ' (' + participant.period + ' ' + participant.year + ')'],
-      values: {}
-    };
-  });
-
-  const summary = {};
-  participants.forEach(p => {
-    summary[p.participantId] = {
-      participantName: p.fullName,
-      participantId: p.participantId,
-      site: p.site,
-      cohort: p.schoolName + ' (' + p.period + ' ' + p.year + ')',
-      completed: {},
-      matchMethods: {},
-      duplicateCounts: {}
-    };
-  });
-
-  Object.keys(participantsBySite).forEach(site => {
-    const normalizedSite = String(site).toLowerCase() === 'missouri' ? 'Missouri' : 'UGA';
-    const workbookId = getLessonJournalWorkbookIdForSite(normalizedSite);
-    if (!workbookId) {
-      notes.push(['Warning', normalizedSite, '', 'No master workbook configured for site']);
-      return;
-    }
-
-    let workbook;
-    try {
-      workbook = openDigitalFormWorkbook(workbookId);
-    } catch (e) {
-      notes.push(['Error', normalizedSite, '', 'Unable to open master workbook: ' + e.message]);
-      return;
-    }
-
-    const siteSources = (exportPlan.sites && exportPlan.sites[normalizedSite]) || [];
-    const siteParticipants = participantsBySite[site] || [];
-    const candidates = siteParticipants;
-
-    siteSources.filter(source => source.enabled !== false && source.sheetName).forEach(source => {
-      const sheet = workbook.getSheetByName(source.sheetName);
-      if (!sheet || sheet.getLastRow() < 2) {
-        notes.push(['Warning', normalizedSite, source.label, 'Response tab is missing or has no response rows: ' + source.sheetName]);
-        return;
-      }
-      const data = sheet.getDataRange().getValues();
-      const headers = data[0] || [];
-      const timestampColumn = headers.indexOf(source.timestampColumn) !== -1 ? source.timestampColumn : (headers[0] || 'Timestamp');
-      const nameColumn = findLessonJournalNameColumn(headers, source.nameColumn);
-      if (!nameColumn) {
-        notes.push(['Warning', normalizedSite, source.label, 'No participant-name column could be detected']);
-        return;
-      }
-      let columns = (source.columns || []).filter(column => column.enabled !== false && headers.indexOf(column.sourceColumn) !== -1);
-      if (!columns.length) {
-        columns = headers
-          .filter(header => header && header !== timestampColumn && header !== nameColumn)
-          .map(header => ({ sourceColumn: header, exportLabel: header, enabled: true }));
-        notes.push(['Info', normalizedSite, source.label, 'Automatic column selection exported all non-name, non-timestamp columns']);
-      }
-
-      columns.forEach(column => {
-        const lessonHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
-        if (!lessonHeaderSeen[lessonHeader]) {
-          lessonHeaders.push(lessonHeader);
-          lessonHeaderSeen[lessonHeader] = true;
-        }
-      });
-      if (exportPlan.includeSourceLinks) {
-        const sourceLinkHeader = source.label + ' - Source Row';
-        if (!lessonHeaderSeen[sourceLinkHeader]) {
-          lessonHeaders.push(sourceLinkHeader);
-          lessonHeaderSeen[sourceLinkHeader] = true;
-        }
-      }
-
-      const responseByParticipant = {};
-      const duplicateCounts = {};
-      for (var i = 1; i < data.length; i++) {
-        const row = data[i];
-        const rawName = getExportCellValue(row, headers, nameColumn);
-        const responseTimestamp = headers.indexOf(timestampColumn) === -1 ? '' : row[headers.indexOf(timestampColumn)];
-        const best = findBestLessonJournalParticipant(rawName, candidates, matchContext, responseTimestamp);
-        if (!best.participant || best.score < 60) {
-          if (rawName) {
-            const unmatchedNote = 'Unmatched response row ' + (i + 1) + ' for name "' + rawName + '"' + (best.reason ? ' (' + best.reason + ')' : '');
-            notes.push(['Info', normalizedSite, source.label, unmatchedNote]);
-          }
-          continue;
-        }
-        const pid = best.participant.participantId;
-        const response = {
-          participant: best.participant,
-          row: row,
-          rowNumber: i + 1,
-          rawName: rawName,
-          score: best.score,
-          matchReason: best.reason,
-          dateReason: best.dateReason,
-          timestamp: responseTimestamp
-        };
-        duplicateCounts[pid] = (duplicateCounts[pid] || 0) + 1;
-        responseByParticipant[pid] = chooseLessonJournalResponse(responseByParticipant[pid], response, exportPlan.duplicateMode);
-      }
-
-      siteParticipants.forEach(participant => {
-        const response = responseByParticipant[participant.participantId];
-        if (!response) return;
-        summary[participant.participantId].completed[source.label] = true;
-        summary[participant.participantId].matchMethods[source.label] = response.matchReason;
-        summary[participant.participantId].duplicateCounts[source.label] = duplicateCounts[participant.participantId] || 0;
-        if (duplicateCounts[participant.participantId] > 1) {
-          notes.push(['Info', normalizedSite, source.label, 'Multiple responses found for ' + participant.fullName + '; ' + exportPlan.duplicateMode + ' response used']);
-        }
-        notes.push(['Info', normalizedSite, source.label, 'Matched row ' + response.rowNumber + ' (' + response.rawName + ') to ' + participant.fullName + ' at ' + response.score + '% via ' + response.matchReason + (response.dateReason ? '; ' + response.dateReason : '')]);
-        columns.forEach(column => {
-          const lessonHeader = source.label + ' - ' + (column.exportLabel || column.sourceColumn);
-          lessonRowsByParticipant[participant.participantId].values[lessonHeader] = getExportCellValue(response.row, headers, column.sourceColumn);
-        });
-        if (exportPlan.includeSourceLinks) {
-          const sourceLinkHeader = source.label + ' - Source Row';
-          lessonRowsByParticipant[participant.participantId].values[sourceLinkHeader] = 'https://docs.google.com/spreadsheets/d/' + extractSpreadsheetId(workbookId) + '/edit#gid=' + sheet.getSheetId() + '&range=' + response.rowNumber + ':' + response.rowNumber;
-        }
-      });
-    });
-  });
-
-  const lessonRows = participants.map(participant => {
-    const entry = lessonRowsByParticipant[participant.participantId];
-    return entry.meta.concat(lessonHeaders.slice(4).map(header => entry.values[header] || ''));
-  });
-  lessonSheet.getRange(1, 1, 1, lessonHeaders.length).setValues([lessonHeaders]);
-  if (lessonRows.length) lessonSheet.getRange(2, 1, lessonRows.length, lessonHeaders.length).setValues(lessonRows);
-  lessonSheet.getRange(1, 1, 1, lessonHeaders.length).setBackground('#0f766e').setFontColor('#ffffff').setFontWeight('bold').setWrap(true);
-  lessonSheet.setFrozenRows(1);
-  lessonSheet.setColumnWidths(1, lessonHeaders.length, 170);
-
-  const summarySheet = spreadsheet.insertSheet(makeSafeExportSheetName('Summary', usedSheetNames));
-  const summaryHeaders = ['Participant Name', 'Participant ID', 'Site', 'Cohort'].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => source.label));
-  const summaryRows = participants.map(participant => {
-    const entry = summary[participant.participantId];
-    return [entry.participantName, entry.participantId, entry.site, entry.cohort].concat(LESSON_JOURNAL_EXPORT_SOURCES.map(source => {
-      if (!entry.completed[source.label]) return 'Missing';
-      const method = entry.matchMethods[source.label] || 'Matched';
-      return method.indexOf('Unique first-name') !== -1 ? 'Matched by first name' : (method.indexOf('alias') !== -1 ? 'Matched by alias' : 'Completed');
-    }));
-  });
-  summarySheet.getRange(1, 1, 1, summaryHeaders.length).setValues([summaryHeaders]);
-  if (summaryRows.length) summarySheet.getRange(2, 1, summaryRows.length, summaryHeaders.length).setValues(summaryRows);
-  summarySheet.getRange(1, 1, 1, summaryHeaders.length).setBackground('#2563eb').setFontColor('#ffffff').setFontWeight('bold');
-  summarySheet.setFrozenRows(1);
-  summarySheet.setColumnWidths(1, summaryHeaders.length, 160);
-
-  const notesSheet = spreadsheet.insertSheet(makeSafeExportSheetName('Export Notes', usedSheetNames));
-  const noteRows = [
-    ['Info', 'Export', '', 'Generated at ' + new Date().toISOString()],
-    ['Info', 'Filter', '', 'Site: ' + (filters.site || 'All') + '; Cohort: ' + (filters.rolloutId || 'All')],
-    ['Info', 'Workbook structure', '', 'Export contains Lesson Journals, Summary, and Export Notes only. Individual response tabs are intentionally excluded.']
-  ].concat(notes);
-  notesSheet.getRange(1, 1, 1, 4).setValues([['Severity', 'Site/Area', 'Sheet', 'Message']]);
-  notesSheet.getRange(2, 1, noteRows.length, 4).setValues(noteRows);
-  notesSheet.getRange(1, 1, 1, 4).setBackground('#334155').setFontColor('#ffffff').setFontWeight('bold');
-  notesSheet.setFrozenRows(1);
-  notesSheet.setColumnWidths(1, 4, 220);
-
-  SpreadsheetApp.flush();
-  const exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheet.getId() + '/export?format=xlsx';
-  const response = UrlFetchApp.fetch(exportUrl, {
-    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-    muteHttpExceptions: true
-  });
-  if (response.getResponseCode() !== 200) {
-    DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
-    return { success: false, message: 'Failed to generate Lesson Journal Export: ' + response.getContentText() };
-  }
-  const blob = response.getBlob().setName('lesson_journal_export_' + new Date().toISOString().split('T')[0] + '.xlsx');
-  const base64 = Utilities.base64Encode(blob.getBytes());
-  DriveApp.getFileById(spreadsheet.getId()).setTrashed(true);
-  return {
-    success: true,
-    file: base64,
-    mimeType: MimeType.MICROSOFT_EXCEL,
-    filename: blob.getName(),
-    downloadMessage: 'Lesson Journal Export downloaded'
-  };
-}
-
 function exportParticipantsCSV(token, filters) {
   const currentUser = validateSession(token);
   if (!currentUser) {
@@ -7449,7 +7183,7 @@ function exportParticipantsCSV(token, filters) {
     filters.site = currentUser.site;
   }
 
-  const result = getAllParticipants(token, filters);
+  const result = getAllParticipants(token, Object.assign({}, filters || {}, { useStoredCompletion: true }));
   if (!result.success) return result;
 
   const participants = result.participants;
@@ -7463,7 +7197,7 @@ function exportParticipantsCSV(token, filters) {
     enrollmentFields.forEach(field => headers.push(field.label));
   }
 
-  headers.push('Site', 'School', 'Period', 'Year', 'Enrollment Date', 'Status', 'Completion %', 'Notes');
+  headers.push('Site', 'School', 'Period', 'Year', 'Enrollment Date', 'Switch Number', 'Status', 'Completion %', 'Notes');
 
   let csv = headers.join(',') + '\n';
 
@@ -7486,6 +7220,7 @@ function exportParticipantsCSV(token, filters) {
       p.period,
       p.year,
       p.enrollmentDate,
+      '"' + String(p.switchNumber || '').replace(/"/g, '""') + '"',
       p.status,
       p.completionPercentage,
       '"' + (p.notes || '').replace(/"/g, '""') + '"'
